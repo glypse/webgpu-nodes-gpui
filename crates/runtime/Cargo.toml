@@ -6,3 +6,8 @@ license.workspace = true
 description = "wgpu runtime drawing the shader programs webgpu-nodes generates"
 
 [dependencies]
+wgpu.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+pollster.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
