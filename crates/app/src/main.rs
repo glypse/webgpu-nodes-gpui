@@ -1,14 +1,21 @@
+mod code_view;
 mod editor;
-mod renderer;
+mod playback;
+mod preview;
+mod program;
+mod shell;
+mod timeline;
 
 use gpui::{
     AppContext as _, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
 };
 
-use editor::Editor;
+use shell::Shell;
 
 fn main() {
-    Application::new().run(|cx| {
+    Application::new().with_assets(theme::Assets).run(|cx| {
+        theme::init(cx);
+        shell::init(cx);
         let bounds = Bounds::centered(None, size(px(1400.0), px(860.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -18,9 +25,7 @@ fn main() {
             }),
             ..Default::default()
         };
-        let opened = cx.open_window(options, |window, cx| {
-            cx.new(|cx| Editor::new(window, cx).expect("the preview needs a GPU"))
-        });
+        let opened = cx.open_window(options, |window, cx| cx.new(|cx| Shell::new(window, cx)));
         if let Err(e) = opened {
             eprintln!("failed to open the window: {e}");
             cx.quit();

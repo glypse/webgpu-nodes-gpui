@@ -10,5 +10,8 @@ anyhow.workspace = true
 gpui-flow = { path = "../flow" }
 shader-graph = { path = "../shader-graph" }
 pollster.workspace = true
+runtime = { path = "../runtime" }
+theme = { path = "../theme" }
+screen = { path = "../screen" }
 image = { version = "0.25", default-features = false }
 smallvec = "1"

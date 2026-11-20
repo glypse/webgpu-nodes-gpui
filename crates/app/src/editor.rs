@@ -1,20 +1,22 @@
-use std::sync::Arc;
-use std::time::Instant;
-
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, Focusable, Hsla,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels, Point, Render,
-    RenderImage, SharedString, StatefulInteractiveElement as _, Styled as _, Window, anchored,
-    deferred, div, hsla, img, point, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _,
+    Pixels, Point, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    anchored, deferred, div, hsla, point, prelude::FluentBuilder as _, px,
 };
 use gpui_flow::{Flow, FlowEdge, FlowEvent, FlowNode, FlowPort, PortRef};
 use shader_graph::{DocId, Edge, Endpoint, NodeId, NodeKind, Project};
 
-use crate::renderer::{Renderer, SIZE};
-
 struct Menu {
     graph: Point<f32>,
     window: Point<Pixels>,
+}
+
+/// What the shell needs from the editor.
+#[derive(Clone, Debug)]
+pub enum EditorEvent {
+    /// The project's WGSL changed, or couldn't be generated.
+    Shader(Result<String, String>),
 }
 
 pub struct Editor {
@@ -22,16 +24,15 @@ pub struct Editor {
     /// The documents entered, from the root down to the one shown.
     path: Vec<DocId>,
     flow: Entity<Flow>,
-    renderer: Renderer,
-    frame: Option<Arc<RenderImage>>,
-    wgsl: SharedString,
+    shader: Result<String, String>,
     error: Option<SharedString>,
     menu: Option<Menu>,
-    start: Instant,
 }
 
+impl EventEmitter<EditorEvent> for Editor {}
+
 impl Editor {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> anyhow::Result<Self> {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let flow = cx.new(Flow::new);
         cx.subscribe(&flow, |this, _, event, cx| {
             this.on_flow_event(event.clone(), cx)
@@ -42,16 +43,13 @@ impl Editor {
             project: Project::demo(),
             path: vec![DocId::Root],
             flow,
-            renderer: Renderer::new()?,
-            frame: None,
-            wgsl: SharedString::default(),
+            shader: Err(String::new()),
             error: None,
             menu: None,
-            start: Instant::now(),
         };
         editor.sync(cx);
-        editor.recompile();
-        Ok(editor)
+        editor.recompile(cx);
+        editor
     }
 
     fn doc(&self) -> DocId {
@@ -86,7 +84,7 @@ impl Editor {
             FlowEvent::ValueChanged { port, value } => {
                 let result = self.project.set_value(doc, endpoint(port), value);
                 // The flow already shows the value: only the shader changes.
-                self.recompile();
+                self.recompile(cx);
                 cx.notify();
                 return result.unwrap_or_default();
             }
@@ -110,7 +108,7 @@ impl Editor {
         };
         self.error = result.err().map(|e| e.to_string().into());
         self.sync(cx);
-        self.recompile();
+        self.recompile(cx);
     }
 
     /// Shows the current document in the flow.
@@ -168,16 +166,14 @@ impl Editor {
         cx.notify();
     }
 
-    fn recompile(&mut self) {
-        let compiled = shader_graph::generate(&self.project)
-            .map_err(anyhow::Error::from)
-            .and_then(|wgsl| {
-                self.wgsl = wgsl.clone().into();
-                self.renderer.set_shader(&wgsl)
-            });
-        if let Err(e) = compiled {
-            self.error = Some(e.to_string().into());
-        }
+    fn recompile(&mut self, cx: &mut Context<Self>) {
+        self.shader = shader_graph::generate(&self.project).map_err(|e| e.to_string());
+        cx.emit(EditorEvent::Shader(self.shader.clone()));
+    }
+
+    /// The WGSL of the project as it is now.
+    pub fn shader(&self) -> &Result<String, String> {
+        &self.shader
     }
 
     fn add_node(&mut self, kind: NodeKind, cx: &mut Context<Self>) {
@@ -195,7 +191,7 @@ impl Editor {
             }
             Err(e) => self.error = Some(e.to_string().into()),
         }
-        self.recompile();
+        self.recompile(cx);
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -217,7 +213,7 @@ impl Editor {
                     }
                     Err(e) => self.error = Some(e.to_string().into()),
                 }
-                self.recompile();
+                self.recompile(cx);
             }
             "escape" if self.menu.is_some() => {
                 self.menu = None;
@@ -242,25 +238,6 @@ impl Editor {
                 .groups
                 .get(&id)
                 .map_or("Missing".into(), |g| g.label.clone().into()),
-        }
-    }
-
-    fn render_preview(&mut self, window: &mut Window) {
-        let pixels = match self.renderer.render(self.start.elapsed().as_secs_f32()) {
-            Ok(pixels) => pixels,
-            Err(e) => {
-                self.error = Some(e.to_string().into());
-                return;
-            }
-        };
-        let Some(buffer) = image::RgbaImage::from_raw(SIZE, SIZE, pixels) else {
-            return;
-        };
-        let frame = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
-            buffer
-        )]));
-        if let Some(old) = self.frame.replace(frame) {
-            window.drop_image(old).ok();
         }
     }
 
@@ -331,10 +308,7 @@ impl Focusable for Editor {
 }
 
 impl Render for Editor {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.render_preview(window);
-        window.request_animation_frame();
-
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let text = hsla(0.0, 0.0, 0.85, 1.0);
         let muted = hsla(0.0, 0.0, 0.55, 1.0);
         let crumbs = self.path.iter().enumerate().map(|(depth, doc)| {
@@ -360,58 +334,6 @@ impl Render for Editor {
             .text_sm()
             .children(crumbs);
 
-        let preview_size = px(360.0);
-        let sidebar = div()
-            .flex()
-            .flex_col()
-            .w(preview_size)
-            .h_full()
-            .bg(hsla(0.0, 0.0, 0.1, 1.0))
-            .border_l_1()
-            .border_color(hsla(0.0, 0.0, 0.05, 1.0))
-            .text_color(text)
-            .children(
-                self.frame
-                    .clone()
-                    .map(|frame| img(frame).size(preview_size)),
-            )
-            .child(
-                div()
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(muted)
-                    .child("Right-click: add node · Drag values to edit")
-                    .child("Drag background: select · Scroll: pan · ⌘-scroll: zoom")
-                    .child("⌘G: group selection · Double-click group: enter · Esc: leave")
-                    .child("⌫: delete selection"),
-            )
-            .children(self.error.clone().map(|e| {
-                div()
-                    .mx_3()
-                    .p_2()
-                    .rounded_sm()
-                    .bg(hsla(0.0, 0.5, 0.25, 1.0))
-                    .text_xs()
-                    .child(e)
-            }))
-            .child(
-                div()
-                    .id("wgsl")
-                    .flex_1()
-                    .m_3()
-                    .p_2()
-                    .rounded_sm()
-                    .bg(hsla(0.0, 0.0, 0.07, 1.0))
-                    .overflow_y_scroll()
-                    .font_family("Menlo")
-                    .text_xs()
-                    .text_color(muted)
-                    .child(self.wgsl.clone()),
-            );
-
         div()
             .flex()
             .size_full()
@@ -426,7 +348,17 @@ impl Render for Editor {
                     .child(breadcrumb)
                     .child(div().flex_1().child(self.flow.clone())),
             )
-            .child(sidebar)
+            .children(self.error.clone().map(|e| {
+                div()
+                    .absolute()
+                    .left_2()
+                    .bottom_2()
+                    .p_2()
+                    .rounded_sm()
+                    .bg(hsla(0.0, 0.5, 0.25, 1.0))
+                    .text_xs()
+                    .child(e)
+            }))
             .children(self.render_menu(cx))
     }
 }

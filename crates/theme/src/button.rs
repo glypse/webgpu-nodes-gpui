@@ -1,5 +1,5 @@
 use gpui::{
-    App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _,
+    AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     prelude::FluentBuilder as _, px, relative,
 };
@@ -43,6 +43,7 @@ pub struct Button {
     selected: bool,
     tooltip: Option<SharedString>,
     on_click: Option<ClickHandler>,
+    children: Vec<AnyElement>,
 }
 
 impl Button {
@@ -58,6 +59,7 @@ impl Button {
             selected: false,
             tooltip: None,
             on_click: None,
+            children: Vec::new(),
         }
     }
 
@@ -108,6 +110,12 @@ impl Button {
     ) -> Self {
         self.on_click = Some(Box::new(handler));
         self
+    }
+}
+
+impl ParentElement for Button {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.children.extend(elements);
     }
 }
 
@@ -203,6 +211,7 @@ impl RenderOnce for Button {
             .when(!disabled, |d| d.hover(move |s| s.bg(hover_bg)))
             .children(self.icon.map(|i| Icon::new(i).size(icon).color(fg)))
             .children(self.label)
+            .children(self.children)
             .children(
                 self.icon_end
                     .map(|i| Icon::new(i).size(icon * 0.75).color(fg)),
