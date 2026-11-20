@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::graph::GroupId;
+use crate::legacy::graph::GroupId;
 
 /// What a node computes. Every socket carries an `f32`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

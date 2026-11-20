@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nodes::{Interface, NodeKind, Signature};
+use crate::legacy::nodes::{Interface, NodeKind, Signature};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);

@@ -3,8 +3,8 @@ use std::fmt::Write;
 
 use thiserror::Error;
 
-use crate::graph::{Document, Endpoint, GroupId, Node, NodeId, Project};
-use crate::nodes::NodeKind;
+use crate::legacy::graph::{Document, Endpoint, GroupId, Node, NodeId, Project};
+use crate::legacy::nodes::NodeKind;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum CodegenError {
