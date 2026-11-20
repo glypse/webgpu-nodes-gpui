@@ -1,0 +1,14 @@
+[package]
+name = "webgpu-nodes"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui.workspace = true
+wgpu.workspace = true
+anyhow.workspace = true
+gpui-flow = { path = "../flow" }
+shader-graph = { path = "../shader-graph" }
+pollster.workspace = true
+image = { version = "0.25", default-features = false }
+smallvec = "1"

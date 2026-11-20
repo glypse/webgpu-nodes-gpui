@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[workspace.dependencies]
+# Runtime shaders: building the Metal ones needs a full Xcode.
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+wgpu = "30"
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pollster = "0.4"
