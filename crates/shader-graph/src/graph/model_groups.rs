@@ -485,6 +485,14 @@ impl GraphModel {
         refs
     }
 
+    /// The label of the standard-library group a node uses an older version
+    /// of. The latest version stands in for it, so its links may not match.
+    pub fn outdated_library_label(&self, node_id: &str) -> Option<String> {
+        let reference = self.project.resolve_node(node_id)?.definition_ref()?;
+        let latest = library::entry_for_ref(reference)?;
+        (latest.reference != reference).then(|| latest.label.clone())
+    }
+
     // ── Interface ────────────────────────────────────────────────────────────
 
     pub(super) fn user_definition(&mut self, definition_ref: &str) -> Option<&mut GraphDocument> {

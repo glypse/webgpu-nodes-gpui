@@ -82,6 +82,9 @@ pub struct NodeView {
     pub elsewhere: HashSet<String>,
     /// A zone node whose partner is gone.
     pub zone_missing: bool,
+    /// On a group node using an older standard-library version: the label of
+    /// the group, whose latest version is used instead.
+    pub outdated: Option<String>,
     pub widget: Option<WidgetView>,
     /// The wheels of the colour inputs drawn as wheels, by input id.
     pub wheels: HashMap<String, Entity<ColorWheels>>,
@@ -211,6 +214,7 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         } else {
             HashSet::new()
         },
+        outdated: model.outdated_library_label(id),
         zone_missing: is_zone_node_type(&node.node_type)
             && !model.active_zones().zone_of_boundary.contains_key(id),
         widget: None,
@@ -479,6 +483,24 @@ pub fn render_node(
                 .justify_between()
                 .gap(s(8.0))
                 .child(div().min_w_0().truncate().text_size(s(14.0)).font_weight(gpui::FontWeight::MEDIUM).child(view.label.clone()))
+                .children(view.outdated.as_ref().map(|label| {
+                    let message = format!(
+                        "Saved with an older version of {label}, which isn't available: the latest version is used instead, so its links may not match."
+                    );
+                    div()
+                        .id("outdated")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(s(16.0))
+                        .rounded_full()
+                        .text_size(s(11.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .bg(c.destructive)
+                        .text_color(c.background)
+                        .child("!")
+                        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(message.clone()).build(window, cx))
+                }))
                 .children(view.only_linked.then(|| {
                     let (ed, id, locked) = (ed.clone(), view.id.clone(), view.locked);
                     div()
