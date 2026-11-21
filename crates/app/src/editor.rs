@@ -491,6 +491,10 @@ impl Editor {
                     });
                     return edge;
                 }
+                let reroutes = |id: &str| doc.node(id).is_some_and(|n| n.is(REROUTE));
+                if !invalid && reroutes(&e.source) && reroutes(&e.target) {
+                    edge.arrow = Some(source);
+                }
                 edge.style = Some(if invalid {
                     EdgeStyle::solid(theme.colors.destructive).width(1.5).dash(6.0, 4.0).opacity(0.8, 1.0)
                 } else {
