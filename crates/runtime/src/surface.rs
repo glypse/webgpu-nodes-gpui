@@ -1,6 +1,6 @@
 //! Frames drawn into IOSurface-backed buffers that a window shows, so they
-//! never cross to the CPU. The buffers are NV12 full-range, the layout the
-//! window's video path samples, and each plane is wrapped as a wgpu target.
+//! never cross to the CPU. The buffers are BGRA, the layout the window's image
+//! path samples, and each is wrapped as a wgpu render target.
 
 use std::ptr::{self, NonNull};
 
@@ -8,12 +8,11 @@ use anyhow::{Context as _, Result};
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFType};
 use objc2_core_video::{
-    CVPixelBuffer, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetIOSurface,
-    CVPixelBufferGetWidthOfPlane, CVPixelBufferPool, kCVPixelBufferHeightKey,
-    kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelBufferWidthKey, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
+    CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetWidth,
+    CVPixelBufferPool, kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA,
+    kCVReturnSuccess,
 };
-use objc2_io_surface::IOSurfaceRef;
 use objc2_metal::{
     MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureType,
     MTLTextureUsage,
@@ -30,7 +29,7 @@ pub struct SurfacePool(CFRetained<CVPixelBufferPool>);
 
 impl SurfacePool {
     pub fn new(size: Size) -> Result<Self> {
-        let format = CFNumber::new_i32(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange as i32);
+        let format = CFNumber::new_i32(kCVPixelFormatType_32BGRA as i32);
         let width = CFNumber::new_i32(i32::try_from(size.width)?);
         let height = CFNumber::new_i32(i32::try_from(size.height)?);
         let io_surface_properties = CFDictionary::<CFType, CFType>::empty();
@@ -70,62 +69,23 @@ impl SurfacePool {
     }
 }
 
-/// The luma and chroma planes of a surface, as wgpu render targets.
-pub struct Planes {
-    pub luma: wgpu::Texture,
-    pub chroma: wgpu::Texture,
-}
-
-impl Planes {
-    /// Wraps the planes of a surface from `SurfacePool`. The wgpu textures
-    /// keep the IOSurface alive for as long as they are used.
-    pub fn wrap(device: &wgpu::Device, surface: &CVPixelBuffer) -> Result<Self> {
-        let io_surface =
-            CVPixelBufferGetIOSurface(Some(surface)).context("the surface has no IOSurface")?;
-        let raw_device = {
-            // SAFETY: the device is only read for its Metal handle.
-            let hal = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
-                .context("the GPU isn't Metal, so surfaces can't be drawn")?;
-            hal.raw_device().clone()
-        };
-        Ok(Self {
-            luma: wrap_plane(
-                device,
-                &raw_device,
-                &io_surface,
-                surface,
-                0,
-                MTLPixelFormat::R8Unorm,
-                wgpu::TextureFormat::R8Unorm,
-            )?,
-            chroma: wrap_plane(
-                device,
-                &raw_device,
-                &io_surface,
-                surface,
-                1,
-                MTLPixelFormat::RG8Unorm,
-                wgpu::TextureFormat::Rg8Unorm,
-            )?,
-        })
-    }
-}
-
-fn wrap_plane(
-    device: &wgpu::Device,
-    raw_device: &ProtocolObject<dyn MTLDevice>,
-    io_surface: &IOSurfaceRef,
-    surface: &CVPixelBuffer,
-    plane: usize,
-    pixel_format: MTLPixelFormat,
-    format: wgpu::TextureFormat,
-) -> Result<wgpu::Texture> {
-    let width = CVPixelBufferGetWidthOfPlane(surface, plane);
-    let height = CVPixelBufferGetHeightOfPlane(surface, plane);
-    // SAFETY: the plane's size and format are the ones the IOSurface was made with.
+/// The surface's pixels as a wgpu texture, which the frame is drawn into.
+/// The texture keeps the IOSurface alive for as long as it is used.
+pub fn wrap(device: &wgpu::Device, surface: &CVPixelBuffer) -> Result<wgpu::Texture> {
+    let io_surface =
+        CVPixelBufferGetIOSurface(Some(surface)).context("the surface has no IOSurface")?;
+    let raw_device = {
+        // SAFETY: the device is only read for its Metal handle.
+        let hal = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
+            .context("the GPU isn't Metal, so surfaces can't be drawn")?;
+        hal.raw_device().clone()
+    };
+    let width = CVPixelBufferGetWidth(surface);
+    let height = CVPixelBufferGetHeight(surface);
+    // SAFETY: the size and format are the ones the IOSurface was made with.
     let descriptor = unsafe {
         MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-            pixel_format,
+            MTLPixelFormat::BGRA8Unorm,
             width,
             height,
             false,
@@ -134,8 +94,8 @@ fn wrap_plane(
     descriptor.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
     descriptor.setStorageMode(MTLStorageMode::Shared);
     let raw: objc2::rc::Retained<ProtocolObject<dyn MTLTexture>> = raw_device
-        .newTextureWithDescriptor_iosurface_plane(&descriptor, io_surface, plane)
-        .context("the device can't wrap a surface plane")?;
+        .newTextureWithDescriptor_iosurface_plane(&descriptor, &io_surface, 0)
+        .context("the device can't wrap a surface")?;
 
     let copy_size = wgpu::hal::CopyExtent {
         width: width as u32,
@@ -147,7 +107,7 @@ fn wrap_plane(
     let hal = unsafe {
         wgpu::hal::metal::Device::texture_from_raw(
             raw,
-            format,
+            wgpu::TextureFormat::Bgra8Unorm,
             MTLTextureType::Type2D,
             1,
             1,
@@ -156,7 +116,7 @@ fn wrap_plane(
         )
     };
     let descriptor = wgpu::TextureDescriptor {
-        label: Some("surface plane"),
+        label: Some("surface"),
         size: wgpu::Extent3d {
             width: width as u32,
             height: height as u32,
@@ -165,7 +125,7 @@ fn wrap_plane(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format,
+        format: wgpu::TextureFormat::Bgra8Unorm,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     };

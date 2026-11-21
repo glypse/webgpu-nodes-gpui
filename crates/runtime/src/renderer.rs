@@ -21,7 +21,7 @@ use crate::present::{PresentOptions, Presenter};
 use crate::simulation::{SimulationState, Step, StepKind};
 use crate::uniforms::{UniformBlock, pack_block};
 #[cfg(target_os = "macos")]
-use crate::surface::{Planes, Surface, SurfacePool};
+use crate::surface::{Surface, SurfacePool, wrap};
 
 pub use shader_graph::passes::Size;
 
@@ -1033,15 +1033,21 @@ impl Renderer {
         }
         let (_, pool) = self.surfaces.as_ref().context("no surface pool")?;
         let surface = pool.next()?;
-        let planes = Planes::wrap(&self.device, &surface)?;
+        let target = wrap(&self.device, &surface)?;
         let linear = self.linear.clone().context("no target")?;
-        let luma = planes.luma.create_view(&Default::default());
-        let chroma = planes.chroma.create_view(&Default::default());
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.encode_plan(&mut encoder, program, inputs, &linear);
-        self.presenter
-            .encode_planes(&self.device, &mut encoder, &linear, &luma, &chroma);
+        self.presenter.encode(
+            &self.device,
+            &mut encoder,
+            &linear,
+            &target.create_view(&Default::default()),
+            PresentOptions {
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                premultiply: true,
+            },
+        );
         let timing = self.start_timing(&mut encoder);
         self.queue.submit([encoder.finish()]);
         Ok(Submitted {
@@ -1297,11 +1303,10 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn surfaces_hold_the_planes_of_the_frame_the_readback_gives() {
+    fn surface_holds_the_frame_the_readback_gives() {
         use objc2_core_video::{
-            CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
-            CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-            kCVReturnSuccess,
+            CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress,
+            CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVReturnSuccess,
         };
 
         let mut renderer = Renderer::new().unwrap();
@@ -1325,50 +1330,17 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             }
         };
 
-        let (width, height) = (size.width as usize, size.height as usize);
-        // The readback's colour, as the shader's encoded floats: BGRA bytes, top first.
-        let rgb = |x: usize, y: usize| -> [f32; 3] {
-            let at = (y.min(height - 1) * width + x.min(width - 1)) * 4;
-            [2, 1, 0].map(|channel| f32::from(expected.pixels[at + channel]))
-        };
+        let row_bytes = size.width as usize * 4;
         unsafe {
             assert_eq!(
                 CVPixelBufferLockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly),
                 kCVReturnSuccess
             );
-            let luma = CVPixelBufferGetBaseAddressOfPlane(&surface, 0).cast::<u8>();
-            let luma_stride = CVPixelBufferGetBytesPerRowOfPlane(&surface, 0);
-            let chroma = CVPixelBufferGetBaseAddressOfPlane(&surface, 1).cast::<u8>();
-            let chroma_stride = CVPixelBufferGetBytesPerRowOfPlane(&surface, 1);
-
-            // Full-range BT.601 luma of every pixel.
-            for y in 0..height {
-                for x in 0..width {
-                    let [r, g, b] = rgb(x, y);
-                    let want = 0.299 * r + 0.587 * g + 0.114 * b;
-                    let got = f32::from(*luma.add(y * luma_stride + x));
-                    assert!((got - want).abs() <= 1.5, "luma at ({x}, {y}): {got} vs {want}");
-                }
-            }
-            // Each chroma sample is the mean of the 2x2 pixels it covers.
-            for cy in 0..height / 2 {
-                for cx in 0..width / 2 {
-                    let mut mean = [0.0f32; 3];
-                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                        let [r, g, b] = rgb(cx * 2 + dx, cy * 2 + dy);
-                        mean[0] += r / 4.0;
-                        mean[1] += g / 4.0;
-                        mean[2] += b / 4.0;
-                    }
-                    let [r, g, b] = mean;
-                    let want_cb = 128.0 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-                    let want_cr = 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-                    let row = chroma.add(cy * chroma_stride + cx * 2);
-                    let got_cb = f32::from(*row);
-                    let got_cr = f32::from(*row.add(1));
-                    assert!((got_cb - want_cb).abs() <= 2.0, "Cb at ({cx}, {cy}): {got_cb} vs {want_cb}");
-                    assert!((got_cr - want_cr).abs() <= 2.0, "Cr at ({cx}, {cy}): {got_cr} vs {want_cr}");
-                }
+            let base = CVPixelBufferGetBaseAddress(&surface).cast::<u8>();
+            let stride = CVPixelBufferGetBytesPerRow(&surface);
+            for y in 0..size.height as usize {
+                let row = std::slice::from_raw_parts(base.add(y * stride), row_bytes);
+                assert_eq!(row, &expected.pixels[y * row_bytes..][..row_bytes], "row {y}");
             }
             assert_eq!(
                 CVPixelBufferUnlockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly),
