@@ -185,3 +185,15 @@ fn a_new_ramp_goes_from_black_to_white() {
     g.link((&ramp, "color"), (&out, "color"));
     g.wgsl();
 }
+
+#[test]
+fn is_listed_in_the_add_menu_under_colour() {
+    let model = GraphModel::default();
+    let menu = crate::catalog::add_menu_entries(&model);
+    let entry = menu
+        .iter()
+        .find(|e| e.label == "Color Ramp")
+        .expect("Color Ramp is listed");
+    assert_eq!(entry.heading, "Color");
+    assert!(crate::nodes::is_known_node_type(COLOR_RAMP));
+}
