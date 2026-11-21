@@ -1,8 +1,8 @@
 use guard::SafeListener as _;
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _, Pixels,
-    Point, Render, SharedString, StyleRefinement, Styled as _, Subscription, Window, div, point,
-    prelude::FluentBuilder as _, px,
+    App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, Point, Render, SharedString, StyleRefinement, Styled as _,
+    Subscription, Window, div, point, prelude::FluentBuilder as _, px,
 };
 use runtime::Timing;
 use theme::{
@@ -170,10 +170,10 @@ impl Render for TimelineBar {
             }
         };
 
+        // The readouts take h_full, which is 0 unless this row has a definite height.
         div()
             .flex()
-            .flex_1()
-            .min_w_0()
+            .size_full()
             .items_center()
             .gap_1()
             .child(
@@ -307,6 +307,7 @@ impl Render for TimingControl {
         };
 
         div()
+            .debug_selector(|| "timing-control".into())
             .size_full()
             .flex()
             .items_center()
@@ -335,5 +336,64 @@ impl Render for TimingControl {
             )
             .children(self.menu.map(|at| self.menu(at, cx)))
     })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Context, Entity, IntoElement, Render, StyleRefinement, TestAppContext, Window};
+
+    use super::*;
+
+    /// A typical width for the timeline's header, and the header's height.
+    const WIDTH: f32 = 600.0;
+    const HEADER: f32 = 36.0;
+
+    /// The bar laid out as a header lays out its toolbar: a cached view filling the row.
+    struct Header {
+        bar: Entity<TimelineBar>,
+    }
+
+    impl Render for Header {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .debug_selector(|| "header".into())
+                .flex()
+                .items_center()
+                .w(px(WIDTH))
+                .h(px(HEADER))
+                .px(px(6.0))
+                .child(
+                    self.bar
+                        .clone()
+                        .cached(StyleRefinement::default().flex_1().min_w_0().h_full()),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn timing_control_is_drawn_at_the_right_end(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let playback = cx.new(|_| Playback::new());
+            let bar = cx.new(|cx| TimelineBar::new(playback, window, cx));
+            Header { bar }
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+
+        let header = cx.debug_bounds("header").expect("the header is drawn");
+        let timing = cx.debug_bounds("timing-control").expect("the timing control is drawn");
+        assert!(timing.size.width > px(0.0), "the timing control has no width: {timing:?}");
+        assert!(timing.size.height > px(0.0), "the timing control has no height: {timing:?}");
+        assert!(
+            timing.origin.x >= header.origin.x && timing.right() <= header.right() + px(0.5),
+            "the timing control spills out of the header: {timing:?} in {header:?}"
+        );
+        assert!(
+            timing.right() > header.right() - px(16.0),
+            "the timing control isn't at the right end: {timing:?} in {header:?}"
+        );
     }
 }
