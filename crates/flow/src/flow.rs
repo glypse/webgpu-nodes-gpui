@@ -82,6 +82,10 @@ pub struct FlowOptions {
     /// How close, in flow units, a handle must be to take a dropped link.
     pub connection_radius: f32,
     pub auto_pan_on_connect: bool,
+    /// A click on a handle (no drag) starts a connection that the next handle clicked completes.
+    pub connect_on_click: bool,
+    /// Arrow keys move the selected nodes.
+    pub nodes_keyboard_move: bool,
     pub auto_pan_on_node_drag: bool,
     pub auto_pan_speed: f32,
     /// Pixels the pointer must move before a node drag starts.
@@ -128,6 +132,8 @@ impl Default for FlowOptions {
             connection_mode: ConnectionMode::Strict,
             connection_radius: 20.0,
             auto_pan_on_connect: true,
+            connect_on_click: true,
+            nodes_keyboard_move: true,
             auto_pan_on_node_drag: true,
             auto_pan_speed: 15.0,
             node_drag_threshold: 1.0,
@@ -176,6 +182,8 @@ pub enum FlowEvent {
     PaneContextMenu { window: Point<Pixels>, flow: Xy },
     SelectionStart,
     SelectionEnd,
+    /// A grab ended without confirming; the nodes are back where they started.
+    GrabCancel { nodes: Vec<Id> },
     /// Delete was pressed with these selected, edges touching the nodes included.
     Delete { nodes: Vec<Id>, edges: Vec<Id> },
     Move(Viewport),
@@ -225,6 +233,8 @@ enum Drag {
     Pan { last: Xy, moved: bool, press: Xy },
     Select { start: Xy, current: Xy },
     Nodes(NodeDrag),
+    /// Nodes following the pointer with no button held, until a click.
+    Grab(NodeDrag),
     Connect,
     MiniMap { last: Xy },
 }
@@ -240,6 +250,8 @@ struct NodeDrag {
     toggle_off_on_click: bool,
     collapse_on_click: bool,
     modifiers: Modifiers,
+    /// The pointer wasn't known when the grab began: its first move sets the anchor.
+    anchor_pending: bool,
 }
 
 struct Reconnecting {
@@ -254,6 +266,8 @@ struct ConnectionDrag {
     started: bool,
     reconnecting: Option<Reconnecting>,
     window_position: Point<Pixels>,
+    /// Started by a click: the line follows the pointer until a handle is clicked.
+    click: bool,
 }
 
 struct Anim {
@@ -287,6 +301,7 @@ pub struct Flow {
     pointer: Option<Xy>,
     anim: Option<Anim>,
     fit_request: Option<FitViewOptions>,
+    init_fit_pending: bool,
     initialized: bool,
     /// Every visible node has been measured.
     ready: bool,
@@ -326,6 +341,7 @@ impl Flow {
             pointer: None,
             anim: None,
             fit_request: None,
+            init_fit_pending: true,
             initialized: false,
             ready: false,
             layers: Layers { back: Vec::new(), front: Vec::new(), portals: Vec::new() },
@@ -337,7 +353,6 @@ impl Flow {
 
     pub fn with_options(mut self, options: FlowOptions) -> Self {
         self.options = options;
-        self.fit_request = self.options.fit_view_on_init.then_some(self.options.fit_view_options);
         self
     }
 
@@ -357,7 +372,7 @@ impl Flow {
     /// Replaces the nodes. While a node drag is under way the dragged nodes
     /// keep the positions the pointer gave them.
     pub fn set_nodes(&mut self, mut nodes: Vec<Node>, cx: &mut Context<Self>) {
-        if let Drag::Nodes(drag) = &self.drag
+        if let Drag::Nodes(drag) | Drag::Grab(drag) = &self.drag
             && drag.started
         {
             for node in &mut nodes {
@@ -408,6 +423,93 @@ impl Flow {
                 cx.emit(FlowEvent::MoveEnd(viewport));
             }
         }
+        cx.notify();
+    }
+
+    /// Starts moving the nodes with the pointer, no button held, until a click
+    /// drops them (or Escape or another button cancels). Returns whether any
+    /// node could move.
+    pub fn begin_grab(&mut self, ids: &[Id], cx: &mut Context<Self>) -> bool {
+        if !self.interactive || !matches!(self.drag, Drag::None) {
+            return false;
+        }
+        let items: Vec<DragItem> = self
+            .nodes
+            .iter()
+            .filter(|n| ids.contains(&n.id) && self.node_draggable(n))
+            .map(|n| DragItem { id: n.id.clone(), start: n.position })
+            .collect();
+        let Some(first) = items.first() else {
+            return false;
+        };
+        let clicked = first.id.clone();
+        let nodes: Vec<Id> = items.iter().map(|i| i.id.clone()).collect();
+        let pointer = self.pointer;
+        self.drag = Drag::Grab(NodeDrag {
+            clicked: clicked.clone(),
+            items,
+            start_flow: pointer.map_or(Xy::ZERO, |p| self.viewport.to_flow(p)),
+            start_local: pointer.unwrap_or(Xy::ZERO),
+            pointer: pointer.unwrap_or(Xy::ZERO),
+            started: true,
+            toggle_off_on_click: false,
+            collapse_on_click: false,
+            modifiers: Modifiers::default(),
+            anchor_pending: pointer.is_none(),
+        });
+        cx.emit(FlowEvent::NodeDragStart { id: clicked, nodes });
+        cx.notify();
+        true
+    }
+
+    pub fn is_grabbing(&self) -> bool {
+        matches!(self.drag, Drag::Grab(_))
+    }
+
+    fn confirm_grab(&mut self, cx: &mut Context<Self>) {
+        if let Drag::Grab(d) = std::mem::replace(&mut self.drag, Drag::None) {
+            self.finish_node_drag(d, cx);
+            cx.notify();
+        }
+    }
+
+    pub fn cancel_grab(&mut self, cx: &mut Context<Self>) {
+        let Drag::Grab(d) = std::mem::replace(&mut self.drag, Drag::None) else {
+            return;
+        };
+        let mut changes = Vec::new();
+        for item in &d.items {
+            if let Some(n) = self.nodes.iter_mut().find(|n| n.id == item.id) {
+                n.position = item.start;
+                n.dragging = false;
+                changes.push(NodeChange::Position { id: n.id.clone(), position: Some(item.start), dragging: Some(false) });
+            }
+        }
+        cx.emit(FlowEvent::NodesChange(changes));
+        cx.emit(FlowEvent::GrabCancel { nodes: d.items.iter().map(|i| i.id.clone()).collect() });
+        cx.notify();
+    }
+
+    fn nudge_selection(&mut self, dx: f32, dy: f32, shift: bool, cx: &mut Context<Self>) {
+        let (sx, sy) = self.options.snap_grid.unwrap_or((5.0, 5.0));
+        let factor = if shift { 4.0 } else { 1.0 };
+        let delta = Xy::new(dx * sx * factor, dy * sy * factor);
+        let ids: Vec<Id> = self
+            .nodes
+            .iter()
+            .filter(|n| n.selected && self.node_draggable(n))
+            .map(|n| n.id.clone())
+            .collect();
+        let Some(clicked) = ids.first().cloned() else {
+            return;
+        };
+        let mut changes = Vec::new();
+        for n in self.nodes.iter_mut().filter(|n| ids.contains(&n.id)) {
+            n.position = n.position + delta;
+            changes.push(NodeChange::Position { id: n.id.clone(), position: Some(n.position), dragging: Some(false) });
+        }
+        cx.emit(FlowEvent::NodesChange(changes));
+        cx.emit(FlowEvent::NodeDragStop { id: clicked, nodes: ids });
         cx.notify();
     }
 
@@ -745,6 +847,14 @@ impl Flow {
             }
         }
 
+        // Read here rather than at construction so options set after `new` still apply.
+        if self.init_fit_pending && self.ready {
+            self.init_fit_pending = false;
+            if self.options.fit_view_on_init && self.fit_request.is_none() {
+                self.fit_request = Some(self.options.fit_view_options);
+            }
+        }
+
         if let Some(options) = self.fit_request
             && self.ready
         {
@@ -779,9 +889,9 @@ impl Flow {
         if panning {
             if self.connection_drag.as_ref().is_some_and(|d| d.started) && self.options.auto_pan_on_connect {
                 self.pan_by(pan, cx);
-                self.update_connection(pointer, window, cx);
+                self.update_connection(pointer, cx);
                 animating = true;
-            } else if let Drag::Nodes(d) = &self.drag
+            } else if let Drag::Nodes(d) | Drag::Grab(d) = &self.drag
                 && d.started
                 && self.options.auto_pan_on_node_drag
             {
@@ -808,6 +918,10 @@ impl Flow {
     ) {
         self.focus_flow(window, cx);
         let press = self.local(event.position);
+        if self.finish_click_connection(press, cx) {
+            return;
+        }
+        self.cancel_click_connection(cx);
         self.connection_drag = Some(ConnectionDrag {
             from_node: node,
             from_handle: handle,
@@ -816,6 +930,7 @@ impl Flow {
             started: false,
             reconnecting: None,
             window_position: event.position,
+            click: false,
         });
         self.drag = Drag::Connect;
         cx.notify();
@@ -827,7 +942,7 @@ impl Flow {
         }
     }
 
-    fn update_connection(&mut self, local: Xy, window: &mut Window, cx: &mut Context<Self>) {
+    fn update_connection(&mut self, local: Xy, cx: &mut Context<Self>) {
         let Some(drag) = &mut self.connection_drag else {
             return;
         };
@@ -896,7 +1011,6 @@ impl Flow {
             window_position,
             reconnecting,
         });
-        let _ = window;
         cx.notify();
     }
 
@@ -906,6 +1020,15 @@ impl Flow {
         };
         let state = self.connection.take();
         if !drag.started {
+            if self.options.connect_on_click && drag.reconnecting.is_none() {
+                cx.emit(FlowEvent::ConnectStart {
+                    node: drag.from_node.clone(),
+                    handle: drag.from_handle.clone(),
+                    kind: drag.from_type,
+                });
+                self.connection_drag = Some(ConnectionDrag { started: true, click: true, ..drag });
+                self.update_connection(local, cx);
+            }
             return;
         }
         let Some(state) = state else { return };
@@ -936,10 +1059,57 @@ impl Flow {
         }
     }
 
+    /// Whether a press belongs to a grab in progress: left drops the nodes, any other cancels.
+    fn grab_press(&mut self, button: MouseButton, cx: &mut Context<Self>) -> bool {
+        if !matches!(self.drag, Drag::Grab(_)) {
+            return false;
+        }
+        cx.stop_propagation();
+        if button == MouseButton::Left {
+            self.confirm_grab(cx);
+        } else {
+            self.cancel_grab(cx);
+        }
+        true
+    }
+
+    /// Completes a click-started connection on the handle near `local`, if any.
+    fn finish_click_connection(&mut self, local: Xy, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.connection_drag.as_ref().filter(|d| d.click) else {
+            return false;
+        };
+        let from_key = (&drag.from_node, drag.from_type, drag.from_handle.as_ref());
+        let flow = self.viewport.to_flow(local);
+        let near = handle_under(flow, &self.lookup, from_key)
+            .or_else(|| closest_handle(flow, self.options.connection_radius, &self.lookup, from_key))
+            .is_some();
+        if !near {
+            return false;
+        }
+        self.update_connection(local, cx);
+        self.finish_connection(local, cx);
+        cx.notify();
+        true
+    }
+
+    fn cancel_click_connection(&mut self, cx: &mut Context<Self>) {
+        if self.connection_drag.as_ref().is_some_and(|d| d.click) {
+            self.connection_drag = None;
+            self.connection = None;
+            cx.notify();
+        }
+    }
+
     fn node_down(&mut self, id: Id, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
+        if self.grab_press(event.button, cx) {
+            return;
+        }
         self.focus_flow(window, cx);
         let local = self.local(event.position);
+        if event.button == MouseButton::Left && self.finish_click_connection(local, cx) {
+            return;
+        }
         let flow = self.viewport.to_flow(local);
         let Some(node) = self.nodes.iter().find(|n| n.id == id).cloned() else {
             return;
@@ -998,6 +1168,7 @@ impl Flow {
                     toggle_off_on_click: toggle_off,
                     collapse_on_click: collapse,
                     modifiers: event.modifiers,
+                    anchor_pending: false,
                 });
             }
             MouseButton::Navigate(_) => {}
@@ -1006,7 +1177,14 @@ impl Flow {
     }
 
     fn pane_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.grab_press(event.button, cx) {
+            return;
+        }
         self.focus_flow(window, cx);
+        if event.button == MouseButton::Left && self.finish_click_connection(self.local(event.position), cx) {
+            return;
+        }
+        self.cancel_click_connection(cx);
         let local = self.local(event.position);
         let flow = self.viewport.to_flow(local);
         match event.button {
@@ -1040,6 +1218,7 @@ impl Flow {
                         started: false,
                         reconnecting: Some(Reconnecting { edge }),
                         window_position: event.position,
+                        click: false,
                     });
                     self.drag = Drag::Connect;
                 } else if let Some(index) = self.edge_at(flow) {
@@ -1079,7 +1258,7 @@ impl Flow {
         cx.notify();
     }
 
-    fn mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         let local = self.local(event.position);
         let inside = self.bounds.get().contains(&event.position);
         if inside {
@@ -1088,6 +1267,10 @@ impl Flow {
         let pan_on_drag = self.options.pan_on_drag;
         match &mut self.drag {
             Drag::None => {
+                if self.connection_drag.as_ref().is_some_and(|d| d.click) {
+                    self.update_connection(local, cx);
+                    return;
+                }
                 if inside {
                     let hovered = self.edge_at(self.viewport.to_flow(local)).map(|i| self.edges[i].id.clone());
                     if hovered != self.hovered_edge {
@@ -1116,9 +1299,20 @@ impl Flow {
                 self.pointer = Some(local);
                 self.move_dragged_nodes(local, cx);
             }
+            Drag::Grab(d) => {
+                if d.anchor_pending {
+                    d.anchor_pending = false;
+                    d.start_local = local;
+                    d.start_flow = self.viewport.to_flow(local);
+                }
+                d.pointer = local;
+                d.modifiers = event.modifiers;
+                self.pointer = Some(local);
+                self.move_dragged_nodes(local, cx);
+            }
             Drag::Connect => {
                 self.pointer = Some(local);
-                self.update_connection(local, window, cx);
+                self.update_connection(local, cx);
             }
             Drag::MiniMap { last } => {
                 let delta = local - *last;
@@ -1131,6 +1325,9 @@ impl Flow {
 
     fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
         let local = self.local(event.position);
+        if matches!(self.drag, Drag::Grab(_)) {
+            return;
+        }
         match std::mem::replace(&mut self.drag, Drag::None) {
             Drag::None => {}
             Drag::Pan { moved, .. } => {
@@ -1150,7 +1347,7 @@ impl Flow {
                 }
                 cx.emit(FlowEvent::SelectionEnd);
             }
-            Drag::Nodes(d) => self.finish_node_drag(d, cx),
+            Drag::Nodes(d) | Drag::Grab(d) => self.finish_node_drag(d, cx),
             Drag::Connect => self.finish_connection(local, cx),
             Drag::MiniMap { .. } => cx.emit(FlowEvent::MoveEnd(self.viewport)),
         }
@@ -1158,7 +1355,7 @@ impl Flow {
     }
 
     fn move_dragged_nodes(&mut self, local: Xy, cx: &mut Context<Self>) {
-        let Drag::Nodes(d) = &mut self.drag else {
+        let (Drag::Nodes(d) | Drag::Grab(d)) = &mut self.drag else {
             return;
         };
         if !d.started {
@@ -1170,7 +1367,7 @@ impl Flow {
             let clicked = d.clicked.clone();
             cx.emit(FlowEvent::NodeDragStart { id: clicked, nodes: ids });
         }
-        let Drag::Nodes(d) = &self.drag else { return };
+        let (Drag::Nodes(d) | Drag::Grab(d)) = &self.drag else { return };
         let flow = self.viewport.to_flow(local);
         let delta = flow - d.start_flow;
         // Snapping moves the whole selection by the first node's offset.
@@ -1306,7 +1503,23 @@ impl Flow {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if self.is_grabbing() {
+            cx.stop_propagation();
+            if event.keystroke.key == "escape" {
+                self.cancel_grab(cx);
+            }
+            return;
+        }
         match event.keystroke.key.as_str() {
+            key @ ("left" | "right" | "up" | "down") if self.options.nodes_keyboard_move && self.interactive => {
+                let (dx, dy) = match key {
+                    "left" => (-1.0, 0.0),
+                    "right" => (1.0, 0.0),
+                    "up" => (0.0, -1.0),
+                    _ => (0.0, 1.0),
+                };
+                self.nudge_selection(dx, dy, event.keystroke.modifiers.shift, cx);
+            }
             "backspace" | "delete" if self.options.delete_key => {
                 let nodes: Vec<Id> = self
                     .nodes
@@ -1332,6 +1545,7 @@ impl Flow {
             }
             "escape" if self.connection_drag.take().is_some() => {
                 self.connection = None;
+                cx.stop_propagation();
                 self.drag = Drag::None;
                 cx.notify();
             }
@@ -1784,9 +1998,9 @@ impl Render for Flow {
                     }
                 });
                 // Drags follow the pointer beyond the canvas.
-                window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
+                window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                     if phase == DispatchPhase::Bubble {
-                        on_move.update(cx, |this, cx| guard::guard("flow mouse move", || this.mouse_move(e, window, cx))).ok();
+                        on_move.update(cx, |this, cx| guard::guard("flow mouse move", || this.mouse_move(e, cx))).ok();
                     }
                 });
                 window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
@@ -1804,6 +2018,7 @@ impl Render for Flow {
             Drag::Pan { moved: true, .. } => CursorStyle::ClosedHand,
             Drag::Select { .. } => CursorStyle::Crosshair,
             Drag::Connect => CursorStyle::Crosshair,
+            Drag::Grab(_) => CursorStyle::ClosedHand,
             _ if self.hovered_edge.is_some() => CursorStyle::PointingHand,
             _ => CursorStyle::OpenHand,
         };
