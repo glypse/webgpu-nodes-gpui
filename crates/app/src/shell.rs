@@ -41,6 +41,7 @@ actions!(
         Undo,
         Redo,
         OpenSettings,
+        ToggleMode,
         ZoomPreviewIn,
         ZoomPreviewOut,
         FitPreview,
@@ -62,6 +63,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-s", SaveProject, Some("Shell")),
         KeyBinding::new("cmd-shift-s", SaveProjectAs, Some("Shell")),
         KeyBinding::new("cmd-,", OpenSettings, Some("Shell")),
+        KeyBinding::new("cmd-m", ToggleMode, Some("Shell")),
         // Both keys of "+": typed with shift on US layouts, where only the typed character matches.
         KeyBinding::new("+", ZoomPreviewIn, Some(CONTEXT)),
         KeyBinding::new("=", ZoomPreviewIn, Some(CONTEXT)),
@@ -558,6 +560,9 @@ impl Render for Shell {
             .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
                 this.open_settings(window, cx);
             }))
+            .on_action(cx.safe_listener(|_, _: &ToggleMode, window, cx| {
+                preferences::toggle_mode(window, cx);
+            }))
             .on_action(cx.safe_listener(|this, _: &ZoomPreviewIn, window, cx| {
                 this.over_previews(window, cx, PreviewArea::zoom_in);
             }))
@@ -647,6 +652,17 @@ mod tests {
 
         cx.simulate_keystrokes("cmd-+");
         assert!((zoom(cx) - before).abs() < 1e-4, "keys with modifiers aren't zoom keys");
+    }
+
+    #[gpui::test]
+    fn cmd_m_switches_between_light_and_dark(cx: &mut TestAppContext) {
+        let (_, mut cx) = open(cx);
+        let cx = &mut cx;
+        let theme = |cx: &mut gpui::VisualTestContext| cx.read(|cx| cx.global::<preferences::Preferences>().theme);
+        cx.simulate_keystrokes("cmd-m");
+        assert_eq!(theme(cx), preferences::ThemePreference::Dark);
+        cx.simulate_keystrokes("cmd-m");
+        assert_eq!(theme(cx), preferences::ThemePreference::Light);
     }
 
 }

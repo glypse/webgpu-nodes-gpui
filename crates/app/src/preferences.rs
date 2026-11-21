@@ -27,8 +27,15 @@ pub struct Preferences {
 
 impl Global for Preferences {}
 
+#[cfg(not(test))]
 fn file() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("webgpu-nodes").join("preferences.json"))
+}
+
+/// Tests neither read nor write the user's preferences.
+#[cfg(test)]
+fn file() -> Option<PathBuf> {
+    None
 }
 
 impl Preferences {
@@ -98,6 +105,16 @@ pub fn apply(window: &mut Window, cx: &mut App) {
         theme::sync_component_theme(appearance, cx);
         window.refresh();
     }
+}
+
+/// Switches to the opposite of the appearance on screen, as the original's ⌘M does.
+pub fn toggle_mode(window: &mut Window, cx: &mut App) {
+    let on_screen = cx.global::<Preferences>().appearance(window);
+    let theme = match on_screen {
+        Appearance::Dark => ThemePreference::Light,
+        Appearance::Light => ThemePreference::Dark,
+    };
+    update(window, cx, |p| p.theme = theme);
 }
 
 /// Changes the preferences with `f`, saving and applying them.
