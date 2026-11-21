@@ -3,9 +3,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
 use gpui::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement as _, Render, Styled as _, Window, actions, div,
+    ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, Window, actions, div,
 };
 use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
 use theme::{ActiveTheme as _, IconName, Theme};
@@ -13,10 +16,25 @@ use theme::{ActiveTheme as _, IconName, Theme};
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
 use crate::playback::Playback;
+use crate::project;
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
 
-actions!(shell, [TogglePlayback, PreviousFrame, NextFrame, GoToStart]);
+actions!(
+    shell,
+    [
+        TogglePlayback,
+        PreviousFrame,
+        NextFrame,
+        GoToStart,
+        NewProject,
+        OpenProject,
+        SaveProject,
+        SaveProjectAs,
+        Undo,
+        Redo,
+    ]
+);
 
 /// Playback keys act anywhere but while typing in a field.
 const CONTEXT: &str = "Shell && !ThemeTextInput";
@@ -27,6 +45,10 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(",", PreviousFrame, Some(CONTEXT)),
         KeyBinding::new(".", NextFrame, Some(CONTEXT)),
         KeyBinding::new("home", GoToStart, Some(CONTEXT)),
+        KeyBinding::new("cmd-n", NewProject, Some("Shell")),
+        KeyBinding::new("cmd-o", OpenProject, Some("Shell")),
+        KeyBinding::new("cmd-s", SaveProject, Some("Shell")),
+        KeyBinding::new("cmd-shift-s", SaveProjectAs, Some("Shell")),
     ]);
 }
 
@@ -84,12 +106,24 @@ struct AreaViews {
 pub struct Shell {
     screen: Entity<ScreenView<Panel>>,
     playback: Entity<Playback>,
+    editor: Entity<Editor>,
+    path: Option<PathBuf>,
 }
 
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let playback = cx.new(|_| Playback::new());
         let editor = cx.new(|cx| Editor::new(window, cx));
+        let mut path = None;
+        if let Some(last) = project::last() {
+            match project::read(&last) {
+                Ok(loaded) => {
+                    editor.update(cx, |e, cx| e.load_project(Some(loaded), cx));
+                    path = Some(last);
+                }
+                Err(e) => log::warn!("couldn't reopen {}: {e:#}", last.display()),
+            }
+        }
 
         let first = editor.read(cx).shader().clone();
         playback.update(cx, |p, cx| {
@@ -97,13 +131,14 @@ impl Shell {
         });
         cx.subscribe_in(&editor, window, {
             let playback = playback.clone();
-            move |_, _, event: &EditorEvent, window, cx| {
+            move |this, _, event: &EditorEvent, window, cx| {
                 playback.update(cx, |p, cx| {
                     guard::guard("playback update", || match event {
                         EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
                         EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
                     })
                 });
+                this.refresh_title(window, cx);
             }
         })
         .detach();
@@ -111,6 +146,7 @@ impl Shell {
         let views = Rc::new(RefCell::new(AreaViews::default()));
         let screen = cx.new(|_| {
             let playback = playback.clone();
+            let editor = editor.clone();
             ScreenView::new(default_screen(), move |id, panel, window, cx| {
                 let mut views = views.borrow_mut();
                 match panel {
@@ -154,8 +190,163 @@ impl Shell {
                 }
             })
         });
-        Self { screen, playback }
+        let shell = Self { screen, playback, editor, path };
+        shell.refresh_title(window, cx);
+        shell
     }
+
+    fn refresh_title(&self, window: &mut Window, cx: &App) {
+        let name = self.path.as_deref().map_or_else(|| "Untitled".to_owned(), project::file_name);
+        let dirty = self.editor.read(cx).has_unsaved_changes();
+        window.set_window_title(&format!("{name}{} - webgpu-nodes", if dirty { " *" } else { "" }));
+        window.set_window_edited(dirty);
+    }
+
+    fn report(window: &mut Window, message: &str, error: &anyhow::Error, cx: &mut App) {
+        log::error!("{message}: {error:#}");
+        let detail = format!("{error:#}");
+        drop(window.prompt(PromptLevel::Critical, message, Some(&detail), &["OK"], cx));
+    }
+
+    /// Runs `then` now, or once the user agrees to lose unsaved changes.
+    fn confirm_discard(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        if !self.editor.read(cx).has_unsaved_changes() {
+            then(self, window, cx);
+            return;
+        }
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            "Discard unsaved changes?",
+            Some("The project has changes that haven't been saved."),
+            &["Discard", "Cancel"],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await == Ok(0) {
+                this.update_in(cx, |this, window, cx| {
+                    guard::guard("discard changes", || then(this, window, cx));
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    fn adopt(&mut self, path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        project::remember(path.as_deref());
+        self.path = path;
+        self.refresh_title(window, cx);
+    }
+
+    fn new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_discard(window, cx, |this, window, cx| {
+            this.editor.update(cx, |e, cx| e.load_project(None, cx));
+            this.adopt(None, window, cx);
+        });
+    }
+
+    fn open_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_discard(window, cx, |_, window, cx| {
+            let paths = cx.prompt_for_paths(PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: None,
+            });
+            cx.spawn_in(window, async move |this, cx| {
+                let picked = match paths.await {
+                    Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                    Ok(Err(e)) => {
+                        log::error!("the open dialog failed: {e:#}");
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(path) = picked {
+                    this.update_in(cx, |this, window, cx| {
+                        guard::guard("open project", || this.load(path, window, cx));
+                    })
+                    .ok();
+                }
+            })
+            .detach();
+        });
+    }
+
+    pub fn load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        match project::read(&path) {
+            Ok(loaded) => {
+                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), cx));
+                self.adopt(Some(path), window, cx);
+            }
+            Err(e) => {
+                let message = format!("Couldn't open {}", project::file_name(&path));
+                Self::report(window, &message, &e, cx);
+            }
+        }
+    }
+
+    fn save_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.path.clone() {
+            Some(path) => self.save_to(path, window, cx),
+            None => self.save_project_as(window, cx),
+        }
+    }
+
+    fn save_project_as(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let directory = self
+            .path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(dirs_home)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let suggested = self.path.as_deref().map_or_else(
+            || format!("untitled.{}", project::EXTENSION),
+            project::file_name,
+        );
+        let chosen = cx.prompt_for_new_path(&directory, Some(&suggested));
+        cx.spawn_in(window, async move |this, cx| {
+            let picked = match chosen.await {
+                Ok(Ok(path)) => path,
+                Ok(Err(e)) => {
+                    log::error!("the save dialog failed: {e:#}");
+                    None
+                }
+                Err(_) => None,
+            };
+            if let Some(path) = picked {
+                this.update_in(cx, |this, window, cx| {
+                    guard::guard("save project", || this.save_to(path, window, cx));
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    fn save_to(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let result: Result<()> = project::write(&path, &self.editor.read(cx).project());
+        match result {
+            Ok(()) => {
+                self.editor.read(cx).mark_saved();
+                self.adopt(Some(path), window, cx);
+            }
+            Err(e) => {
+                let message = format!("Couldn't save {}", project::file_name(&path));
+                Self::report(window, &message, &e, cx);
+            }
+        }
+    }
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    dirs::document_dir().or_else(dirs::home_dir)
 }
 
 impl Render for Shell {
@@ -180,6 +371,26 @@ impl Render for Shell {
             }))
             .on_action(cx.safe_listener(|this, _: &GoToStart, window, cx| {
                 this.playback.update(cx, |p, cx| p.seek(0.0, window, cx));
+            }))
+            .on_action(cx.safe_listener(|this, _: &NewProject, window, cx| {
+                this.new_project(window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &OpenProject, window, cx| {
+                this.open_project(window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &SaveProject, window, cx| {
+                this.save_project(window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &SaveProjectAs, window, cx| {
+                this.save_project_as(window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &Undo, window, cx| {
+                this.editor.update(cx, |e, cx| e.undo(cx));
+                this.refresh_title(window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &Redo, window, cx| {
+                this.editor.update(cx, |e, cx| e.redo(cx));
+                this.refresh_title(window, cx);
             }))
             .child(self.screen.clone())
     }

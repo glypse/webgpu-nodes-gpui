@@ -18,3 +18,9 @@ theme = { path = "../theme" }
 screen = { path = "../screen" }
 image = { version = "0.25", default-features = false }
 smallvec = "1"
+zip = { version = "9.8.1", default-features = false, features = ["deflate"] }
+dirs = "7.0.0"
+serde_json.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

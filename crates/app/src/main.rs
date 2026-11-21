@@ -3,14 +3,38 @@ mod editor;
 mod graph;
 mod playback;
 mod preview;
+mod project;
 mod shell;
 mod timeline;
 
 use gpui::{
-    AppContext as _, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
+    AppContext as _, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
+    WindowBounds, WindowOptions, actions, px, size,
 };
 
-use shell::Shell;
+use shell::{NewProject, OpenProject, Redo, SaveProject, SaveProjectAs, Shell, Undo};
+
+actions!(app, [Quit]);
+
+fn menus() -> Vec<Menu> {
+    vec![
+        Menu { name: "webgpu-nodes".into(), items: vec![MenuItem::action("Quit", Quit)] },
+        Menu {
+            name: "File".into(),
+            items: vec![
+                MenuItem::action("New", NewProject),
+                MenuItem::action("Open...", OpenProject),
+                MenuItem::separator(),
+                MenuItem::action("Save", SaveProject),
+                MenuItem::action("Save As...", SaveProjectAs),
+            ],
+        },
+        Menu {
+            name: "Edit".into(),
+            items: vec![MenuItem::action("Undo", Undo), MenuItem::action("Redo", Redo)],
+        },
+    ]
+}
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -18,6 +42,9 @@ fn main() {
     Application::new().with_assets(theme::Assets).run(|cx| {
         theme::init(cx);
         shell::init(cx);
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.set_menus(menus());
         let bounds = Bounds::centered(None, size(px(1400.0), px(860.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
