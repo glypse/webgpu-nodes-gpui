@@ -1,0 +1,96 @@
+use gpui::{Hsla, hsla};
+
+/// Colours the flow's built-in pieces are drawn with.
+#[derive(Clone, Copy, Debug)]
+pub struct FlowTheme {
+    pub background: Hsla,
+    pub pattern: Hsla,
+    pub edge: Hsla,
+    pub edge_selected: Hsla,
+    pub edge_hover: Hsla,
+    pub connection_line: Hsla,
+    pub connection_invalid: Hsla,
+    pub selection_fill: Hsla,
+    pub selection_stroke: Hsla,
+    pub nodes_selection_stroke: Hsla,
+    pub handle: Hsla,
+    pub handle_border: Hsla,
+    pub handle_valid: Hsla,
+    pub handle_invalid: Hsla,
+    pub node_background: Hsla,
+    pub node_border: Hsla,
+    pub node_border_selected: Hsla,
+    pub node_text: Hsla,
+    pub panel_background: Hsla,
+    pub panel_border: Hsla,
+    pub panel_text: Hsla,
+    pub panel_hover: Hsla,
+    pub minimap_background: Hsla,
+    pub minimap_node: Hsla,
+    pub minimap_node_selected: Hsla,
+    pub minimap_mask: Hsla,
+}
+
+impl FlowTheme {
+    pub fn dark() -> Self {
+        Self {
+            background: hsla(0.0, 0.0, 0.07, 1.0),
+            pattern: hsla(0.0, 0.0, 0.3, 1.0),
+            edge: hsla(0.0, 0.0, 0.5, 1.0),
+            edge_selected: hsla(0.0, 0.0, 0.9, 1.0),
+            edge_hover: hsla(0.0, 0.0, 1.0, 0.4),
+            connection_line: hsla(0.0, 0.0, 0.7, 1.0),
+            connection_invalid: hsla(0.0, 0.8, 0.6, 1.0),
+            selection_fill: hsla(0.6, 0.6, 0.6, 0.1),
+            selection_stroke: hsla(0.6, 0.6, 0.7, 0.8),
+            nodes_selection_stroke: hsla(0.6, 0.6, 0.7, 0.5),
+            handle: hsla(0.0, 0.0, 0.55, 1.0),
+            handle_border: hsla(0.0, 0.0, 0.1, 1.0),
+            handle_valid: hsla(0.4, 0.7, 0.5, 1.0),
+            handle_invalid: hsla(0.0, 0.8, 0.6, 1.0),
+            node_background: hsla(0.0, 0.0, 0.12, 1.0),
+            node_border: hsla(0.0, 0.0, 0.3, 1.0),
+            node_border_selected: hsla(0.0, 0.0, 0.9, 1.0),
+            node_text: hsla(0.0, 0.0, 0.95, 1.0),
+            panel_background: hsla(0.0, 0.0, 0.12, 1.0),
+            panel_border: hsla(0.0, 0.0, 0.25, 1.0),
+            panel_text: hsla(0.0, 0.0, 0.9, 1.0),
+            panel_hover: hsla(0.0, 0.0, 0.2, 1.0),
+            minimap_background: hsla(0.0, 0.0, 0.1, 1.0),
+            minimap_node: hsla(0.0, 0.0, 0.4, 1.0),
+            minimap_node_selected: hsla(0.0, 0.0, 0.8, 1.0),
+            minimap_mask: hsla(0.0, 0.0, 0.0, 0.5),
+        }
+    }
+
+    pub fn light() -> Self {
+        Self {
+            background: hsla(0.0, 0.0, 1.0, 1.0),
+            pattern: hsla(0.67, 0.04, 0.6, 1.0),
+            edge: hsla(0.0, 0.0, 0.7, 1.0),
+            edge_selected: hsla(0.0, 0.0, 0.2, 1.0),
+            edge_hover: hsla(0.0, 0.0, 0.0, 0.3),
+            connection_line: hsla(0.0, 0.0, 0.3, 1.0),
+            connection_invalid: hsla(0.0, 0.8, 0.5, 1.0),
+            selection_fill: hsla(0.6, 0.6, 0.5, 0.08),
+            selection_stroke: hsla(0.6, 0.6, 0.5, 0.8),
+            nodes_selection_stroke: hsla(0.6, 0.6, 0.5, 0.5),
+            handle: hsla(0.0, 0.0, 0.45, 1.0),
+            handle_border: hsla(0.0, 0.0, 1.0, 1.0),
+            handle_valid: hsla(0.4, 0.7, 0.4, 1.0),
+            handle_invalid: hsla(0.0, 0.8, 0.5, 1.0),
+            node_background: hsla(0.0, 0.0, 1.0, 1.0),
+            node_border: hsla(0.0, 0.0, 0.7, 1.0),
+            node_border_selected: hsla(0.0, 0.0, 0.1, 1.0),
+            node_text: hsla(0.0, 0.0, 0.1, 1.0),
+            panel_background: hsla(0.0, 0.0, 1.0, 1.0),
+            panel_border: hsla(0.0, 0.0, 0.85, 1.0),
+            panel_text: hsla(0.0, 0.0, 0.1, 1.0),
+            panel_hover: hsla(0.0, 0.0, 0.95, 1.0),
+            minimap_background: hsla(0.0, 0.0, 1.0, 1.0),
+            minimap_node: hsla(0.0, 0.0, 0.85, 1.0),
+            minimap_node_selected: hsla(0.0, 0.0, 0.5, 1.0),
+            minimap_mask: hsla(0.0, 0.0, 0.94, 0.6),
+        }
+    }
+}
