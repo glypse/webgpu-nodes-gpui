@@ -7,15 +7,19 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use gpui::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, KeyBinding,
+    App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding,
     ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, Window, actions, div,
 };
+use runtime::{Size, Timing};
 use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
-use theme::{ActiveTheme as _, IconName, Theme};
+use shader_graph::graph::ProjectSettings;
+use theme::{ActiveTheme as _, IconName};
 
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
-use crate::playback::Playback;
+use crate::playback::{Playback, PlaybackEvent};
+use crate::preferences;
+use crate::settings::{SettingsDialog, SettingsEvent};
 use crate::project;
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
@@ -33,6 +37,7 @@ actions!(
         SaveProjectAs,
         Undo,
         Redo,
+        OpenSettings,
     ]
 );
 
@@ -49,6 +54,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-o", OpenProject, Some("Shell")),
         KeyBinding::new("cmd-s", SaveProject, Some("Shell")),
         KeyBinding::new("cmd-shift-s", SaveProjectAs, Some("Shell")),
+        KeyBinding::new("cmd-,", OpenSettings, Some("Shell")),
     ]);
 }
 
@@ -108,6 +114,7 @@ pub struct Shell {
     playback: Entity<Playback>,
     editor: Entity<Editor>,
     path: Option<PathBuf>,
+    settings: Option<Entity<SettingsDialog>>,
 }
 
 impl Shell {
@@ -125,6 +132,7 @@ impl Shell {
             }
         }
 
+        playback.update(cx, |p, cx| apply_settings(p, &editor.read(cx).settings(), window, cx));
         let first = editor.read(cx).shader().clone();
         playback.update(cx, |p, cx| {
             p.set_source(first, window, cx)
@@ -136,10 +144,17 @@ impl Shell {
                     guard::guard("playback update", || match event {
                         EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
                         EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
+                        EditorEvent::Settings(settings) => apply_settings(p, settings, window, cx),
                     })
                 });
                 this.refresh_title(window, cx);
             }
+        })
+        .detach();
+
+        cx.subscribe_in(&playback, window, |this, playback, event: &PlaybackEvent, _, cx| {
+            let PlaybackEvent::Changed = event;
+            guard::guard("playback settings", || this.adopt_playback_settings(playback, cx));
         })
         .detach();
 
@@ -190,9 +205,43 @@ impl Shell {
                 }
             })
         });
-        let shell = Self { screen, playback, editor, path };
+        let shell = Self { screen, playback, editor, path, settings: None };
         shell.refresh_title(window, cx);
         shell
+    }
+
+    /// The preview's size and the timeline's timing are project settings too: edits made there are kept.
+    fn adopt_playback_settings(&mut self, playback: &Entity<Playback>, cx: &mut Context<Self>) {
+        let (resolution, timing) = {
+            let p = playback.read(cx);
+            (p.resolution, p.timing())
+        };
+        let mut settings = self.editor.read(cx).settings();
+        if !settings.canvas.follow_preview {
+            settings.canvas.width = resolution.width;
+            settings.canvas.height = resolution.height;
+        }
+        settings.timing.fps = timing.fps;
+        settings.timing.realtime = timing.realtime;
+        if settings != self.editor.read(cx).settings() {
+            self.editor.update(cx, |e, cx| e.update_settings(settings, cx));
+        }
+    }
+
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings.is_some() {
+            return;
+        }
+        let editor = self.editor.clone();
+        let dialog = cx.new(|cx| SettingsDialog::new(editor, window, cx));
+        cx.subscribe_in(&dialog, window, |this, _, SettingsEvent::Close, window, cx| {
+            this.settings = None;
+            window.focus(&this.editor.read(cx).focus_handle(cx));
+            cx.notify();
+        })
+        .detach();
+        self.settings = Some(dialog);
+        cx.notify();
     }
 
     fn refresh_title(&self, window: &mut Window, cx: &App) {
@@ -345,13 +394,28 @@ impl Shell {
     }
 }
 
+fn apply_settings(
+    playback: &mut Playback,
+    settings: &ProjectSettings,
+    window: &mut Window,
+    cx: &mut Context<Playback>,
+) {
+    if !settings.canvas.follow_preview {
+        playback.set_resolution(Size::new(settings.canvas.width, settings.canvas.height), window, cx);
+    }
+    let timing = Timing { fps: settings.timing.fps, realtime: settings.timing.realtime };
+    if timing != playback.timing() {
+        playback.set_timing(timing, window, cx);
+    }
+}
+
 fn dirs_home() -> Option<PathBuf> {
     dirs::document_dir().or_else(dirs::home_dir)
 }
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        Theme::sync(window, cx);
+        preferences::apply(window, cx);
         let theme = cx.theme();
         div()
             .key_context("Shell")
@@ -384,6 +448,9 @@ impl Render for Shell {
             .on_action(cx.safe_listener(|this, _: &SaveProjectAs, window, cx| {
                 this.save_project_as(window, cx);
             }))
+            .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
+                this.open_settings(window, cx);
+            }))
             .on_action(cx.safe_listener(|this, _: &Undo, window, cx| {
                 this.editor.update(cx, |e, cx| e.undo(cx));
                 this.refresh_title(window, cx);
@@ -393,5 +460,6 @@ impl Render for Shell {
                 this.refresh_title(window, cx);
             }))
             .child(self.screen.clone())
+            .children(self.settings.clone())
     }
 }

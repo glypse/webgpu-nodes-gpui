@@ -570,7 +570,7 @@ impl GraphModel {
 
     // ── Adding and removing ──────────────────────────────────────────────────
 
-    fn doc_mut(&mut self, key: &str) -> Option<&mut GraphDocument> {
+    pub(crate) fn doc_mut(&mut self, key: &str) -> Option<&mut GraphDocument> {
         self.project.definitions.get_mut(key)
     }
 
@@ -661,13 +661,20 @@ impl GraphModel {
         if removed.is_empty() && edges.len() == doc.edges.len() {
             return false;
         }
+        let frame_of = self.active_frames().frame_of;
         let doc = self.doc_mut(&key).expect("checked");
         doc.nodes.retain(|n| !removed.contains(&n.id));
         doc.edges = edges;
         for node in &mut doc.nodes {
-            if node.frame.as_ref().is_some_and(|f| removed.contains(f)) {
-                node.frame = None;
+            // What a deleted frame held stays, in the frame around it.
+            let mut frame = node.frame.clone();
+            while let Some(f) = &frame {
+                if !removed.contains(f) {
+                    break;
+                }
+                frame = frame_of.get(f).cloned();
             }
+            node.frame = frame;
         }
         self.selected.retain(|id| !removed.contains(id));
         self.changed();
@@ -751,8 +758,7 @@ impl GraphModel {
     /// Copy nodes (zone partners with them) and the links among them.
     pub fn copy_nodes(&self, node_ids: &[String]) -> Option<NodeClipboard> {
         let doc = self.active_document();
-        let wanted: HashSet<String> = node_ids.iter().cloned().collect();
-        let ids = self.with_zone_partners(&wanted);
+        let ids = self.with_zone_partners(&self.with_frame_contents(node_ids));
         let nodes: Vec<GraphNode> =
             doc.nodes.iter().filter(|n| ids.contains(&n.id) && n.deletable()).cloned().collect();
         if nodes.is_empty() {

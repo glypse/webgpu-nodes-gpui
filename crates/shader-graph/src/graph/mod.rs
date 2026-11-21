@@ -2,14 +2,19 @@
 //! `GraphModel` editing them.
 
 mod document;
+mod frames;
 mod history;
 mod model;
+mod model_frames;
 mod model_groups;
 mod model_zones;
+mod settings;
 mod validate;
 
 pub use document::*;
+pub use frames::*;
 pub use history::{History, HistoryCounts};
 pub use model::{GraphModel, NodeClipboard, TypeChoice, clone_subgraph};
 pub use model_zones::ZoneNodes;
+pub use settings::*;
 pub use validate::*;

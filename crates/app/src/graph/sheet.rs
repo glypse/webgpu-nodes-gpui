@@ -10,12 +10,16 @@ use gpui::{
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     prelude::FluentBuilder as _, px,
 };
-use shader_graph::graph::{GraphModel, GroupSide};
+use shader_graph::graph::{
+    FrameTint, GraphModel, GroupSide, LAYOUT_FRAME, frame_note, frame_tint, set_frame_note,
+    set_frame_tint,
+};
 use shader_graph::types::{HandleType, WgslType};
 use shader_graph::zones::{is_zone_node_type, paired_output_id};
 use theme::{ActiveTheme as _, InputEvent, TextInput};
 
 use super::fields::picker;
+use super::frames::tint_color;
 use crate::editor::{Editor, ListItem};
 
 #[derive(Default)]
@@ -96,7 +100,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
     let node_id = editor.sheet.clone()?;
     let theme = cx.theme().clone();
     let c = &theme.colors;
-    let (label, reference, is_group, locked, zone_id, interface, variables) = {
+    let (label, reference, is_group, locked, zone_id, interface, variables, frame) = {
         let model = editor.model();
         let node = model.node(&node_id)?;
         let reference = node.definition_ref().map(str::to_owned);
@@ -115,6 +119,9 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             zone,
             doc.map(|d| (d.inputs.clone(), d.outputs.clone())),
             doc.map(|d| d.type_variables.clone()).unwrap_or_default(),
+            node.is(LAYOUT_FRAME).then(|| {
+                (frame_note(&node.data).unwrap_or_default().to_owned(), frame_tint(&node.data))
+            }),
         )
     };
 
@@ -138,6 +145,47 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
     body = body
         .child(div().text_size(theme.text.xs).text_color(c.muted_foreground).child("Name"))
         .child(div().px_1().border_1().border_color(c.input).rounded(theme.radius.md).child(name));
+
+    if let Some((note, tint)) = frame {
+        let commit: Commit = {
+            let id = node_id.clone();
+            Rc::new(move |this, text, cx| {
+                let id = id.clone();
+                let note = text.trim_end().to_owned();
+                this.edit_model(cx, move |m: &mut GraphModel| {
+                    m.update_node_data(&id, |d| set_frame_note(d, Some(&note)));
+                });
+            })
+        };
+        let input = field(editor, format!("note-{node_id}"), &note, window, cx, commit);
+        body = body
+            .child(div().text_size(theme.text.sm).font_weight(gpui::FontWeight::MEDIUM).child("Note"))
+            .child(div().px_1().border_1().border_color(c.input).rounded(theme.radius.md).child(input))
+            .child(div().text_size(theme.text.sm).font_weight(gpui::FontWeight::MEDIUM).child("Colour"))
+            .child(div().flex().flex_wrap().gap_1p5().children(
+                std::iter::once(None).chain(FrameTint::ALL.into_iter().map(Some)).map(|option| {
+                    let id = node_id.clone();
+                    let name = option.map_or_else(|| "None".to_owned(), FrameTint::label);
+                    div()
+                        .id(SharedString::from(format!("tint-{name}")))
+                        .size(px(28.0))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(c.border)
+                        .bg(tint_color(option, &theme).opacity(0.6))
+                        .when(tint == option, |d| d.border_2().border_color(c.primary))
+                        .when(!locked, |d| d.cursor_pointer())
+                        .tooltip(theme::Tooltip::text(name))
+                        .on_click(cx.safe_listener(move |this, _, _, cx| {
+                            if locked {
+                                return;
+                            }
+                            let id = id.clone();
+                            this.edit_model(cx, move |m| m.update_node_data(&id, |d| set_frame_tint(d, option)));
+                        }))
+                }),
+            ));
+    }
 
     if let (Some(reference), Some((inputs, outputs))) = (reference.clone(), interface) {
         for (side, title, handles) in [(GroupSide::Input, "Inputs", inputs), (GroupSide::Output, "Outputs", outputs)] {

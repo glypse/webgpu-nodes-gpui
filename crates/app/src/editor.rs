@@ -1,7 +1,8 @@
 use guard::SafeListener as _;
 use std::cell::{Ref, RefCell, RefMut};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
@@ -19,7 +20,8 @@ use shader_graph::catalog::{
 };
 use shader_graph::codegen::Program;
 use shader_graph::graph::{
-    Connection, FRAG_OUTPUT, GraphModel, GraphProject, NodeClipboard, Point as GraphPoint,
+    Connection, FRAG_OUTPUT, GraphModel, GraphProject, LAYOUT_FRAME, NodeClipboard,
+    Point as GraphPoint, ProjectSettings, frame_note, frame_tint,
 };
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
@@ -27,6 +29,7 @@ use theme::{ActiveTheme as _, Menu, MenuItem};
 
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
+use crate::graph::frames::{self, Drag, FrameLook, SharedDrag, Snapshot, SnapshotItem, ZoneBox};
 use crate::graph::node::{node_width, render_node, view_of};
 use crate::graph::sheet;
 use crate::graph::socket::socket_color;
@@ -40,6 +43,8 @@ pub enum EditorEvent {
     Shader(Result<Program, String>),
     /// Only values the program reads from uniforms changed.
     Uniforms(Vec<(String, UniformValue)>),
+    /// The project's settings changed, by an edit, a load, undo or redo.
+    Settings(ProjectSettings),
 }
 
 /// An entry of a small list popup: an enum's variants, a type to pick.
@@ -81,6 +86,12 @@ pub struct Editor {
     clipboard: Option<NodeClipboard>,
     pub(crate) sheet: Option<String>,
     pub(crate) sheet_fields: sheet::Fields,
+    frame_snapshot: Rc<Snapshot>,
+    frame_drag: SharedDrag,
+    /// Where nodes were last put in the flow, frame headers included.
+    placed: HashMap<String, GraphPoint>,
+    frame_settle: Option<gpui::Task<()>>,
+    settings: ProjectSettings,
 }
 
 impl EventEmitter<EditorEvent> for Editor {}
@@ -148,6 +159,11 @@ impl Editor {
             clipboard: None,
             sheet: None,
             sheet_fields: sheet::Fields::default(),
+            frame_snapshot: Rc::default(),
+            frame_drag: SharedDrag::default(),
+            placed: HashMap::new(),
+            frame_settle: None,
+            settings: ProjectSettings::default(),
         };
         editor.sync(cx);
         editor.regenerate(cx);
@@ -175,12 +191,23 @@ impl Editor {
         self.add_menu = None;
         self.sheet = None;
         self.code.clear();
+        *self.frame_drag.borrow_mut() = None;
         self.after_edit(cx);
         self.flow.update(cx, |flow, cx| flow.fit_view(Default::default(), cx));
     }
 
     pub fn project(&self) -> GraphProject {
         self.model.borrow().project().clone()
+    }
+
+    pub fn settings(&self) -> ProjectSettings {
+        self.model.borrow().settings()
+    }
+
+    pub fn update_settings(&mut self, settings: ProjectSettings, cx: &mut Context<Self>) {
+        if self.model_mut().update_settings(settings) {
+            self.sync(cx);
+        }
     }
 
     pub fn has_unsaved_changes(&self) -> bool {
@@ -255,10 +282,48 @@ impl Editor {
                 padding: paddings.iter().find(|(id, _)| *id == z.id).map_or(28.0, |p| p.1),
             })
             .collect();
+        let snapshot = Rc::new(Snapshot {
+            items: doc
+                .nodes
+                .iter()
+                .map(|n| SnapshotItem {
+                    id: n.id.clone(),
+                    is_frame: n.is(LAYOUT_FRAME),
+                    frame: n.frame.clone(),
+                })
+                .collect(),
+            analysis: model.frame_analysis(doc),
+            zones: ordered
+                .iter()
+                .map(|z| ZoneBox {
+                    input: z.input_id.clone(),
+                    output: z.output_id.clone(),
+                    members: z.members.iter().cloned().collect(),
+                    padding: paddings.iter().find(|(id, _)| *id == z.id).map_or(28.0, |p| p.1),
+                })
+                .collect(),
+            looks: doc
+                .nodes
+                .iter()
+                .filter(|n| n.is(LAYOUT_FRAME))
+                .map(|n| {
+                    let look = FrameLook {
+                        tint: frame_tint(&n.data),
+                        label: model.node_label(&n.id),
+                        note: frame_note(&n.data).map(str::to_owned),
+                    };
+                    (n.id.clone(), look)
+                })
+                .collect(),
+        });
         drop(model);
+        self.frame_snapshot = snapshot.clone();
 
         let layers = Layers {
-            back: vec![zones::layer(flow_entity, bubbles)],
+            back: vec![
+                frames::layer(flow_entity.clone(), snapshot, self.frame_drag.clone()),
+                zones::layer(flow_entity, bubbles),
+            ],
             front: Vec::new(),
             portals: Vec::new(),
         };
@@ -267,7 +332,150 @@ impl Editor {
             flow.set_edges(edges, cx);
             flow.set_layers(layers, cx);
         });
+        self.place_frames(cx);
+        self.settle_frames(cx);
+        let settings = self.model.borrow().settings();
+        if settings != self.settings {
+            self.settings = settings;
+            cx.emit(EditorEvent::Settings(settings));
+        }
         cx.notify();
+    }
+
+    /// Puts each frame's header at the top-left of its box.
+    fn place_frames(&mut self, cx: &mut Context<Self>) {
+        if self.frame_snapshot.is_empty() {
+            self.placed.clear();
+            return;
+        }
+        let loose = self.frame_drag.borrow().as_ref().map(|d| d.loose.clone()).unwrap_or_default();
+        let flow = self.flow.read(cx);
+        let (boxes, _) = frames::boxes(&self.frame_snapshot, flow, &loose);
+        let mut nodes = flow.nodes().to_vec();
+        let mut moved = false;
+        for node in &mut nodes {
+            if let Some(b) = boxes.get(node.id.as_ref())
+                && ((node.position.x - b.x).abs() > 0.01 || (node.position.y - b.y).abs() > 0.01)
+            {
+                node.position = Xy::new(b.x, b.y);
+                moved = true;
+            }
+        }
+        if moved {
+            self.flow.update(cx, |f, cx| f.set_nodes(nodes, cx));
+        }
+        if self.frame_drag.borrow().is_none() {
+            self.placed = self.flow_positions(cx);
+        }
+    }
+
+    /// Frame boxes depend on measured node sizes, which only exist after the
+    /// flow has painted: place the headers again once they do.
+    fn settle_frames(&mut self, cx: &mut Context<Self>) {
+        if self.frame_snapshot.is_empty() {
+            self.frame_settle = None;
+            return;
+        }
+        self.frame_settle = Some(cx.spawn(async move |this, cx| {
+            for ms in [40, 150, 500] {
+                cx.background_executor().timer(Duration::from_millis(ms)).await;
+                this.update(cx, |editor, cx| {
+                    guard::guard("place frames", || editor.place_frames(cx));
+                })
+                .ok();
+            }
+        }));
+    }
+
+    fn flow_positions(&self, cx: &App) -> HashMap<String, GraphPoint> {
+        self.flow
+            .read(cx)
+            .nodes()
+            .iter()
+            .map(|n| (n.id.to_string(), graph_point(n.position)))
+            .collect()
+    }
+
+    fn start_frame_drag(&mut self, dragged: &[Id], cx: &mut Context<Self>) {
+        if self.frame_snapshot.is_empty() {
+            return;
+        }
+        let dragged: Vec<String> = dragged.iter().map(ToString::to_string).collect();
+        let positions = self.flow_positions(cx);
+        *self.frame_drag.borrow_mut() =
+            Some(Drag::start(&self.frame_snapshot.analysis, &positions, &dragged));
+    }
+
+    /// Frames drag what they hold along, and show which frame a drop would join.
+    fn frame_drag_moved(&mut self, anchor: &Id, cx: &mut Context<Self>) {
+        let (delta, inside, loose, moving) = {
+            let drag = self.frame_drag.borrow();
+            let Some(drag) = drag.as_ref() else { return };
+            let flow = self.flow.read(cx);
+            let (Some(from), Some(now)) =
+                (drag.from.get(anchor.as_ref()), flow.nodes().iter().find(|n| n.id == *anchor))
+            else {
+                return;
+            };
+            (
+                Xy::new(now.position.x - from.x, now.position.y - from.y),
+                drag.inside.clone(),
+                drag.loose.clone(),
+                drag.moving.clone(),
+            )
+        };
+        if !inside.is_empty() {
+            let mut nodes = self.flow.read(cx).nodes().to_vec();
+            for node in &mut nodes {
+                if let Some(p) = inside.get(node.id.as_ref()) {
+                    node.position = Xy::new(p.x + delta.x, p.y + delta.y);
+                }
+            }
+            self.flow.update(cx, |f, cx| f.set_nodes(nodes, cx));
+        }
+        let target = {
+            let flow = self.flow.read(cx);
+            let (boxes, analysis) = frames::boxes(&self.frame_snapshot, flow, &loose);
+            let rects = frames::node_rects(flow);
+            boxes.get(anchor.as_ref()).or_else(|| rects.get(anchor.as_ref())).and_then(|rect| {
+                let c = rect.center();
+                frames::frame_at(&boxes, &analysis, c, &moving)
+            })
+        };
+        if let Some(drag) = self.frame_drag.borrow_mut().as_mut() {
+            drag.drop_frame = target;
+        }
+        self.place_frames(cx);
+    }
+
+    /// Commits a drag: positions, frames dragged along, and the frames the
+    /// nodes were dropped in, as one edit.
+    fn finish_drag(&mut self, anchor: &Id, dragged: &[Id], cx: &mut Context<Self>) {
+        let dragged: Vec<String> = dragged.iter().map(ToString::to_string).collect();
+        let now = self.flow_positions(cx);
+        let analysis = self.model.borrow().active_frames();
+        let drag = self
+            .frame_drag
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| Drag::start(&analysis, &self.placed, &dragged));
+        let delta = match (drag.from.get(anchor.as_ref()), now.get(anchor.as_ref())) {
+            (Some(from), Some(now)) => GraphPoint::new(now.x - from.x, now.y - from.y),
+            _ => GraphPoint::default(),
+        };
+        let mut positions: BTreeMap<String, GraphPoint> =
+            dragged.iter().filter_map(|id| Some((id.clone(), *now.get(id)?))).collect();
+        for (id, p) in &drag.inside {
+            positions.insert(id.clone(), GraphPoint::new(p.x + delta.x, p.y + delta.y));
+        }
+        let targets = {
+            let flow = self.flow.read(cx);
+            let (boxes, _) = frames::boxes(&self.frame_snapshot, flow, &drag.loose);
+            frames::drop_targets(&analysis, &boxes, &frames::node_rects(flow), &dragged, &drag.moving)
+        };
+        self.model_mut().drop_nodes(&positions, &targets);
+        self.sync(cx);
+        self.regenerate(cx);
     }
 
     fn regenerate(&mut self, cx: &mut Context<Self>) {
@@ -454,6 +662,7 @@ impl Editor {
                 cx.notify();
             }
             FlowEvent::GrabCancel { .. } => {
+                *self.frame_drag.borrow_mut() = None;
                 if let Some((copies, originals)) = self.duplicating.take() {
                     self.edit(cx, |m| {
                         m.delete_nodes(&copies, &[]);
@@ -463,23 +672,11 @@ impl Editor {
                     self.sync(cx);
                 }
             }
-            FlowEvent::NodeDragStop { nodes, .. } => {
+            FlowEvent::NodeDragStart { nodes, .. } => self.start_frame_drag(&nodes, cx),
+            FlowEvent::NodeDrag { id, .. } => self.frame_drag_moved(&id, cx),
+            FlowEvent::NodeDragStop { id, nodes } => {
                 self.duplicating = None;
-                let moved: std::collections::BTreeMap<String, GraphPoint> = self
-                    .flow
-                    .read(cx)
-                    .nodes()
-                    .iter()
-                    .filter(|n| nodes.contains(&n.id))
-                    .map(|n| (n.id.to_string(), graph_point(n.position)))
-                    .collect();
-                {
-                    let mut model = self.model_mut();
-                    for (id, p) in &moved {
-                        model.set_node_position(id, *p);
-                    }
-                }
-                self.sync(cx);
+                self.finish_drag(&id, &nodes, cx);
             }
             FlowEvent::Connect(c) => {
                 self.model_mut().try_connect(to_model(&c));
@@ -670,6 +867,8 @@ impl Editor {
             push("Duplicate", Editor::duplicate);
             push("Copy", Editor::copy);
             push("Delete", Editor::delete_selection);
+            push("Frame selected", Editor::frame_selection);
+            push("Remove from frame", Editor::remove_from_frame);
             push("Group", Editor::group_selection);
             push("Ungroup", Editor::ungroup_selection);
         }
@@ -733,6 +932,22 @@ impl Editor {
         }
     }
 
+    fn frame_selection(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected();
+        let id = self.model_mut().frame_nodes(&selected);
+        self.after_edit(cx);
+        if let Some(id) = id {
+            self.select(vec![id], cx);
+        }
+    }
+
+    fn remove_from_frame(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected();
+        self.edit(cx, |m| {
+            m.remove_from_frame(&selected);
+        });
+    }
+
     fn group_selection(&mut self, cx: &mut Context<Self>) {
         let selected = self.selected();
         let id = self.model_mut().group_selection(&selected);
@@ -786,6 +1001,8 @@ impl Editor {
                 self.open_add_menu(at, None, None, cx);
             }
             "d" if m.shift && !cmd && !locked => self.duplicate(cx),
+            "j" if cmd && !m.alt && !m.shift && !locked => self.frame_selection(cx),
+            "p" if m.alt && !cmd && !m.shift && !locked => self.remove_from_frame(cx),
             "g" if !cmd && !m.alt && !m.shift && !locked => self.grab(cx),
             "backspace" | "delete" if !locked => {
                 if cmd {
@@ -948,3 +1165,83 @@ impl Editor {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    struct Scene {
+        editor: Entity<Editor>,
+        frame: String,
+        member: String,
+        loose: String,
+    }
+
+    fn scene(cx: &mut TestAppContext) -> (Scene, &mut gpui::VisualTestContext) {
+        cx.update(theme::init);
+        let (editor, cx) = cx.add_window_view(Editor::new);
+        let (frame, member, loose) = editor.update(cx, |e, cx| {
+            let (member, loose, frame) = {
+                let mut model = e.model_mut();
+                let member = model.add_node("sin", GraphPoint::new(100.0, 100.0)).expect("adds");
+                let loose = model.add_node("sin", GraphPoint::new(2000.0, 2000.0)).expect("adds");
+                let frame = model.frame_nodes(std::slice::from_ref(&member)).expect("frames");
+                (member, loose, frame)
+            };
+            e.after_edit(cx);
+            (frame, member, loose)
+        });
+        cx.run_until_parked();
+        (Scene { editor, frame, member, loose }, cx)
+    }
+
+    /// Moves a node in the flow as the pointer would, then drops it.
+    fn drag(scene: &Scene, cx: &mut gpui::VisualTestContext, id: &str, to: Xy) {
+        scene.editor.update(cx, |e, cx| {
+            let id = Id::from(id.to_owned());
+            e.start_frame_drag(std::slice::from_ref(&id), cx);
+            let mut nodes = e.flow.read(cx).nodes().to_vec();
+            for node in nodes.iter_mut().filter(|n| n.id == id) {
+                node.position = to;
+            }
+            e.flow.update(cx, |f, cx| f.set_nodes(nodes, cx));
+            e.frame_drag_moved(&id, cx);
+            e.finish_drag(&id, std::slice::from_ref(&id), cx);
+        });
+    }
+
+    fn node(scene: &Scene, cx: &gpui::VisualTestContext, id: &str) -> shader_graph::graph::GraphNode {
+        scene.editor.read_with(cx, |e, _| e.model().node(id).cloned().expect("node"))
+    }
+
+    #[gpui::test]
+    fn dragging_a_frame_takes_what_it_holds_along(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let header = scene.editor.read_with(cx, |e, cx| e.flow_positions(cx)[&scene.frame]);
+        drag(&scene, cx, &scene.frame, Xy::new(header.x + 50.0, header.y + 30.0));
+        let member = node(&scene, cx, &scene.member);
+        assert_eq!((member.position.x, member.position.y), (150.0, 130.0));
+        assert_eq!(member.frame.as_deref(), Some(scene.frame.as_str()));
+    }
+
+    #[gpui::test]
+    fn dropping_a_node_on_a_frame_joins_it_and_dragging_it_out_leaves(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        drag(&scene, cx, &scene.loose, Xy::new(110.0, 110.0));
+        assert_eq!(node(&scene, cx, &scene.loose).frame.as_deref(), Some(scene.frame.as_str()));
+        drag(&scene, cx, &scene.loose, Xy::new(3000.0, 3000.0));
+        assert_eq!(node(&scene, cx, &scene.loose).frame, None);
+    }
+
+    #[gpui::test]
+    fn a_drag_is_one_undo_step(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let header = scene.editor.read_with(cx, |e, cx| e.flow_positions(cx)[&scene.frame]);
+        drag(&scene, cx, &scene.frame, Xy::new(header.x + 50.0, header.y));
+        scene.editor.update(cx, |e, cx| e.undo(cx));
+        let member = node(&scene, cx, &scene.member);
+        assert_eq!((member.position.x, member.position.y), (100.0, 100.0));
+    }
+}

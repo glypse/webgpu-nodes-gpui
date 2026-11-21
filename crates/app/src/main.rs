@@ -2,8 +2,10 @@ mod code_view;
 mod editor;
 mod graph;
 mod playback;
+mod preferences;
 mod preview;
 mod project;
+mod settings;
 mod shell;
 mod timeline;
 
@@ -12,13 +14,20 @@ use gpui::{
     WindowBounds, WindowOptions, actions, px, size,
 };
 
-use shell::{NewProject, OpenProject, Redo, SaveProject, SaveProjectAs, Shell, Undo};
+use shell::{NewProject, OpenProject, OpenSettings, Redo, SaveProject, SaveProjectAs, Shell, Undo};
 
 actions!(app, [Quit]);
 
 fn menus() -> Vec<Menu> {
     vec![
-        Menu { name: "webgpu-nodes".into(), items: vec![MenuItem::action("Quit", Quit)] },
+        Menu {
+            name: "webgpu-nodes".into(),
+            items: vec![
+                MenuItem::action("Settings...", OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit", Quit),
+            ],
+        },
         Menu {
             name: "File".into(),
             items: vec![
@@ -41,6 +50,7 @@ fn main() {
     guard::install_panic_hook();
     Application::new().with_assets(theme::Assets).run(|cx| {
         theme::init(cx);
+        preferences::init(cx);
         shell::init(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());

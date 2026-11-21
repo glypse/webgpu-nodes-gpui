@@ -6,7 +6,10 @@ use gpui::{
     SharedString, Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_flow::{HandleType, NodeProps, Position};
-use shader_graph::graph::{GraphModel, GraphNode, GroupSide, NODE_GROUP, REROUTE, TypeChoice};
+use shader_graph::graph::{
+    GraphModel, GraphNode, GroupSide, LAYOUT_FRAME, NODE_GROUP, REROUTE, TypeChoice, frame_note,
+    frame_tint,
+};
 use shader_graph::nodes::CUSTOM_WGSL;
 use shader_graph::types::{
     InputControl, InputValue, ScalarKind, WgslType, enum_value,
@@ -16,6 +19,7 @@ use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
 use theme::ActiveTheme as _;
 
 use super::fields::{Edit, Scrub, check, picker};
+use super::frames::{self, FrameView};
 use super::socket::{SocketSpec, socket};
 use crate::editor::{Editor, ListItem};
 
@@ -67,6 +71,7 @@ pub struct NodeView {
     pub boundary: Option<GroupSide>,
     pub zone: bool,
     pub reroute_type: Option<WgslType>,
+    pub frame: Option<FrameView>,
 }
 
 pub fn node_width(node_type: &str) -> f32 {
@@ -153,6 +158,11 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         boundary: node.side(),
         zone: is_zone_node_type(&node.node_type),
         reroute_type: node.is(REROUTE).then(|| model.resolve_input_type(id, "in")),
+        frame: node.is(LAYOUT_FRAME).then(|| FrameView {
+            label: model.node_label(id),
+            note: frame_note(&node.data).map(str::to_owned),
+            tint: frame_tint(&node.data),
+        }),
     }
 }
 
@@ -348,6 +358,9 @@ pub fn render_node(
 ) -> AnyElement {
     if view.node_type == REROUTE {
         return reroute(props, view, cx);
+    }
+    if let Some(frame) = &view.frame {
+        return frames::header(frame, props, ed, cx);
     }
     let z = props.zoom;
     let theme = cx.theme().clone();

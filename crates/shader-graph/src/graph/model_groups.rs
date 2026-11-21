@@ -158,7 +158,9 @@ impl GraphModel {
             return None;
         }
         let zones = self.active_zones();
-        let mut expanded: HashSet<String> = selected.iter().cloned().collect();
+        let frames = self.active_frames();
+        // A frame is grouped with what it holds.
+        let mut expanded = self.with_frame_contents(selected);
         for id in selected {
             if let Some(zone) = zones.zone_of(id) {
                 expanded.insert(zone.input_id.clone());
@@ -255,7 +257,12 @@ impl GraphModel {
             outputs.push(handle);
         }
         let mut definition_nodes: Vec<GraphNode> = nodes.clone();
-        definition_nodes.iter_mut().for_each(|n| n.frame = None);
+        // Frames left outside don't come along.
+        for node in &mut definition_nodes {
+            if node.frame.as_ref().is_some_and(|f| !ids.contains(f)) {
+                node.frame = None;
+            }
+        }
         definition_nodes.extend([input_node, output_node]);
         let definition = GraphDocument {
             nodes: definition_nodes,
@@ -269,6 +276,7 @@ impl GraphModel {
         let mut group_node = GraphNode::new(NODE_GROUP, center);
         group_node.id = group_id.clone();
         group_node.group = Some(GroupRef { definition_ref: reference.clone(), locked: false });
+        group_node.frame = frames.common_frame(ids.iter().map(String::as_str));
         let touched: HashSet<&str> =
             internal.iter().chain(&incoming).chain(&outgoing).map(|e| e.id.as_str()).collect();
         let key = self.active_definition_ref();
@@ -317,7 +325,13 @@ impl GraphModel {
             )
         };
         let offset = Point::new(group_node.position.x - center.x, group_node.position.y - center.y);
-        let (nodes, edges, id_map) = clone_subgraph(&inner_nodes, &def.edges, offset);
+        let (mut nodes, edges, id_map) = clone_subgraph(&inner_nodes, &def.edges, offset);
+        // What was in no frame of the group goes in the group node's.
+        if let Some(frame) = &group_node.frame {
+            for node in nodes.iter_mut().filter(|n| n.frame.is_none()) {
+                node.frame = Some(frame.clone());
+            }
+        }
         let remap = |id: &str| id_map.get(id).cloned().unwrap_or_else(|| id.to_owned());
         let key = self.active_definition_ref();
         let Some(doc) = self.project.document(&key) else { return Vec::new() };
