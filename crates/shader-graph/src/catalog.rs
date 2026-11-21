@@ -220,9 +220,15 @@ fn group_choices(definition: &crate::graph::GraphDocument) -> Vec<Vec<EntryOptio
     choice_options(choices)
 }
 
-/// Every entry of the add menu in menu order: registered nodes by category,
-/// then the groups of the project.
+/// Every entry of the add menu in menu order, without developer-tool nodes.
 pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
+    add_menu_entries_with(model, false)
+}
+
+/// Every entry of the add menu in menu order: registered nodes by category,
+/// then the groups of the project. Developer-tool nodes are listed only with
+/// `developer_tools`.
+pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<AddMenuEntry> {
     let mut entries = Vec::new();
     let zone = |key: &str, label: &str, aliases: &[&str], kind| AddMenuEntry {
         key: key.to_owned(),
@@ -256,7 +262,7 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
         ZoneKind::Passes,
     ));
     for descriptor in registered_nodes() {
-        if descriptor.hidden {
+        if descriptor.hidden || (descriptor.dev && !developer_tools) {
             continue;
         }
         entries.push(AddMenuEntry {
@@ -945,5 +951,22 @@ mod tests {
         let pending = Pending { node: output, handle: input, from_output: false };
         let offered = connectable_entries(&model, &entries(), &pending);
         assert!(!offered.is_empty() && offered.len() < entries().len());
+    }
+
+    #[test]
+    fn developer_tool_nodes_are_listed_only_with_developer_tools() {
+        let model = GraphModel::default();
+        let keys = |dev: bool| -> Vec<String> {
+            add_menu_entries_with(&model, dev).into_iter().map(|e| e.key).collect()
+        };
+        let dev_keys = ["node:test-invalid-wgsl", "node:test-runtime-error"];
+        let off = keys(false);
+        let on = keys(true);
+        for key in dev_keys {
+            assert!(!off.iter().any(|k| k == key), "{key} is hidden by default");
+            assert!(on.iter().any(|k| k == key), "{key} is listed with developer tools");
+        }
+        assert!(off.iter().any(|k| k == "node:add"));
+        assert_eq!(keys(false), add_menu_entries(&model).into_iter().map(|e| e.key).collect::<Vec<_>>());
     }
 }

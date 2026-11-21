@@ -451,6 +451,8 @@ pub struct NodeDescriptor {
     pub category: NodeCategory,
     /// Left out of the add menu.
     pub hidden: bool,
+    /// Listed in the add menu only while developer tools are on.
+    pub dev: bool,
     pub inputs: Vec<NodeInputDef>,
     pub outputs: Vec<NodeOutputDef>,
     pub default_data: NodeData,
@@ -483,6 +485,7 @@ impl NodeDescriptor {
             aliases: Vec::new(),
             category,
             hidden: false,
+            dev: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
             default_data: NodeData::default(),
@@ -555,6 +558,11 @@ impl NodeDescriptor {
 
     pub fn hidden(mut self) -> Self {
         self.hidden = true;
+        self
+    }
+
+    pub fn dev(mut self) -> Self {
+        self.dev = true;
         self
     }
 

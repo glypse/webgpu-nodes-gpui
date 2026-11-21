@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use gpui::{App, Global, Window};
+use gpui::{App, Global, Window, actions};
 use serde::{Deserialize, Serialize};
 use theme::{Appearance, Theme};
 
@@ -23,7 +23,11 @@ pub struct Preferences {
     pub theme: ThemePreference,
     /// A font-family list for the interface; empty for the default.
     pub font: String,
+    /// Unset, developer tools start on in debug builds only.
+    pub developer_tools: Option<bool>,
 }
+
+actions!(preferences, [ToggleDeveloperTools]);
 
 impl Global for Preferences {}
 
@@ -39,6 +43,10 @@ fn file() -> Option<PathBuf> {
 }
 
 impl Preferences {
+    pub fn developer_tools_enabled(&self) -> bool {
+        self.developer_tools.unwrap_or(cfg!(debug_assertions))
+    }
+
     /// What was saved, or the defaults when there is nothing readable.
     pub fn load() -> Self {
         let Some(file) = file() else { return Self::default() };
@@ -88,6 +96,28 @@ impl Preferences {
 
 pub fn init(cx: &mut App) {
     cx.set_global(Preferences::load());
+    cx.on_action(|_: &ToggleDeveloperTools, cx| {
+        guard::guard("developer tools", || toggle_developer_tools(cx));
+    });
+}
+
+/// Turns developer tools on or off, saving the choice and redrawing the windows
+/// so the add menu lists or drops the developer nodes.
+pub fn toggle_developer_tools(cx: &mut App) {
+    let mut preferences = cx.global::<Preferences>().clone();
+    preferences.developer_tools = Some(!preferences.developer_tools_enabled());
+    preferences.save();
+    cx.set_global(preferences);
+    cx.refresh_windows();
+}
+
+/// Logs a shader's generated code while developer tools are on. Callers pass
+/// only code that changed since their last call.
+#[expect(dead_code, reason = "the editor calls this when the generated shader changes")]
+pub fn log_generated_code(cx: &App, code: &str) {
+    if cx.global::<Preferences>().developer_tools_enabled() {
+        log::info!("[shader debug] compiled passes:\n{code}");
+    }
 }
 
 /// Makes the theme follow the preferences (and the system's appearance for "system"),
@@ -143,7 +173,7 @@ mod tests {
 
     #[test]
     fn preferences_round_trip_and_tolerate_missing_fields() {
-        let p = Preferences { theme: ThemePreference::Dark, font: "Inter".into() };
+        let p = Preferences { theme: ThemePreference::Dark, font: "Inter".into(), developer_tools: None };
         let json = serde_json::to_string(&p).expect("serialises");
         assert_eq!(serde_json::from_str::<Preferences>(&json).expect("reads"), p);
         assert_eq!(serde_json::from_str::<Preferences>("{}").expect("reads"), Preferences::default());
@@ -151,5 +181,22 @@ mod tests {
             serde_json::from_str::<Preferences>(r#"{"theme":"light"}"#).expect("reads").theme,
             ThemePreference::Light
         );
+    }
+
+    #[test]
+    fn developer_tools_follow_the_saved_choice_then_the_build() {
+        assert_eq!(Preferences::default().developer_tools_enabled(), cfg!(debug_assertions));
+        let on = Preferences { developer_tools: Some(true), ..Preferences::default() };
+        let off = Preferences { developer_tools: Some(false), ..Preferences::default() };
+        assert!(on.developer_tools_enabled());
+        assert!(!off.developer_tools_enabled());
+    }
+
+    #[test]
+    fn the_developer_tools_choice_round_trips() {
+        let p = Preferences { developer_tools: Some(false), ..Preferences::default() };
+        let json = serde_json::to_string(&p).expect("serialises");
+        assert_eq!(serde_json::from_str::<Preferences>(&json).expect("reads"), p);
+        assert_eq!(serde_json::from_str::<Preferences>("{}").expect("reads").developer_tools, None);
     }
 }

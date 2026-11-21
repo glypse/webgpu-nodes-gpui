@@ -26,7 +26,7 @@ fn every_node_generates_valid_wgsl_for_every_input_type() {
     let mut failures = Vec::new();
     let mut cases = 0;
     for descriptor in registered_nodes() {
-        if descriptor.type_id == "frag-output" {
+        if descriptor.type_id == "frag-output" || descriptor.dev {
             continue;
         }
         let source_types: Vec<Option<WgslType>> = if descriptor.inputs.is_empty() {

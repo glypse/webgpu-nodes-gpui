@@ -46,7 +46,7 @@ fn unlinked_values_are_uniforms_or_literals() {
 #[test]
 fn every_registered_node_generates_valid_wgsl() {
     for descriptor in registered_nodes() {
-        if descriptor.category == NodeCategory::Layout || descriptor.type_id == "frag-output" {
+        if descriptor.category == NodeCategory::Layout || descriptor.type_id == "frag-output" || descriptor.dev {
             continue;
         }
         let types: Vec<Option<WgslType>> = match descriptor.pickable_types() {

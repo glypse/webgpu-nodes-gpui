@@ -5,6 +5,7 @@ mod color_ramp;
 pub mod cpu;
 mod curve;
 mod custom;
+mod dev;
 mod dynamic;
 mod media;
 mod render_texture;
@@ -77,6 +78,7 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     let after_reroute = misc.iter().position(|d| d.type_id == "reroute").map_or(0, |i| i + 1);
     misc.insert(after_reroute, build_custom_wgsl_descriptor(&NodeData::default()));
     all.extend(misc);
+    all.extend(dev::dev_nodes());
     let ordered: Vec<_> = all
         .into_iter()
         .map(|mut d| {
