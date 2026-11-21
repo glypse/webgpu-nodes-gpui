@@ -32,7 +32,10 @@ Loops of repeated waits are the most common way agents waste a session. Follow t
 
 ## Version control
 - GitButler: `but status`, then `but commit -b dev -m "<message>" <paths>` listing only your files. Never run git write commands, never push.
-- Focused commits; messages describe the change in one plain sentence (plus a short body if useful) and end with `Co-Authored-By: Claude <model and version> <noreply@anthropic.com>`.
+- Focused commits; messages describe the change in one plain sentence (plus a short body if useful).
+
+## Finishing
+Delete your target dir (`target/agents/<your-name>`) once your work is committed: they take several GB each.
 
 ## Report
 At the end, briefly: what changed and how it was verified, what's left (and why), API changes other crates must know, edits outside your files. Send the final report exactly once; once it's delivered, stop, even if you're woken up again.

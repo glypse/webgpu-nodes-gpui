@@ -32,7 +32,7 @@ Exit status is 0 on a clean quit, 1 if `--screenshot` could not be written.
 ## Profile
 
 ```sh
-$BIN crates/app/scenes/voronoi.json --play --seconds 10 --profile target/agents/probe/v.json
+$BIN crates/app/scenes/voronoi.wgnodes --play --seconds 10 --profile target/agents/probe/v.json
 ```
 
 This writes a Chrome trace to `v.json` (open it in <https://ui.perfetto.dev>) and prints a summary when the app quits. The trace is written by the app's quit hook, so it is complete even though gpui exits the process itself.
@@ -59,7 +59,7 @@ For where CPU time goes inside functions, use a sampling profiler. `samply` is n
 
 ```sh
 samply record --save-only -o target/agents/probe/cpu.json.gz -- \
-  $BIN crates/app/scenes/voronoi.json --play --seconds 10
+  $BIN crates/app/scenes/voronoi.wgnodes --play --seconds 10
 samply load target/agents/probe/cpu.json.gz
 ```
 
@@ -70,13 +70,7 @@ This section has not been run; check `samply record --help` if the flags differ.
 `crates/app/scenes/` holds the benchmark projects:
 
 - `default.json`: the original app's default scene, copied unchanged.
-- `voronoi.json`: UV, aspect correction, the fractal Voronoi from `std-fractal-voronoi` driven by a vec3 whose z is time / 2, remapped, and shown through OKLCh to linear RGB. Its GPU cost is high relative to the default scene.
-
-`voronoi.json` is built by `write_voronoi_scene` in `crates/app/src/scenes.rs`. Rebuild it with:
-
-```sh
-cargo test -p webgpu-nodes -- --ignored write_voronoi_scene
-```
+- `voronoi.wgnodes`: a fractal Voronoi scene saved from the editor (UV, aspect, a vec3 whose z is time / 2, Fractal Voronoi, Remap, OKLCh), far heavier on the GPU than the default scene.
 
 `cargo test -p webgpu-nodes scenes` checks that both scenes load and generate WGSL that naga validates.
 
@@ -85,6 +79,5 @@ cargo test -p webgpu-nodes -- --ignored write_voronoi_scene
 | scene | frames | fps | frame p50 / p95 / max (ms) | GPU mean / p95 (ms) | playback tick mean (ms) | submit mean (ms) |
 |---|---|---|---|---|---|---|
 | default.json | 621 | 59.5 | 16.67 / 16.74 / 114 | 0.27 / 0.29 | 0.89 | 0.73 |
-| voronoi.json | 620 | 59.4 | 16.66 / 16.73 / 104 | 10.1 / 13.7 | 0.68 | 0.57 |
 
-Both scenes hold the display's refresh rate, so the frame rate cannot show a regression. Use the GPU column and the per-frame busy times to compare changes. Voronoi's GPU time is roughly 40 times the default scene's. Both runs also show one stall of 100 ms or more, which was not investigated.
+Both scenes hold the display's refresh rate, so the frame rate cannot show a regression. Use the GPU column and the per-frame busy times to compare changes. The run also shows one stall of 100 ms or more, which was not investigated.
