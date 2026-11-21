@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent,
     Empty, EventEmitter, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
@@ -215,7 +216,7 @@ impl<E: Editor> ScreenView<E> {
             .border_color(theme.colors.border)
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                cx.safe_listener(move |this, event: &MouseDownEvent, _, cx| {
                     this.menu = Some(OpenMenu {
                         area: id,
                         kind: MenuKind::Area,
@@ -232,7 +233,7 @@ impl<E: Editor> ScreenView<E> {
                     .icon_end(IconName::CaretDown)
                     .selected(type_open)
                     .tooltip("Editor type")
-                    .on_click(cx.listener(move |this, event, _, cx| open_type(this, event, cx))),
+                    .on_click(cx.safe_listener(move |this, event, _, cx| open_type(this, event, cx))),
             )
             .children(toolbar)
             .into_any_element()
@@ -333,7 +334,7 @@ impl<E: Editor> ScreenView<E> {
                     .occlude()
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event, _, cx| this.start_edge_drag(event, cx)),
+                        cx.safe_listener(|this, event, _, cx| this.start_edge_drag(event, cx)),
                     )
                     .on_drag(EdgeDrag, |_, _, _, cx| cx.new(|_| Empty));
                 match axis {
@@ -434,7 +435,7 @@ impl<E: Editor> Render for ScreenView<E> {
             )
             .children(rendered)
             .children(dividers)
-            .on_drag_move::<EdgeDrag>(cx.listener(
+            .on_drag_move::<EdgeDrag>(cx.safe_listener(
                 |this, event: &DragMoveEvent<EdgeDrag>, _, cx| {
                     this.drag_edge(event.event.position, cx);
                 },

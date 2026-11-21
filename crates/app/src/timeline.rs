@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _, Pixels,
     Point, Render, SharedString, Styled as _, Subscription, Window, div, point,
@@ -226,7 +227,7 @@ impl Render for TimelineBar {
                     .size(ButtonSize::Xs)
                     .tooltip(hint.join("\n"))
                     .selected(self.menu.is_some())
-                    .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                    .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
                         this.menu = Some(event.position() + point(px(0.0), px(8.0)));
                         cx.notify();
                     }))

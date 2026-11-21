@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
@@ -193,7 +194,7 @@ impl Render for PreviewArea {
                     .w(rect.size.width)
                     .h(rect.size.height)
             }))
-            .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll_wheel(cx.safe_listener(move |this, event: &ScrollWheelEvent, _, cx| {
                 let delta = event.delta.pixel_delta(px(20.0)).y;
                 let boost = if event.modifiers.control { 10.0 } else { 1.0 };
                 let factor = 2f32.powf(f32::from(delta) * WHEEL_SPEED * boost);
@@ -202,12 +203,12 @@ impl Render for PreviewArea {
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
                     this.panning = Some(event.position);
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+            .on_mouse_move(cx.safe_listener(|this, event: &MouseMoveEvent, _, cx| {
                 let Some(last) = this.panning else {
                     return;
                 };
@@ -224,12 +225,12 @@ impl Render for PreviewArea {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
+                cx.safe_listener(|this, _, _, cx| {
                     this.panning = None;
                     cx.notify();
                 }),
             )
-            .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+            .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
                 if event.click_count() == 2 {
                     let factor = if event.modifiers().shift { 0.5 } else { 2.0 };
                     let anchor = event.position() - this.pane.origin;
@@ -243,7 +244,7 @@ impl Render for PreviewArea {
                         .size(ButtonSize::Icon)
                         .icon(IconName::ArrowsIn)
                         .tooltip("Fit view (0)")
-                        .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
+                        .on_click(cx.safe_listener(|this, _, _, cx| this.fit(cx))),
                 ),
             )
             .children(failure.map(|failure| {
@@ -404,7 +405,7 @@ fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
     let png = match frame {
         Ok(png) => png,
         Err(error) => {
-            eprintln!("[export] {error}");
+            log::error!("export failed: {error:#}");
             return;
         }
     };
@@ -414,7 +415,7 @@ fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
         if let Ok(Ok(Some(path))) = path.await
             && let Err(error) = std::fs::write(&path, png)
         {
-            eprintln!("[export] {}: {error}", path.display());
+            log::error!("export to {} failed: {error:#}", path.display());
         }
     })
     .detach();

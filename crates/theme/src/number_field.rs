@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use gpui::{
     AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Empty, Entity, EventEmitter,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Render,
@@ -197,20 +198,20 @@ impl Render for NumberField {
             .hover(|s| s.border_color(c.ring))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, _| {
+                cx.safe_listener(|this, event: &MouseDownEvent, _, _| {
                     this.scrub = Some((event.position.x.into(), this.value));
                     this.moved = false;
                 }),
             )
             .on_drag(Scrub, |_, _, _, cx| cx.new(|_| Empty))
-            .on_drag_move::<Scrub>(cx.listener(|this, event: &DragMoveEvent<Scrub>, _, cx| {
+            .on_drag_move::<Scrub>(cx.safe_listener(|this, event: &DragMoveEvent<Scrub>, _, cx| {
                 this.scrub_to(
                     event.event.position.x.into(),
                     event.event.modifiers.shift,
                     cx,
                 );
             }))
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+            .on_click(cx.safe_listener(|this, _: &ClickEvent, window, cx| {
                 let scrubbed = std::mem::take(&mut this.moved);
                 this.scrub = None;
                 if !scrubbed {

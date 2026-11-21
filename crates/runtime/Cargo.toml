@@ -6,6 +6,7 @@ license.workspace = true
 description = "wgpu runtime drawing the shader programs webgpu-nodes generates"
 
 [dependencies]
+log.workspace = true
 wgpu.workspace = true
 shader-graph = { path = "../shader-graph" }
 anyhow.workspace = true

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+guard = { path = "../guard" }
 serde.workspace = true
 gpui.workspace = true
 theme = { path = "../theme" }

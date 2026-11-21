@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels, Point, Render,
@@ -155,7 +156,7 @@ impl Render for AddMenu {
                             .text_size(theme.text.xs)
                             .text_color(c.destructive)
                             .hover(move |s| s.bg(c.destructive.opacity(0.15)))
-                            .on_mouse_down(gpui::MouseButton::Left, cx.listener({
+                            .on_mouse_down(gpui::MouseButton::Left, cx.safe_listener({
                                 let key = key.clone();
                                 move |_, _, _, cx| {
                                     cx.stop_propagation();
@@ -165,7 +166,7 @@ impl Render for AddMenu {
                             .child("delete"),
                     )
                 })
-                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                .on_click(cx.safe_listener(move |_, _: &ClickEvent, _, cx| {
                     if !disabled {
                         cx.emit(AddMenuEvent::Picked(Box::new(picked.clone())));
                     }
@@ -224,7 +225,7 @@ impl Render for AddMenu {
                     .text_color(fg)
                     .cursor_pointer()
                     .when(selected, |d| d.bg(accent).text_color(accent_fg))
-                    .on_mouse_move(cx.listener({
+                    .on_mouse_move(cx.safe_listener({
                         let name = name.clone();
                         move |this, _, _, cx| {
                             if this.open_heading.as_ref() != Some(&name) {
@@ -261,7 +262,7 @@ impl Render for AddMenu {
             .on_dismiss(cx.listener_dismiss())
             .child(
                 div()
-                    .on_key_down(cx.listener(|this, e, _, cx| this.key_down(e, cx)))
+                    .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
                     .child(div().px_1().pb_1().border_b_1().border_color(c.border).child(self.input.clone()))
                     .child(div().pt_1().child(body)),
             )

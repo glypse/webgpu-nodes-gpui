@@ -74,7 +74,7 @@ impl TypeResolver {
 
     /// Forget every node's types.
     pub fn clear(&self) {
-        self.cache.lock().expect("type cache poisoned").clear();
+        self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
     }
 
     fn variables<'a>(project: &'a GraphProject, node_id: &str) -> &'a [TypeVariable] {
@@ -98,11 +98,11 @@ impl TypeResolver {
         bindings: &TypeBindings,
     ) -> Arc<ResolvedNodeTypes> {
         let key = (node.id.clone(), Self::key(project, &node.id, bindings));
-        if let Some(found) = self.cache.lock().expect("type cache poisoned").get(&key) {
+        if let Some(found) = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key) {
             return found.clone();
         }
         let result = Arc::new(self.resolve_with(project, node, &node.data, bindings));
-        self.cache.lock().expect("type cache poisoned").insert(key, result.clone());
+        self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, result.clone());
         result
     }
 

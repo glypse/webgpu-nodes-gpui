@@ -13,6 +13,8 @@ use gpui::{
 use shell::Shell;
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    guard::install_panic_hook();
     Application::new().with_assets(theme::Assets).run(|cx| {
         theme::init(cx);
         shell::init(cx);
@@ -27,7 +29,7 @@ fn main() {
         };
         let opened = cx.open_window(options, |window, cx| cx.new(|cx| Shell::new(window, cx)));
         if let Err(e) = opened {
-            eprintln!("failed to open the window: {e}");
+            log::error!("failed to open the window: {e:#}");
             cx.quit();
         }
         cx.on_window_closed(|cx| cx.quit()).detach();

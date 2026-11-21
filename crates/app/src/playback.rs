@@ -243,7 +243,7 @@ impl Playback {
         window.on_next_frame(move |window, cx| {
             this.update(cx, |this, cx| {
                 this.scheduled = false;
-                this.animation_frame(window, cx);
+                guard::guard("animation frame", || this.animation_frame(window, cx));
             });
         });
     }
@@ -302,8 +302,10 @@ impl Playback {
         let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
             buffer
         )]));
-        if let Some(old) = self.image.replace(image) {
-            window.drop_image(old).ok();
+        if let Some(old) = self.image.replace(image)
+            && let Err(error) = window.drop_image(old)
+        {
+            log::warn!("dropping the previous frame failed: {error:#}");
         }
     }
 }

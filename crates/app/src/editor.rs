@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -127,7 +128,10 @@ impl Editor {
             }));
             flow
         });
-        cx.subscribe(&flow, |this, _, event, cx| this.on_flow_event(event.clone(), cx)).detach();
+        cx.subscribe(&flow, |this, _, event, cx| {
+            guard::guard("flow event", || this.on_flow_event(event.clone(), cx));
+        })
+        .detach();
         window.focus(&flow.focus_handle(cx));
         let mut editor = Self {
             model,
@@ -813,7 +817,7 @@ impl Editor {
                     .rounded(theme.radius.sm)
                     .text_color(if current { c.foreground } else { c.muted_foreground })
                     .when(!current, |d| d.cursor_pointer().hover(|s| s.bg(c.muted)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.jump_to(depth, cx)))
+                    .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| this.jump_to(depth, cx)))
                     .child(label)
                     .into_any_element();
                 let sep: Vec<AnyElement> = if i > 0 { vec![div().text_color(c.muted_foreground).child("›").into_any_element()] } else { Vec::new() };
@@ -863,7 +867,7 @@ impl Render for Editor {
             .size_full()
             .bg(c.background)
             .text_color(c.foreground)
-            .on_key_down(cx.listener(|this, e, w, cx| this.key_down(e, w, cx)))
+            .on_key_down(cx.safe_listener(|this, e, w, cx| this.key_down(e, w, cx)))
             .child(
                 div()
                     .flex()

@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -840,7 +841,9 @@ impl Flow {
                 cx.emit(FlowEvent::ConnectStart { node, handle, kind });
             }
         }
-        let drag = self.connection_drag.as_ref().unwrap();
+        let Some(drag) = self.connection_drag.as_ref() else {
+            return;
+        };
         let (from_node, from_handle, from_type) = (drag.from_node.clone(), drag.from_handle.clone(), drag.from_type);
         let window_position = drag.window_position;
         let reconnecting = drag.reconnecting.as_ref().map(|r| r.edge.id.clone());
@@ -1123,7 +1126,6 @@ impl Flow {
                 self.drag_minimap(delta, cx);
             }
         }
-        window.request_animation_frame();
         cx.notify();
     }
 
@@ -1548,7 +1550,7 @@ impl Render for Flow {
                 let label = e.label.clone()?;
                 let at = vp.to_screen(g.path.label);
                 let id = e.id.clone();
-                let on_down = cx.listener(move |this: &mut Flow, ev: &MouseDownEvent, w, cx| {
+                let on_down = cx.safe_listener(move |this: &mut Flow, ev: &MouseDownEvent, w, cx| {
                     cx.stop_propagation();
                     this.focus_flow(w, cx);
                     let id = id.clone();
@@ -1654,7 +1656,7 @@ impl Render for Flow {
             .size_full();
             let id = node.id.clone();
             let down = |id: Id| {
-                cx.listener(move |this: &mut Flow, e: &MouseDownEvent, w, cx| this.node_down(id.clone(), e, w, cx))
+                cx.safe_listener(move |this: &mut Flow, e: &MouseDownEvent, w, cx| this.node_down(id.clone(), e, w, cx))
             };
             let mut wrapper = div()
                 .absolute()
@@ -1784,12 +1786,12 @@ impl Render for Flow {
                 // Drags follow the pointer beyond the canvas.
                 window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
                     if phase == DispatchPhase::Bubble {
-                        on_move.update(cx, |this, cx| this.mouse_move(e, window, cx)).ok();
+                        on_move.update(cx, |this, cx| guard::guard("flow mouse move", || this.mouse_move(e, window, cx))).ok();
                     }
                 });
                 window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
                     if phase == DispatchPhase::Bubble {
-                        on_up.update(cx, |this, cx| this.mouse_up(e, cx)).ok();
+                        on_up.update(cx, |this, cx| guard::guard("flow mouse up", || this.mouse_up(e, cx))).ok();
                     }
                 });
             },
@@ -1813,11 +1815,11 @@ impl Render for Flow {
             .size_full()
             .overflow_hidden()
             .cursor(cursor)
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_scroll_wheel(cx.listener(|this, e, _, cx| this.scroll(e, cx)))
-            .on_key_down(cx.listener(|this, e, _, cx| this.key_down(e, cx)))
+            .on_mouse_down(MouseButton::Left, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
+            .on_mouse_down(MouseButton::Middle, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
+            .on_mouse_down(MouseButton::Right, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
+            .on_scroll_wheel(cx.safe_listener(|this, e, _, cx| this.scroll(e, cx)))
+            .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
             .child(back)
             .children(back_portals)
             .children(labels)

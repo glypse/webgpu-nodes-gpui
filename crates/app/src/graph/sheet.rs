@@ -1,6 +1,7 @@
 //! The side sheet of a node: its name, and for a group its interface (inputs,
 //! outputs and type variables), for a zone its state items.
 
+use guard::SafeListener as _;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -87,7 +88,7 @@ fn button(
         .text_color(fg)
         .cursor_pointer()
         .hover(move |s| s.bg(muted))
-        .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
+        .on_click(cx.safe_listener(move |this, _, _, cx| on_click(this, cx)))
         .child(label)
 }
 

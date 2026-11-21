@@ -135,6 +135,8 @@ impl Renderer {
                 required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
                 ..Default::default()
             }))?;
+        // wgpu's default handler panics on errors outside an error scope.
+        device.on_uncaptured_error(std::sync::Arc::new(|error| log::error!("GPU error: {error}")));
         let timer = GpuTimer::new(&device, &queue);
         Ok(Self {
             presenter: Presenter::new(&device),

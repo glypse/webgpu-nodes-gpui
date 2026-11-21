@@ -1,5 +1,6 @@
 //! Controls and the minimap, and the corner panels they sit in.
 
+use guard::SafeListener as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -179,16 +180,16 @@ impl Flow {
                         "flow-zoom-in",
                         div().relative().size(px(12.0)).child(bar(12.0, 2.0).absolute().top(px(5.0))).child(bar(2.0, 12.0).absolute().left(px(5.0))).into_any_element(),
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.zoom_in(cx))),
+                    .on_click(cx.safe_listener(|this, _, _, cx| this.zoom_in(cx))),
                 )
                 .child(
                     button("flow-zoom-out", div().w(px(12.0)).h(px(2.0)).bg(theme.panel_text).into_any_element())
-                        .on_click(cx.listener(|this, _, _, cx| this.zoom_out(cx))),
+                        .on_click(cx.safe_listener(|this, _, _, cx| this.zoom_out(cx))),
                 );
         }
         if opts.show_fit_view {
             let fit = div().size(px(12.0)).border(px(2.0)).border_color(theme.panel_text).rounded(px(1.0));
-            column = column.child(button("flow-fit", fit.into_any_element()).on_click(cx.listener(|this, _, _, cx| {
+            column = column.child(button("flow-fit", fit.into_any_element()).on_click(cx.safe_listener(|this, _, _, cx| {
                 let options = crate::flow::FitViewOptions {
                     duration: Some(std::time::Duration::from_millis(300)),
                     ..this.options.fit_view_options
@@ -203,7 +204,7 @@ impl Flow {
                 .size(px(12.0))
                 .child(div().absolute().left(px(2.0)).top(px(0.0)).w(px(8.0)).h(px(6.0)).border(px(2.0)).border_color(theme.panel_text).rounded_t(px(4.0)))
                 .child(div().absolute().left(px(0.0)).top(px(5.0)).w(px(12.0)).h(px(7.0)).bg(if locked { theme.panel_text } else { theme.panel_background }).border(px(2.0)).border_color(theme.panel_text).rounded(px(1.0)));
-            column = column.child(button("flow-lock", lock.into_any_element()).on_click(cx.listener(|this, _, _, cx| {
+            column = column.child(button("flow-lock", lock.into_any_element()).on_click(cx.safe_listener(|this, _, _, cx| {
                 let next = !this.is_interactive();
                 this.set_interactive(next, cx);
             })));
@@ -292,7 +293,7 @@ impl Flow {
         if opts.pannable {
             root = root.on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
+                cx.safe_listener(|this, e: &gpui::MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     this.begin_minimap_drag(this.local_xy(e.position));
                 }),

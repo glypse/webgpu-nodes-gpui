@@ -1,3 +1,4 @@
+use guard::SafeListener as _;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -97,9 +98,11 @@ impl Shell {
         cx.subscribe_in(&editor, window, {
             let playback = playback.clone();
             move |_, _, event: &EditorEvent, window, cx| {
-                playback.update(cx, |p, cx| match event {
-                    EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
-                    EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
+                playback.update(cx, |p, cx| {
+                    guard::guard("playback update", || match event {
+                        EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
+                        EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
+                    })
                 });
             }
         })
@@ -165,17 +168,17 @@ impl Render for Shell {
             .bg(theme.colors.background)
             .text_color(theme.colors.foreground)
             .font_family(theme.font.clone())
-            .on_action(cx.listener(|this, _: &TogglePlayback, window, cx| {
+            .on_action(cx.safe_listener(|this, _: &TogglePlayback, window, cx| {
                 let playback = this.playback.clone();
                 playback.update(cx, |p, cx| p.toggle(window, cx));
             }))
-            .on_action(cx.listener(|this, _: &PreviousFrame, window, cx| {
+            .on_action(cx.safe_listener(|this, _: &PreviousFrame, window, cx| {
                 this.playback.update(cx, |p, cx| p.step(-1, window, cx));
             }))
-            .on_action(cx.listener(|this, _: &NextFrame, window, cx| {
+            .on_action(cx.safe_listener(|this, _: &NextFrame, window, cx| {
                 this.playback.update(cx, |p, cx| p.step(1, window, cx));
             }))
-            .on_action(cx.listener(|this, _: &GoToStart, window, cx| {
+            .on_action(cx.safe_listener(|this, _: &GoToStart, window, cx| {
                 this.playback.update(cx, |p, cx| p.seek(0.0, window, cx));
             }))
             .child(self.screen.clone())
