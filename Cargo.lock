@@ -2226,6 +2226,7 @@ dependencies = [
  "gpui-fast",
  "gpui-fast-platform",
  "guard",
+ "log",
 ]
 
 [[package]]

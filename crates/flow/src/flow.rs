@@ -307,6 +307,7 @@ pub struct Flow {
     pub options: FlowOptions,
     viewport: Viewport,
     pub(crate) bounds: Rc<Cell<Bounds<Pixels>>>,
+    background_cache: Rc<RefCell<crate::background::BackgroundCache>>,
     pub(crate) measure: Rc<RefCell<Measure>>,
     pub(crate) lookup: Lookup,
     pub(crate) edge_geoms: Vec<EdgeGeom>,
@@ -347,6 +348,7 @@ impl Flow {
             options: FlowOptions::default(),
             viewport: Viewport::default(),
             bounds: Rc::default(),
+            background_cache: Rc::default(),
             measure: Rc::default(),
             lookup: Lookup::new(),
             edge_geoms: Vec::new(),
@@ -1852,6 +1854,7 @@ impl Render for Flow {
             })
             .collect();
         let bounds_cell = self.bounds.clone();
+        let background_cache = self.background_cache.clone();
         let back = canvas(
             move |b, _, _| bounds_cell.set(b),
             move |b, _, window, cx| { guard::guard("flow background", || {
@@ -1862,7 +1865,7 @@ impl Render for Flow {
                     if let Some(bg) = opts.background {
                         window.paint_quad(gpui::fill(b, bg));
                     }
-                    crate::background::paint(window, b, &vp, &opts, color);
+                    background_cache.borrow_mut().paint(window, b, &vp, &opts, color);
                 }
                 window.with_content_mask(Some(gpui::ContentMask { bounds: b }), |window| {
                     for layer in &back_layers {
