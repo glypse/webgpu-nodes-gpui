@@ -66,7 +66,7 @@ mod av {
         AVVideoCodecTypeH264, AVVideoColorPrimariesKey, AVVideoColorPrimaries_ITU_R_709_2,
         AVVideoColorPropertiesKey, AVVideoCompressionPropertiesKey, AVVideoHeightKey,
         AVVideoMaxKeyFrameIntervalKey, AVVideoTransferFunctionKey,
-        AVVideoTransferFunction_ITU_R_709_2, AVVideoWidthKey, AVVideoYCbCrMatrixKey,
+        AVVideoTransferFunction_IEC_sRGB, AVVideoWidthKey, AVVideoYCbCrMatrixKey,
         AVVideoYCbCrMatrix_ITU_R_709_2,
     };
     use objc2_core_foundation::CFRetained;
@@ -133,7 +133,7 @@ mod av {
                     &*NSNumber::new_i64(fps.round().max(1.0) as i64) as &AnyObject,
                 ],
             );
-            // BT.709 throughout, so players show the colours the frames were rendered in.
+            // The frames are sRGB: BT.709 primaries with the sRGB transfer, as the original tags them.
             let colour = NSDictionary::<NSString, AnyObject>::from_slices(
                 &[
                     key(unsafe { AVVideoColorPrimariesKey }, "colour primaries")?,
@@ -142,7 +142,7 @@ mod av {
                 ],
                 &[
                     key(unsafe { AVVideoColorPrimaries_ITU_R_709_2 }, "BT.709 primaries")? as &AnyObject,
-                    key(unsafe { AVVideoTransferFunction_ITU_R_709_2 }, "BT.709 transfer")? as &AnyObject,
+                    key(unsafe { AVVideoTransferFunction_IEC_sRGB }, "sRGB transfer")? as &AnyObject,
                     key(unsafe { AVVideoYCbCrMatrix_ITU_R_709_2 }, "BT.709 matrix")? as &AnyObject,
                 ],
             );
@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn mp4_is_tagged_bt709() {
+    fn mp4_is_tagged_srgb() {
         let path = std::env::temp_dir().join(format!("export-colour-{}.mp4", std::process::id()));
         let size = Size::new(64, 64);
         let mut encoder = AvFoundationEncoder::open(&path, Format::Mp4, Quality::Medium, size, 30.0)
@@ -335,7 +335,7 @@ mod tests {
         encoder.finish().expect("the file is written");
         let bytes = std::fs::read(&path).expect("the file is readable");
         std::fs::remove_file(&path).ok();
-        // ISO/IEC 23001-8 code points: 1 is BT.709 for primaries, transfer and matrix.
-        assert_eq!(colour_tags(&bytes), Some((1, 1, 1)));
+        // ISO/IEC 23001-8 code points: 1 is BT.709 (primaries, matrix), 13 the sRGB transfer.
+        assert_eq!(colour_tags(&bytes), Some((1, 13, 1)));
     }
 }
