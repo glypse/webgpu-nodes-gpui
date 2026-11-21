@@ -1,7 +1,7 @@
 //! Groups: creating, grouping a selection, ungrouping, and editing a group's
 //! interface (inputs, outputs, enums, type variables).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use super::model::{GraphModel, clone_subgraph};
 use super::{
@@ -9,7 +9,8 @@ use super::{
     GroupSide, NODE_GROUP, Point, ROOT_ID, new_id,
 };
 use crate::library::is_library_ref;
-use crate::enums::{fit_variants, is_under, owner_exists};
+use super::model_interface::fit_type_owners;
+use crate::enums::{fit_variants, is_under, owner_chain, owner_exists, shown_apart};
 use crate::types::{
     EnumVariant, GroupHandleDef, HandleType, InputOwner, InputValue, TypeVariable, WgslType,
     toggle_variants,
@@ -453,7 +454,7 @@ impl GraphModel {
 
     // ── Interface ────────────────────────────────────────────────────────────
 
-    fn user_definition(&mut self, definition_ref: &str) -> Option<&mut GraphDocument> {
+    pub(super) fn user_definition(&mut self, definition_ref: &str) -> Option<&mut GraphDocument> {
         if definition_ref == ROOT_ID || is_library_ref(definition_ref) {
             return None;
         }
@@ -522,7 +523,7 @@ impl GraphModel {
         self.add_handle(&reference, side, ty, None, None)
     }
 
-    fn update_handle(
+    pub(super) fn update_handle(
         &mut self,
         definition_ref: &str,
         side: GroupSide,
@@ -538,7 +539,9 @@ impl GraphModel {
         true
     }
 
-    /// Rename a handle; labels stay unique on their side.
+    /// Rename an input or output of a group. Rejected (returning false) when
+    /// another of the same side has that label, unless the two are never
+    /// shown together (inputs of different variants or types).
     pub fn set_handle_label(
         &mut self,
         definition_ref: &str,
@@ -547,10 +550,14 @@ impl GraphModel {
         label: &str,
     ) -> bool {
         let label = label.trim().to_owned();
-        let taken = self
-            .project
-            .document(definition_ref)
-            .is_some_and(|d| d.interface(side).iter().any(|h| h.id != handle_id && h.label == label));
+        let Some(def) = self.project.document(definition_ref) else { return false };
+        let handles = def.interface(side);
+        let Some(handle) = handles.iter().find(|h| h.id == handle_id) else { return false };
+        let taken = handles.iter().any(|h| {
+            h.id != handle_id
+                && h.label == label
+                && !(side == GroupSide::Input && shown_apart(handles, handle, h))
+        });
         if label.is_empty() || taken {
             return false;
         }
@@ -651,37 +658,43 @@ impl GraphModel {
         }
     }
 
-    /// Make an input an enum choosing among `variants` (a u32), or a plain
-    /// input again with `None`. Inputs of removed variants lose their owner.
+    /// Make an input an enum choosing among `variants` (it becomes a u32),
+    /// or a plain input again with `None`. Inputs under removed variants go
+    /// with them, and Match nodes linked to it follow.
     pub fn set_handle_variants(
         &mut self,
         definition_ref: &str,
         handle_id: &str,
         variants: Option<Vec<EnumVariant>>,
     ) {
-        let Some(def) = self.user_definition(definition_ref) else { return };
-        let variables = def.type_variables.clone();
-        let present: BTreeMap<String, Vec<f64>> = variants
-            .iter()
-            .map(|vs| (handle_id.to_owned(), vs.iter().map(|v| v.value).collect()))
-            .collect();
-        for h in &mut def.inputs {
-            if h.id == handle_id {
-                h.variants = variants.clone();
-                if variants.is_some() {
-                    h.ty = WgslType::U32.into();
-                } else {
-                    h.variants_by = None;
-                }
-                *h = fit_variants(h, &variables);
-            } else if let Some(owner) = &h.owner
-                && owner.enum_id == handle_id
-                    && !present.get(handle_id).is_some_and(|vs| vs.contains(&owner.value))
-                {
-                    h.owner = None;
-                }
+        let Some(def) = self.project.document(definition_ref) else { return };
+        let is_toggle = def.inputs.iter().any(|h| {
+            h.id == handle_id && h.ty == HandleType::Fixed(WgslType::Bool) && h.variants.is_some()
+        });
+        if variants.is_some() && !is_toggle {
+            self.set_handle_type(definition_ref, GroupSide::Input, handle_id, WgslType::U32.into());
         }
+        let Some(def) = self.user_definition(definition_ref) else { return };
+        let handles = def.inputs.clone();
+        let variables = def.type_variables.clone();
+        let Some(handle) = def.inputs.iter_mut().find(|h| h.id == handle_id) else { return };
+        handle.compiled = None;
+        handle.variants = variants.clone();
+        if variants.is_some() {
+            *handle = fit_variants(handle, &variables);
+        } else {
+            handle.variants_by = None;
+        }
+        let kept: Vec<f64> = variants.iter().flatten().map(|v| v.value).collect();
+        let orphans: Vec<String> = handles
+            .iter()
+            .filter(|h| owner_chain(&handles, h).iter().any(|o| o.enum_id == handle_id && !kept.contains(&o.value)))
+            .map(|h| h.id.clone())
+            .collect();
         self.changed();
+        if !orphans.is_empty() {
+            self.remove_handles(definition_ref, GroupSide::Input, &orphans);
+        }
     }
 
     /// Make an input a checkbox: a bool compiled into the shader.
@@ -766,8 +779,9 @@ impl GraphModel {
         Some(variable)
     }
 
-    /// Change a variable's name and the types it may take. Sockets keep the
-    /// variable; links that no longer fit are dropped.
+    /// Change a variable's name and the types it may take. Group nodes
+    /// forcing a type it no longer has go back to inferring it; sockets keep
+    /// the variable, and links that no longer fit are dropped.
     pub fn set_type_variable(
         &mut self,
         definition_ref: &str,
@@ -775,6 +789,7 @@ impl GraphModel {
         name: Option<&str>,
         types: Option<&[WgslType]>,
     ) {
+        let types = types.filter(|t| !t.is_empty());
         let Some(def) = self.user_definition(definition_ref) else { return };
         let Some(variable) = def.type_variables.iter_mut().find(|v| v.id == variable_id) else {
             return;
@@ -782,16 +797,24 @@ impl GraphModel {
         if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
             variable.name = name.to_owned();
         }
-        if let Some(types) = types.filter(|t| !t.is_empty()) {
+        if let Some(types) = types {
             variable.types = types.to_vec();
-        }
-        let variables = def.type_variables.clone();
-        for h in &mut def.inputs {
-            *h = fit_variants(h, &variables);
+            fit_type_owners(def);
         }
         let handles = self.handles_of_variable(definition_ref, variable_id);
+        if let Some(types) = types {
+            for doc in self.project.definitions.values_mut() {
+                for node in doc.nodes.iter_mut().filter(|n| n.definition_ref() == Some(definition_ref)) {
+                    if node.data.types.get(variable_id).is_some_and(|t| !types.contains(t)) {
+                        node.data.types.remove(variable_id);
+                    }
+                }
+            }
+        }
         self.changed();
-        self.drop_unfit_links_to_instances(definition_ref, &handles);
+        if types.is_some() {
+            self.drop_unfit_links_to_instances(definition_ref, &handles);
+        }
     }
 
     fn handles_of_variable(&self, definition_ref: &str, variable_id: &str) -> Vec<String> {
@@ -816,18 +839,14 @@ impl GraphModel {
             if h.ty.variable() == Some(variable_id) {
                 h.ty = HandleType::Fixed(fixed);
             }
-            if h.variants_by.as_deref() == Some(variable_id) {
-                h.variants_by = None;
-            }
-            if h.type_owner.as_ref().is_some_and(|o| o.variable == variable_id) {
-                h.type_owner = None;
+        }
+        for item in def.nodes.iter_mut().filter_map(|n| n.data.items.as_mut()).flatten() {
+            if item.ty.variable() == Some(variable_id) {
+                item.ty = HandleType::Fixed(fixed);
             }
         }
         def.type_variables.retain(|v| v.id != variable_id);
-        let variables = def.type_variables.clone();
-        for h in &mut def.inputs {
-            *h = fit_variants(h, &variables);
-        }
+        fit_type_owners(def);
         for doc in self.project.definitions.values_mut() {
             for node in doc.nodes.iter_mut().filter(|n| n.definition_ref() == Some(definition_ref)) {
                 node.data.types.remove(variable_id);

@@ -11,7 +11,7 @@ use super::{
 };
 use crate::color::color_mode_conversion;
 use crate::codegen::{CodegenError, Program, ShaderOptions, generate_program};
-use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, hidden_inputs_of};
+use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, group_constants, hidden_inputs_of};
 use crate::nodes::{COLOR_RAMP, color_ramp_hidden_inputs, default_data_for_type, registered, resolve_descriptor};
 use crate::types::{
     InputValue, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, ResolvedNodeTypes,
@@ -124,6 +124,7 @@ impl GraphModel {
     pub(crate) fn changed(&mut self) {
         crate::library::register(&mut self.project);
         self.project.reindex();
+        self.drop_stale_case_links();
         self.resolver.clear();
         let valid = self.valid_path(&self.path);
         self.path = valid;
@@ -458,15 +459,8 @@ impl GraphModel {
             .types_of(node_id, None)
             .and_then(|t| t.bindings.clone())
             .unwrap_or_default();
-        let values: BTreeMap<String, i64> = def
-            .inputs
-            .iter()
-            .filter(|h| h.variants.is_some())
-            .map(|h| {
-                let stored = node.data.values.get(&h.id).or_else(|| def.defaults.get(&h.id));
-                (h.id.clone(), stored.map_or(0, InputValue::as_i64))
-            })
-            .collect();
+        let Some(doc) = self.project.document_of(node_id) else { return HashSet::new() };
+        let values = group_constants(&EnumDocument::of(doc), node, &self.project, &bindings, &BTreeMap::new());
         hidden_inputs_of(&def.inputs, &values, &bindings).into_iter().collect()
     }
 
@@ -946,7 +940,16 @@ impl GraphModel {
     /// Generate the program drawing the project's root document, reading
     /// unlinked input values of the root from uniforms.
     pub fn generate(&self) -> Result<Program, CodegenError> {
-        self.generate_with(&ShaderOptions { uniform_scopes: vec![ROOT_ID.to_owned()] })
+        self.generate_with(&ShaderOptions { uniform_scopes: vec![ROOT_ID.to_owned()], ..Default::default() })
+    }
+
+    /// The program to run: like `generate`, with the frame values computed on
+    /// the CPU and fed to the passes reading them.
+    pub fn generate_hoisted(&self) -> Result<Program, CodegenError> {
+        self.generate_with(&ShaderOptions {
+            uniform_scopes: vec![ROOT_ID.to_owned()],
+            hoist_frame_values: true,
+        })
     }
 
     pub fn generate_with(&self, options: &ShaderOptions) -> Result<Program, CodegenError> {

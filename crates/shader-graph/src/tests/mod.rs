@@ -1,4 +1,5 @@
 mod cpu;
+mod builders;
 mod codegen;
 mod edits;
 mod frames;
@@ -9,3 +10,8 @@ mod settings;
 mod passes;
 mod textures;
 mod custom;
+mod enums;
+mod index_switch;
+mod frame_values;
+mod nodes;
+mod reroute;

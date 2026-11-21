@@ -7,7 +7,7 @@ use crate::enums::{CASES_FAMILY, MATCH, MATCH_SELECTOR, WIDTH_SWITCH, WIDTH_SWIT
 use crate::graph::{GraphDocument, GraphNode, GraphProject};
 use crate::types::{
     EnumVariant, GroupHandleDef, HandleType, InputControl, InputValue,
-    NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
+    NodeCategory, NodeData, TypeFamily, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
     SOCKET_TYPES, TypeVariable, WgslType, bound_type, enum_value,
 };
 
@@ -70,6 +70,11 @@ pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
             vec![format!("let {} = {chosen};", ctx.var_name)]
         });
     d.primary_input = variants.first().map(|v| case_handle(v.int()));
+    // Without cases nothing infers its type: it's picked, under the key the
+    // cases' type is forced with once an enum is linked.
+    if variants.is_empty() {
+        d.type_family = Some(TypeFamily { key: CASES_FAMILY.to_owned(), types: WgslType::ALL.to_vec() });
+    }
     d
 }
 

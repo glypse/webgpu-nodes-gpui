@@ -353,9 +353,13 @@ impl GraphModel {
             return;
         }
         let count = clamp_cases(count);
-        self.update_node_data(node_id, |data| data.cases = Some(count));
-        let key = self.active_definition_ref();
         let cases: HashSet<String> = (0..count).map(|i| crate::enums::case_handle(i64::from(i))).collect();
+        let removed = |handle: &str| crate::enums::is_case_handle(handle) && !cases.contains(handle);
+        self.update_node_data(node_id, |data| {
+            data.cases = Some(count);
+            data.values.retain(|handle, _| !removed(handle));
+        });
+        let key = self.active_definition_ref();
         if let Some(doc) = self.project.definitions.get_mut(&key) {
             doc.edges.retain(|e| {
                 e.target != node_id

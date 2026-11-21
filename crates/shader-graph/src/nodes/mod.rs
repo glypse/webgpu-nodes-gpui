@@ -6,6 +6,7 @@ pub mod cpu;
 mod curve;
 mod custom;
 mod dynamic;
+mod media;
 mod render_texture;
 mod standard;
 mod texture;
@@ -17,6 +18,7 @@ pub use builders::*;
 pub use color_ramp::*;
 pub use custom::*;
 pub use dynamic::*;
+pub use media::*;
 pub use render_texture::*;
 pub use standard::{COMPONENT_COUNT, COMPONENT_COUNT_INPUT};
 pub use texture::*;
@@ -54,13 +56,19 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     all.extend(math);
     all.extend(standard::vector_nodes());
     all.extend(standard::logic_nodes());
-    all.push(build_match_descriptor(&[]));
+    // Registered without a type family, so the add menu doesn't offer a Match
+    // per type: one is of no use before an enum is linked to it.
+    let mut match_node = build_match_descriptor(&[]);
+    match_node.type_family = None;
+    all.push(match_node);
     all.push(build_index_switch_descriptor(&NodeData::default()));
     all.push(width_switch_node());
     all.extend(standard::integer_nodes());
     all.extend(standard::converter_nodes());
     all.push(color_ramp::color_ramp_node());
     all.extend(standard::color_nodes());
+    all.push(media::image_node());
+    all.push(media::video_node());
     all.extend(texture::texture_nodes());
     all.push(build_render_texture_descriptor(&NodeData::default()));
     let mut misc = standard::misc_nodes();

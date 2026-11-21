@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use crate::graph::{
-    FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphModel, GraphNode, NODE_GROUP, Point, ROOT_ID,
+    FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphModel, GraphNode, NODE_GROUP, Point, REROUTE, ROOT_ID,
 };
 use crate::library;
 use crate::nodes::{default_data_for_type, registered, registered_nodes, resolve_descriptor};
@@ -20,6 +20,9 @@ pub enum EntryKind {
     /// An instance of an existing group definition.
     Group { definition_ref: String },
     Zone(ZoneKind),
+    /// A link from a reroute of the document whose links are hidden, or a
+    /// reroute it feeds.
+    Link { source: String },
 }
 
 /// One of an entry's choices: `label` names it after the entry's own.
@@ -53,6 +56,7 @@ pub struct AddMenuEntry {
 }
 
 pub const GROUPS_HEADING: &str = "Groups";
+pub const NAMED_REROUTES: &str = "Named reroutes";
 
 fn category_from_id(id: &str) -> Option<NodeCategory> {
     NodeCategory::ALL.into_iter().find(|c| c.id() == id)
@@ -263,6 +267,21 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
             deletable: false,
         });
     }
+    for node in model.active_document().nodes.iter().filter(|n| n.is(REROUTE) && n.data.hide_links == Some(true)) {
+        entries.push(AddMenuEntry {
+            key: format!("link:{}", node.id),
+            label: model.node_label(&node.id),
+            aliases: vec!["Get".to_owned(), "Named reroute".to_owned()],
+            heading: category_label(NodeCategory::Layout).to_owned(),
+            section: vec![NAMED_REROUTES.to_owned()],
+            search_section: None,
+            kind: EntryKind::Link { source: node.id.clone() },
+            data: None,
+            choices: Vec::new(),
+            disabled: false,
+            deletable: false,
+        });
+    }
     if model.active_definition_ref() != ROOT_ID {
         for (ty, label, category, aliases) in [
             (GROUP_INPUT, "Group Input", NodeCategory::Input, ["Parameters", "Arguments"]),
@@ -411,6 +430,12 @@ pub fn add_entry(model: &mut GraphModel, entry: &AddMenuEntry, position: Point) 
         EntryKind::Node { node_type } => {
             model.add_node_with(node_type, position, entry.data.clone())
         }
+        EntryKind::Link { source } => {
+            model.active_document().node(source)?;
+            let reroute = model.add_node(REROUTE, position)?;
+            model.connect(crate::graph::Connection::new(source, "out", &reroute, "in"));
+            Some(reroute)
+        }
     }
 }
 
@@ -452,6 +477,10 @@ fn fresh_node(entry: &AddMenuEntry) -> Option<GraphNode> {
 pub fn entry_handle_for(model: &GraphModel, entry: &AddMenuEntry, pending: &Pending) -> Option<String> {
     if matches!(entry.kind, EntryKind::Zone(_)) {
         return Some(NEW_ITEM_HANDLE.to_owned());
+    }
+    if let EntryKind::Link { source } = &entry.kind {
+        let link = crate::graph::Connection::new(source, "out", &pending.node, &pending.handle);
+        return (!pending.from_output && model.is_valid_connection(&link)).then(|| "out".to_owned());
     }
     let node = fresh_node(entry)?;
     let descriptor = resolve_descriptor(&node, model.project());
@@ -515,6 +544,12 @@ pub fn add_entry_connected(
     pending: &Pending,
 ) -> Option<String> {
     let handle = entry_handle_for(model, entry, pending);
+    // A named reroute is linked to straight away, wherever it is.
+    if let EntryKind::Link { source } = &entry.kind {
+        let handle = handle?;
+        model.connect(crate::graph::Connection::new(source, handle, &pending.node, &pending.handle));
+        return Some(source.clone());
+    }
     // Feeding an input: the new node's outputs sit at the drop point.
     let upstream = !pending.from_output;
     let offset = if !upstream {
