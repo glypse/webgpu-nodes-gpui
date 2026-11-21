@@ -2,7 +2,7 @@ use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
     Render, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
-    canvas, div, img, point, prelude::FluentBuilder as _, px, size,
+    canvas, div, point, prelude::FluentBuilder as _, px, size,
 };
 use guard::SafeListener as _;
 use runtime::Size;
@@ -157,7 +157,7 @@ impl Render for PreviewArea {
             self.scale = window.scale_factor();
             let theme = cx.theme().clone();
             let playback = self.playback.read(cx);
-            let image = playback.image();
+            let texture = playback.texture();
             let failure = playback.failure.clone();
             let rect = self.rect(cx);
             let view = cx.entity();
@@ -189,13 +189,22 @@ impl Render for PreviewArea {
                     .absolute()
                     .size_full(),
                 )
-                .children(image.map(|image| {
-                    img(image)
-                        .absolute()
-                        .left(rect.origin.x)
-                        .top(rect.origin.y)
-                        .w(rect.size.width)
-                        .h(rect.size.height)
+                .children(texture.map(|texture| {
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            guard::guard("preview frame", || {
+                                if let Err(error) = window.paint_dynamic_texture(bounds, texture) {
+                                    log::warn!("painting the frame failed: {error:#}");
+                                }
+                            });
+                        },
+                    )
+                    .absolute()
+                    .left(rect.origin.x)
+                    .top(rect.origin.y)
+                    .w(rect.size.width)
+                    .h(rect.size.height)
                 }))
                 .on_scroll(
                     cx.safe_listener(move |this, event: &ScrollEvent, _, cx| {

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use gpui::{Context, EventEmitter, RenderImage, SharedString, Window};
+use gpui::{Bounds, Context, DevicePixels, DynamicTexture, EventEmitter, SharedString, Window, point};
 use shader_graph::assets::AssetKind;
 use shader_graph::codegen::ResourceDecl;
 
@@ -14,6 +14,8 @@ use runtime::{
 
 /// Seconds' worth of samples before the display's refresh rate is judged.
 const REFRESH_SAMPLES: usize = 20;
+/// How often the preview's frame timing is logged at debug level.
+const STATS_PERIOD: Duration = Duration::from_secs(5);
 pub const DEFAULT_RESOLUTION: Size = Size::new(512, 512);
 pub const DEFAULT_TIMING: Timing = Timing {
     fps: 60.0,
@@ -77,7 +79,9 @@ pub struct Playback {
     program: Option<Program>,
     pub player: Player,
     pub resolution: Size,
-    image: Option<Arc<RenderImage>>,
+    /// The texture the latest frame was uploaded into, and the size it was made for.
+    texture: Option<(DynamicTexture, Size)>,
+    stats: FrameStats,
     /// The WGSL of the latest program the graph generated, working or not.
     pub code: SharedString,
     pub failure: Option<Failure>,
@@ -102,12 +106,14 @@ impl Playback {
                 Some(Failure::text(format!("No GPU for the preview: {error}"))),
             ),
         };
+        let player = Player::new(DEFAULT_TIMING);
         Self {
             renderer,
             program: None,
-            player: Player::new(DEFAULT_TIMING),
+            player,
             resolution: DEFAULT_RESOLUTION,
-            image: None,
+            texture: None,
+            stats: FrameStats::default(),
             code: SharedString::default(),
             failure,
             refresh_rate: None,
@@ -164,8 +170,9 @@ impl Playback {
         }
     }
 
-    pub fn image(&self) -> Option<Arc<RenderImage>> {
-        self.image.clone()
+    /// The texture showing the latest presented frame, once one has been drawn.
+    pub fn texture(&self) -> Option<DynamicTexture> {
+        self.texture.map(|(texture, _)| texture)
     }
 
     pub fn timing(&self) -> Timing {
@@ -312,24 +319,41 @@ impl Playback {
         {
             self.refresh_rate = Some(rate);
         }
+        let mut changed = false;
+        if let Some(result) = self.renderer.as_mut().and_then(|r| r.take_frame()) {
+            self.player.finished();
+            changed = true;
+            match result {
+                Ok(frame) => self.present(frame, window),
+                Err(error) => self.failure = Some(Failure::text(error.to_string())),
+            }
+        }
+        let drawable = self.renderer.is_some() && self.program.is_some();
         let mut to_draw = None;
         self.player.animation_frame(timestamp, |inputs| {
             to_draw = Some(inputs);
-            false
+            drawable
         });
-        if let Some(inputs) = to_draw {
-            self.draw(inputs, window);
+        if let Some(inputs) = to_draw
+            && drawable
+            && !self.submit(inputs)
+        {
+            self.player.finished();
+        }
+        if changed {
             cx.emit(PlaybackEvent::Changed);
             cx.notify();
         }
         self.schedule(window, cx);
     }
 
-    fn draw(&mut self, inputs: runtime::FrameInputs, window: &mut Window) {
+    /// Starts drawing a frame. It is presented once the GPU has copied it out.
+    fn submit(&mut self, inputs: runtime::FrameInputs) -> bool {
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else {
-            return;
+            return false;
         };
-        let rendered = renderer.render(
+        let started = Instant::now();
+        let submitted = renderer.submit(
             program,
             inputs,
             RenderOptions {
@@ -338,31 +362,102 @@ impl Playback {
                 premultiply: true,
             },
         );
-        let frame = match rendered {
-            Ok(frame) => frame,
+        self.stats.submitted(started.elapsed());
+        match submitted {
+            Ok(()) => true,
             Err(error) => {
                 self.failure = Some(Failure::text(error.to_string()));
-                return;
+                false
+            }
+        }
+    }
+
+    /// Uploads a frame into the texture on screen: one texture per size, updated in place.
+    fn present(&mut self, frame: Frame, window: &mut Window) {
+        let started = Instant::now();
+        let Frame { size, pixels, gpu_time, .. } = frame;
+        let (Ok(width), Ok(height)) = (i32::try_from(size.width), i32::try_from(size.height)) else {
+            log::error!("a {}x{} frame is too large to show", size.width, size.height);
+            return;
+        };
+        let device_size = gpui::size(DevicePixels(width), DevicePixels(height));
+        let stride = size.width * 4;
+        let result = match self.texture {
+            Some((texture, shown)) if shown == size => window.update_dynamic_texture(
+                texture,
+                Bounds::new(point(DevicePixels(0), DevicePixels(0)), device_size),
+                &pixels,
+                stride,
+            ),
+            previous => {
+                if let Some((old, _)) = previous {
+                    window.remove_dynamic_texture(old);
+                }
+                self.texture = None;
+                window
+                    .create_dynamic_texture(device_size, &pixels, stride)
+                    .map(|texture| self.texture = Some((texture, size)))
             }
         };
-        if let Some(seconds) = frame.gpu_time
+        if let Err(error) = result {
+            log::warn!("showing a frame failed: {error:#}");
+        }
+        if let Some(seconds) = gpu_time
             && self.player.playing()
         {
             self.player.meter.record_gpu_time(seconds);
         }
-        // GPUI's images are BGRA bytes in an image buffer.
-        let Some(buffer) =
-            image::RgbaImage::from_raw(frame.size.width, frame.size.height, frame.pixels)
-        else {
-            return;
-        };
-        let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
-            buffer
-        )]));
-        if let Some(old) = self.image.replace(image)
-            && let Err(error) = window.drop_image(old)
-        {
-            log::warn!("dropping the previous frame failed: {error:#}");
+        self.stats.presented(started.elapsed(), gpu_time);
+    }
+}
+
+/// Averages the CPU and GPU cost of the preview's frames, logged every `STATS_PERIOD`.
+#[derive(Default)]
+struct FrameStats {
+    since: Option<Instant>,
+    submits: u32,
+    submit_time: Duration,
+    frames: u32,
+    present_time: Duration,
+    gpu_total: f64,
+    gpu_count: u32,
+}
+
+impl FrameStats {
+    fn submitted(&mut self, submit: Duration) {
+        self.since.get_or_insert_with(Instant::now);
+        self.submits += 1;
+        self.submit_time += submit;
+    }
+
+    fn presented(&mut self, present: Duration, gpu: Option<f64>) {
+        let now = Instant::now();
+        let since = *self.since.get_or_insert(now);
+        self.frames += 1;
+        self.present_time += present;
+        if let Some(seconds) = gpu {
+            self.gpu_total += seconds;
+            self.gpu_count += 1;
         }
+        let elapsed = now.duration_since(since);
+        if elapsed < STATS_PERIOD {
+            return;
+        }
+        let frames = f64::from(self.frames);
+        let per_frame_ms = |total: Duration| total.as_secs_f64() * 1e3 / frames;
+        let gpu_ms = (self.gpu_count > 0)
+            .then(|| self.gpu_total * 1e3 / f64::from(self.gpu_count));
+        log::debug!(
+            "preview: {:.1} fps ({:.2} ms per frame; submit {:.3} ms, present {:.3} ms, gpu {} ms)",
+            frames / elapsed.as_secs_f64(),
+            elapsed.as_secs_f64() * 1e3 / frames,
+            self.submit_time.as_secs_f64() * 1e3 / f64::from(self.submits.max(1)),
+            per_frame_ms(self.present_time),
+            gpu_ms.map_or_else(|| "n/a".to_owned(), |ms| format!("{ms:.3}")),
+        );
+        *self = Self {
+            since: Some(now),
+            ..Self::default()
+        };
     }
 }

@@ -1,5 +1,6 @@
 use std::cell::{OnceCell, RefCell};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use anyhow::{Context as _, Result};
 use shader_graph::ShaderProgram;
@@ -124,10 +125,60 @@ pub struct RenderOptions {
     pub premultiply: bool,
 }
 
+/// Staging buffers for one frame's pixels and timing.
 struct Readback {
+    size: Size,
     pixels: wgpu::Buffer,
     timing: wgpu::Buffer,
 }
+
+/// A buffer's map result, until it has been seen. `None` once mapped.
+type Mapping = Option<Receiver<Result<(), wgpu::BufferAsyncError>>>;
+
+/// A frame whose copy into a staging buffer is on its way to the CPU.
+struct Submitted {
+    readback: Readback,
+    format: PixelFormat,
+    pixels: Mapping,
+    timing: Mapping,
+}
+
+impl Submitted {
+    /// Whether both buffers are mapped, without waiting for them.
+    fn poll(&mut self) -> Result<bool> {
+        let pixels = poll_mapping(&mut self.pixels)?;
+        let timing = poll_mapping(&mut self.timing)?;
+        Ok(pixels && timing)
+    }
+}
+
+/// Maps a buffer for reading once the copy into it has run; the result is
+/// reported through the returned receiver, by `poll_mapping`.
+fn map_for_read(buffer: &wgpu::Buffer) -> Mapping {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+        // The receiver is gone only when the frame was dropped unread.
+        let _ = sender.send(result);
+    });
+    Some(receiver)
+}
+
+/// Whether a buffer's mapping has finished, without waiting; a failed mapping is an error.
+fn poll_mapping(mapping: &mut Mapping) -> Result<bool> {
+    let Some(receiver) = mapping else { return Ok(true) };
+    match receiver.try_recv() {
+        Ok(result) => {
+            result?;
+            *mapping = None;
+            Ok(true)
+        }
+        Err(TryRecvError::Empty) => Ok(false),
+        Err(TryRecvError::Disconnected) => anyhow::bail!("the frame's readback was dropped"),
+    }
+}
+
+/// Frames read back at once: one being copied out while the next draws.
+const READBACK_DEPTH: usize = 2;
 
 /// What a frame is drawn with: its inputs, and the canvas' size.
 #[derive(Clone, Copy)]
@@ -240,7 +291,9 @@ pub struct Renderer {
     simulation: SimulationState,
     linear: Option<wgpu::Texture>,
     output: Option<wgpu::Texture>,
-    readback: Option<(Size, Readback)>,
+    /// Staging buffers no frame is reading, reused by the next submitted frame.
+    free_readbacks: Vec<Readback>,
+    in_flight: VecDeque<Submitted>,
 }
 
 fn filter_mode(filter: SamplerFilter) -> wgpu::FilterMode {
@@ -300,7 +353,8 @@ impl Renderer {
             simulation: SimulationState::default(),
             linear: None,
             output: None,
-            readback: None,
+            free_readbacks: Vec::new(),
+            in_flight: VecDeque::new(),
         })
     }
 
@@ -802,17 +856,73 @@ impl Renderer {
         Ok(())
     }
 
-    /// Draws one frame of `program` and reads it back.
+    /// Draws one frame of `program` and reads it back, waiting for the GPU.
     pub fn render(
         &mut self,
         program: &Program,
         inputs: FrameInputs,
         options: RenderOptions,
     ) -> Result<Frame> {
-        let size = options.size;
-        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
-        self.ensure_targets(size, options.format);
+        let readback = self.new_readback(options.size)?;
+        let mut submitted = self.start_readback(program, inputs, options, readback)?;
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        anyhow::ensure!(submitted.poll()?, "the frame's readback didn't finish");
+        self.read_out(submitted)
+    }
 
+    /// Starts drawing a frame and copying it to the CPU, without waiting for
+    /// the GPU. `take_frame` returns it once the copy has finished.
+    pub fn submit(
+        &mut self,
+        program: &Program,
+        inputs: FrameInputs,
+        options: RenderOptions,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.in_flight.len() < READBACK_DEPTH,
+            "frames are already waiting to be read back"
+        );
+        let readback = self.take_readback(options.size)?;
+        let submitted = self.start_readback(program, inputs, options, readback)?;
+        self.in_flight.push_back(submitted);
+        Ok(())
+    }
+
+    /// The oldest submitted frame, if its copy has finished; never waits.
+    /// A frame whose copy failed is returned as an error, and the frame is
+    /// consumed either way.
+    pub fn take_frame(&mut self) -> Option<Result<Frame>> {
+        if self.in_flight.is_empty() {
+            return None;
+        }
+        // Mapping callbacks run while the device is polled; this does not wait for the GPU.
+        if let Err(error) = self.device.poll(wgpu::PollType::Poll) {
+            self.in_flight.clear();
+            return Some(Err(error.into()));
+        }
+        let front = self.in_flight.front_mut()?;
+        match front.poll() {
+            Ok(false) => None,
+            Ok(true) => {
+                let submitted = self.in_flight.pop_front()?;
+                Some(self.read_out(submitted))
+            }
+            Err(error) => {
+                self.in_flight.pop_front();
+                Some(Err(error))
+            }
+        }
+    }
+
+    fn start_readback(
+        &mut self,
+        program: &Program,
+        inputs: FrameInputs,
+        options: RenderOptions,
+        readback: Readback,
+    ) -> Result<Submitted> {
+        let size = options.size;
+        self.ensure_targets(size, options.format);
         let (linear, output) = (
             self.linear.clone().context("no target")?,
             self.output.clone().context("no target")?,
@@ -829,16 +939,13 @@ impl Renderer {
                 premultiply: options.premultiply,
             },
         );
-
-        let padded_row = (size.width * 4).next_multiple_of(ROW_ALIGNMENT);
-        let (_, readback) = self.readback.as_ref().context("no readback")?;
         encoder.copy_texture_to_buffer(
             output.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
                 buffer: &readback.pixels,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(padded_row),
+                    bytes_per_row: Some((size.width * 4).next_multiple_of(ROW_ALIGNMENT)),
                     rows_per_image: None,
                 },
             },
@@ -849,27 +956,79 @@ impl Renderer {
         }
         self.queue.submit([encoder.finish()]);
 
-        let pixel_slice = readback.pixels.slice(..);
-        pixel_slice.map_async(wgpu::MapMode::Read, |_| {});
-        let timing_slice = readback.timing.slice(..);
-        if self.timer.is_some() {
-            timing_slice.map_async(wgpu::MapMode::Read, |_| {});
-        }
-        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        let pixels = map_for_read(&readback.pixels);
+        let timing = if self.timer.is_some() {
+            map_for_read(&readback.timing)
+        } else {
+            None
+        };
+        Ok(Submitted {
+            readback,
+            format: options.format,
+            pixels,
+            timing,
+        })
+    }
 
-        let mapped = pixel_slice.get_mapped_range()?;
-        let mut pixels = Vec::with_capacity((size.width * size.height * 4) as usize);
-        for row in mapped.chunks(padded_row as usize).take(size.height as usize) {
-            pixels.extend_from_slice(&row[..(size.width * 4) as usize]);
+    /// Copies a frame's mapped pixels out and unmaps its buffers.
+    fn read_out(&mut self, submitted: Submitted) -> Result<Frame> {
+        let Submitted { readback, format, .. } = submitted;
+        let Readback { size, pixels, timing } = readback;
+        let row_bytes = (size.width * 4) as usize;
+        let padded_row = row_bytes.next_multiple_of(ROW_ALIGNMENT as usize);
+        let mut out = Vec::with_capacity(row_bytes * size.height as usize);
+        {
+            let mapped = pixels.slice(..).get_mapped_range()?;
+            for row in mapped.chunks_exact(padded_row).take(size.height as usize) {
+                if let Some(bytes) = row.get(..row_bytes) {
+                    out.extend_from_slice(bytes);
+                }
+            }
         }
-        drop(mapped);
-        readback.pixels.unmap();
-        let gpu_time = self.timer.as_ref().and_then(|timer| {
-            let seconds = timer.seconds(&timing_slice.get_mapped_range().ok()?);
-            readback.timing.unmap();
-            seconds
-        });
-        Ok(Frame { size, format: options.format, pixels, gpu_time })
+        pixels.unmap();
+        let gpu_time = match &self.timer {
+            Some(timer) => {
+                let seconds = timing
+                    .slice(..)
+                    .get_mapped_range()
+                    .ok()
+                    .and_then(|view| timer.seconds(&view));
+                timing.unmap();
+                seconds
+            }
+            None => None,
+        };
+        if self.free_readbacks.len() < READBACK_DEPTH {
+            self.free_readbacks.push(Readback { size, pixels, timing });
+        }
+        Ok(Frame { size, format, pixels: out, gpu_time })
+    }
+
+    /// A staging buffer no frame is reading, from the pool when one fits the size.
+    fn take_readback(&mut self, size: Size) -> Result<Readback> {
+        self.free_readbacks.retain(|r| r.size == size);
+        match self.free_readbacks.pop() {
+            Some(readback) => Ok(readback),
+            None => self.new_readback(size),
+        }
+    }
+
+    fn new_readback(&self, size: Size) -> Result<Readback> {
+        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        let padded_row = u64::from((size.width * 4).next_multiple_of(ROW_ALIGNMENT));
+        let buffer = |label, bytes| {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: bytes,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            })
+        };
+        Ok(Readback {
+            size,
+            pixels: buffer("frame readback", padded_row * u64::from(size.height)),
+            timing: buffer("timing readback", TIMING_BYTES),
+        })
     }
 
     /// Textures and buffers for frames of `size`, kept while it stays the same.
@@ -908,24 +1067,6 @@ impl Renderer {
                 "output",
                 output_format,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            ));
-        }
-        if self.readback.as_ref().map(|(s, _)| *s) != Some(size) {
-            let padded_row = u64::from((size.width * 4).next_multiple_of(ROW_ALIGNMENT));
-            let buffer = |label, size| {
-                self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some(label),
-                    size,
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                    mapped_at_creation: false,
-                })
-            };
-            self.readback = Some((
-                size,
-                Readback {
-                    pixels: buffer("frame readback", padded_row * u64::from(size.height)),
-                    timing: buffer("timing readback", TIMING_BYTES),
-                },
             ));
         }
     }
@@ -996,6 +1137,43 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             uniforms: Vec::new(),
             frame: Default::default(),
         }
+    }
+
+    #[test]
+    fn submitted_frames_come_out_as_rendered_ones() {
+        let mut renderer = Renderer::new().unwrap();
+        let program = renderer.compile(&plan(CODE)).unwrap();
+        let options = RenderOptions {
+            size: Size::new(100, 50),
+            format: PixelFormat::Bgra8,
+            premultiply: true,
+        };
+        let first = FrameInputs { time: 0.25, delta: 0.0, frame: 0 };
+        let second = FrameInputs { time: 0.75, delta: 0.0, frame: 1 };
+        let expected = [
+            renderer.render(&program, first, options).unwrap(),
+            renderer.render(&program, second, options).unwrap(),
+        ];
+
+        renderer.submit(&program, first, options).unwrap();
+        renderer.submit(&program, second, options).unwrap();
+        assert!(
+            renderer.submit(&program, first, options).is_err(),
+            "no more frames than the readback depth wait at once"
+        );
+        let mut taken = Vec::new();
+        while taken.len() < 2 {
+            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            if let Some(frame) = renderer.take_frame() {
+                taken.push(frame.unwrap());
+            }
+        }
+        assert!(renderer.take_frame().is_none());
+        for (frame, want) in taken.iter().zip(&expected) {
+            assert_eq!(frame.size, want.size);
+            assert_eq!(frame.pixels, want.pixels);
+        }
+        assert_ne!(taken[0].pixels, taken[1].pixels, "each frame is its own");
     }
 
     #[test]

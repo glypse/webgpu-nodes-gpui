@@ -91,8 +91,11 @@ impl Player {
         self.dirty = true;
     }
 
+    /// A frame in flight wants animation frames too, so the host collects it and calls `finished`.
     pub fn wants_animation_frame(&self) -> bool {
-        self.playing || (self.dirty && self.frames_in_flight < self.max_frames_in_flight)
+        self.playing
+            || self.frames_in_flight > 0
+            || (self.dirty && self.frames_in_flight < self.max_frames_in_flight)
     }
 
     /// Runs an animation frame at `timestamp` seconds. `draw` is called with
@@ -195,12 +198,14 @@ mod tests {
         player.invalidate();
         display.next_frame(&mut player, true);
         assert_eq!(display.drawn, 1);
-        assert!(!player.wants_animation_frame());
+        assert!(player.wants_animation_frame());
 
         player.finished();
         assert!(player.wants_animation_frame());
         display.next_frame(&mut player, true);
         assert_eq!(display.drawn, 2);
+        player.finished();
+        assert!(!player.wants_animation_frame());
     }
 
     #[test]
