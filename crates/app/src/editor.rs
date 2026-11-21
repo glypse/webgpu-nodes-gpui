@@ -12,7 +12,8 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_flow::{
-    Connection as FlowConnection, ControlsOptions, Edge, EdgeStyle, Flow, FlowEvent, Id, Layers,
+    Connection as FlowConnection, ControlsOptions, Edge, EdgeStyle, FitViewOptions, Flow, FlowEvent, Id,
+    Layers,
     Node, Viewport, Xy,
 };
 use shader_graph::catalog::{
@@ -233,7 +234,10 @@ impl Editor {
             flow.options.delete_key = false;
             flow.options.min_zoom = 0.1;
             flow.options.max_zoom = 3.0;
-            flow.options.theme = gpui_flow::FlowTheme::dark();
+            flow.options.theme = gpui_flow::FlowTheme {
+                background: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+                ..gpui_flow::FlowTheme::dark()
+            };
             flow.options.controls = Some(ControlsOptions {
                 show_zoom: false,
                 show_interactive: false,
@@ -338,6 +342,12 @@ impl Editor {
                 None => flow.fit_view(Default::default(), cx),
             }
         });
+    }
+
+    /// Fits the nodes at exactly `zoom`, for `--zoom`.
+    pub fn fit_at_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        let options = FitViewOptions { min_zoom: Some(zoom), max_zoom: Some(zoom), ..Default::default() };
+        self.flow.update(cx, |flow, cx| flow.fit_view(options, cx));
     }
 
     /// Puts this area in the group a saved layout left it in, at the camera it had.
@@ -1659,6 +1669,33 @@ mod tests {
         scene.editor.update(cx, |e, cx| e.undo(cx));
         let member = node(&scene, cx, &scene.member);
         assert_eq!((member.position.x, member.position.y), (100.0, 100.0));
+    }
+
+    /// Card heights grow with the zoom and stay within a device pixel or two of
+    /// a straight line through the zoom-1 height, so zooming never makes a card
+    /// grow then snap back. Run at a 2x display, as on a Retina screen.
+    #[gpui::test]
+    fn node_cards_scale_linearly_with_zoom(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        cx.simulate_scale_factor_change(2.0);
+        let selector: &'static str = Box::leak(format!("node-card {}", scene.member).into_boxed_str());
+        let mut heights = Vec::new();
+        for step in 10..=40 {
+            let zoom = step as f32 / 20.0;
+            scene.editor.update(cx, |e, cx| {
+                e.flow.update(cx, |f, cx| f.set_viewport(Viewport { x: 0.0, y: 0.0, zoom }, None, cx));
+            });
+            render_frame(cx);
+            let bounds = cx.debug_bounds(selector).expect("the card is drawn");
+            heights.push((zoom, f32::from(bounds.size.height)));
+        }
+        let unit = heights.iter().find(|(z, _)| *z == 1.0).expect("zoom 1 is sampled").1;
+        for pair in heights.windows(2) {
+            assert!(pair[1].1 >= pair[0].1, "card shrank from zoom {} to {}", pair[0].0, pair[1].0);
+        }
+        for (zoom, height) in &heights {
+            assert!((height - zoom * unit).abs() <= 2.0, "zoom {zoom}: card is {height}, expected about {}", zoom * unit);
+        }
     }
 
     fn render_frame(cx: &mut gpui::VisualTestContext) {

@@ -95,7 +95,7 @@ fn main() -> ExitCode {
         };
         let project = launch.project.clone();
         let opened = cx.open_window(options, |window, cx| {
-            cx.new(|cx| Shell::new(project, window, cx))
+            cx.new(|cx| Shell::new(project, launch.zoom, window, cx))
         });
         match opened {
             Ok(handle) => {

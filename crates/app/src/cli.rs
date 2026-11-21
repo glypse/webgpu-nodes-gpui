@@ -38,6 +38,18 @@ pub struct Cli {
     /// print a summary when the app quits.
     #[arg(long, value_name = "PATH")]
     pub profile: Option<PathBuf>,
+
+    /// Zoom the first graph area to FACTOR on startup (1 is 100%), centred on its nodes.
+    #[arg(long, value_name = "FACTOR", value_parser = parse_zoom)]
+    pub zoom: Option<f32>,
+}
+
+fn parse_zoom(text: &str) -> Result<f32, String> {
+    text.trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|z| z.is_finite() && *z > 0.0)
+        .ok_or_else(|| format!("`{text}` is not a positive zoom factor"))
 }
 
 /// A window size in points.
@@ -116,5 +128,13 @@ mod tests {
     fn rejects_bad_window_sizes() {
         assert!(Cli::try_parse_from(["webgpu-nodes", "--window", "800"]).is_err());
         assert!(Cli::try_parse_from(["webgpu-nodes", "--window", "0x600"]).is_err());
+    }
+
+    #[test]
+    fn parses_a_positive_zoom() {
+        let cli = Cli::try_parse_from(["webgpu-nodes", "--zoom", "0.83"]).expect("parses");
+        assert_eq!(cli.zoom, Some(0.83));
+        assert!(Cli::try_parse_from(["webgpu-nodes", "--zoom", "0"]).is_err());
+        assert!(Cli::try_parse_from(["webgpu-nodes", "--zoom", "-1"]).is_err());
     }
 }

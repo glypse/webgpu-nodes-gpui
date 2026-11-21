@@ -113,6 +113,8 @@ struct AreaViews {
     pending: HashMap<AreaId, GraphView>,
     /// Whether the shell's own editor is shown in an area: the others edit the same project through their own.
     primary_shown: bool,
+    /// The zoom the first graph area opens at, from `--zoom`.
+    startup_zoom: Option<f32>,
 }
 
 /// The window: the screen of areas, hosting the graph editor, the previews and the code.
@@ -131,7 +133,9 @@ impl Shell {
         self.playback.update(cx, |playback, cx| playback.toggle(window, cx));
     }
 
-    pub fn new(requested: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+
+    /// `zoom` opens the first graph area at that zoom, as `--zoom` asks for at launch.
+    pub fn new(requested: Option<PathBuf>, zoom: Option<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let playback = cx.new(|_| Playback::new());
         let editor = cx.new(|cx| Editor::new(window, cx));
         let mut path = None;
@@ -174,7 +178,7 @@ impl Shell {
         })
         .detach();
 
-        let views = Rc::new(RefCell::new(AreaViews::default()));
+        let views = Rc::new(RefCell::new(AreaViews { startup_zoom: zoom, ..Default::default() }));
         if let Some(layout) = &layout {
             views.borrow_mut().pending.extend(layout.graphs.iter().cloned());
         }
@@ -198,6 +202,11 @@ impl Shell {
                                 };
                                 if let Some(view) = views.pending.remove(&id) {
                                     area.update(cx, |e, cx| e.set_view(&view, cx));
+                                }
+                                if views.graphs.is_empty()
+                                    && let Some(zoom) = views.startup_zoom
+                                {
+                                    area.update(cx, |e, cx| e.fit_at_zoom(zoom, cx));
                                 }
                                 views.graphs.insert(id, area.clone());
                                 area
