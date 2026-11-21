@@ -127,6 +127,20 @@ impl GraphModel {
         self.history.record(snapshot);
     }
 
+    /// Like `edit`, but a gesture's steps (`first` false) replace the step
+    /// the gesture began with instead of adding their own.
+    pub fn edit_gesture(&mut self, first: bool, f: impl FnOnce(&mut GraphProject)) {
+        f(&mut self.project);
+        if first {
+            self.changed();
+            return;
+        }
+        self.project.reindex();
+        self.resolver.clear();
+        let snapshot = Self::snapshot_of(&self.project);
+        self.history.replace_current(snapshot);
+    }
+
     // ── History ──────────────────────────────────────────────────────────────
 
     pub fn can_undo(&self) -> bool {

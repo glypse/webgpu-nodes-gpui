@@ -13,7 +13,6 @@ use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
 use crate::playback::Playback;
 use crate::preview::{self, PreviewArea, PreviewToolbar};
-use crate::program::program_source;
 use crate::timeline::TimelineBar;
 
 actions!(shell, [TogglePlayback, PreviousFrame, NextFrame, GoToStart]);
@@ -93,14 +92,14 @@ impl Shell {
 
         let first = editor.read(cx).shader().clone();
         playback.update(cx, |p, cx| {
-            p.set_source(first.map(program_source), window, cx)
+            p.set_source(first, window, cx)
         });
         cx.subscribe_in(&editor, window, {
             let playback = playback.clone();
             move |_, _, event: &EditorEvent, window, cx| {
-                let EditorEvent::Shader(shader) = event;
-                playback.update(cx, |p, cx| {
-                    p.set_source(shader.clone().map(program_source), window, cx);
+                playback.update(cx, |p, cx| match event {
+                    EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
+                    EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
                 });
             }
         })

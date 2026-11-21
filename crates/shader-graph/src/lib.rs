@@ -4,7 +4,6 @@ pub mod catalog;
 pub mod codegen;
 pub mod enums;
 pub mod graph;
-pub mod legacy;
 pub mod nodes;
 #[cfg(test)]
 mod testing;
@@ -12,7 +11,5 @@ mod testing;
 mod tests;
 pub mod types;
 pub mod zones;
-
-pub use legacy::*;
 
 pub use codegen::{ShaderProgram, UniformBlock, UniformField, UniformScalar, UniformValue};

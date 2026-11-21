@@ -1,0 +1,606 @@
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use gpui::{
+    AnyElement, App, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
+    SharedString, Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+};
+use gpui_flow::{HandleType, NodeProps, Position};
+use shader_graph::graph::{GraphModel, GraphNode, GroupSide, NODE_GROUP, REROUTE, TypeChoice};
+use shader_graph::nodes::CUSTOM_WGSL;
+use shader_graph::types::{
+    InputControl, InputValue, ScalarKind, WgslType, enum_value,
+    input_control,
+};
+use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
+use theme::ActiveTheme as _;
+
+use super::fields::{Edit, Scrub, check, picker};
+use super::socket::{SocketSpec, socket};
+use crate::editor::{Editor, ListItem};
+
+#[derive(Clone)]
+pub struct InputView {
+    pub id: String,
+    pub label: String,
+    pub ty: WgslType,
+    pub control: Option<InputControl>,
+    pub value: Option<InputValue>,
+    pub variadic: bool,
+    pub fallback: bool,
+    /// The name of the type variable deciding the socket's type.
+    pub shared: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct OutputView {
+    pub id: String,
+    pub label: String,
+    pub ty: WgslType,
+    pub shared: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct SettingView {
+    pub key: String,
+    pub options: Vec<(String, String)>,
+    pub value: String,
+}
+
+/// What a node's card shows, taken from the model so the card can be
+/// drawn without it.
+#[derive(Clone)]
+pub struct NodeView {
+    pub id: String,
+    pub node_type: String,
+    pub label: String,
+    /// The viewed document can't be edited.
+    pub locked: bool,
+    pub group_locked: bool,
+    pub settings: Vec<SettingView>,
+    pub type_choice: Option<TypeChoice>,
+    pub inputs: Vec<InputView>,
+    pub outputs: Vec<OutputView>,
+    /// Inputs of variants not picked: kept linked, undrawn.
+    pub parked: Vec<String>,
+    pub only_linked: bool,
+    pub boundary: Option<GroupSide>,
+    pub zone: bool,
+    pub reroute_type: Option<WgslType>,
+}
+
+pub fn node_width(node_type: &str) -> f32 {
+    match node_type {
+        CUSTOM_WGSL => 320.0,
+        REROUTE => 18.0,
+        _ => 180.0,
+    }
+}
+
+pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
+    let descriptor = model.resolve_descriptor(node);
+    let id = node.id.as_str();
+    let doc = model.active_document();
+    let variables = &doc.type_variables;
+    let shared_of = |handle: &str, boundary: bool| -> Option<String> {
+        if !boundary {
+            return None;
+        }
+        let side = node.side()?;
+        let def = doc.interface(side).iter().find(|h| h.id == handle)?;
+        let variable = def.ty.variable()?;
+        variables.iter().find(|v| v.id == variable).map(|v| v.name.clone())
+    };
+    let boundary = node.side().is_some();
+    let hidden = model.hidden_inputs(id);
+    let inputs = model
+        .resolve_node_inputs(id)
+        .into_iter()
+        .filter(|i| !hidden.contains(&i.id))
+        .map(|def| {
+            let ty = model.resolve_input_type(id, &def.id);
+            let value = node
+                .data
+                .values
+                .get(&def.id)
+                .or_else(|| descriptor.default_data.values.get(&def.id))
+                .copied();
+            InputView {
+                control: def.control.as_ref().map(|_| input_control(&def, ty)).or_else(|| {
+                    (!def.variadic && !def.fallback).then(|| input_control(&def, ty))
+                }),
+                shared: shared_of(&def.id, boundary),
+                id: def.id,
+                label: def.label,
+                ty,
+                value,
+                variadic: def.variadic,
+                fallback: def.fallback,
+            }
+        })
+        .collect();
+    let outputs = model
+        .resolve_node_outputs(id)
+        .into_iter()
+        .map(|def| OutputView {
+            ty: model.resolve_output_handle_type(id, &def.id),
+            shared: shared_of(&def.id, boundary),
+            id: def.id,
+            label: def.label,
+        })
+        .collect();
+    let settings = descriptor
+        .settings
+        .iter()
+        .map(|s| SettingView {
+            key: s.key.to_owned(),
+            options: s.options.iter().map(|(v, l)| ((*v).to_owned(), (*l).to_owned())).collect(),
+            value: s.value(&node.data).to_owned(),
+        })
+        .collect();
+    NodeView {
+        id: node.id.clone(),
+        node_type: node.node_type.clone(),
+        label: model.node_label(id),
+        locked: model.is_locked(),
+        group_locked: node.group.as_ref().is_some_and(|g| g.locked),
+        settings,
+        type_choice: model.type_choice(id),
+        inputs,
+        outputs,
+        parked: hidden.into_iter().collect(),
+        only_linked: node.data.hide_unlinked == Some(true),
+        boundary: node.side(),
+        zone: is_zone_node_type(&node.node_type),
+        reroute_type: node.is(REROUTE).then(|| model.resolve_input_type(id, "in")),
+    }
+}
+
+const PAD: f32 = 12.0;
+
+type PointAction = Rc<dyn Fn(gpui::Point<gpui::Pixels>, &mut App)>;
+
+fn type_items(
+    ed: &WeakEntity<Editor>,
+    view: &NodeView,
+    choice: &TypeChoice,
+) -> Vec<ListItem> {
+    let current = choice.forced;
+    let mut items = Vec::new();
+    if choice.inferable {
+        let (ed, id) = (ed.clone(), view.id.clone());
+        items.push(ListItem::new(
+            format!("Inferred ({})", choice.inferred.id()),
+            Some(current.is_none()),
+            Rc::new(move |_, cx| {
+                ed.update(cx, |e, cx| e.set_node_type(&id, None, cx)).ok();
+            }),
+        ));
+    }
+    for ty in &choice.types {
+        let (ed, id, ty) = (ed.clone(), view.id.clone(), *ty);
+        items.push(ListItem::new(
+            ty.id(),
+            Some(current == Some(ty) || (!choice.inferable && current.is_none() && ty == choice.inferred)),
+            Rc::new(move |_, cx| {
+                ed.update(cx, |e, cx| e.set_node_type(&id, Some(ty), cx)).ok();
+            }),
+        ));
+    }
+    items
+}
+
+fn value_control(
+    props: &NodeProps,
+    view: &NodeView,
+    input: &InputView,
+    ed: &WeakEntity<Editor>,
+    cx: &App,
+) -> AnyElement {
+    let z = props.zoom;
+    let readonly = view.locked;
+    let Some(control) = &input.control else {
+        return div().into_any_element();
+    };
+    let (node, handle, ty) = (view.id.clone(), input.id.clone(), input.ty);
+    match control {
+        InputControl::Enum { variants } => {
+            let current = enum_value(input.value.as_ref(), variants);
+            let label = variants
+                .iter()
+                .find(|v| Some(v.int()) == current)
+                .map_or_else(String::new, |v| v.label.clone());
+            let items: Vec<ListItem> = variants
+                .iter()
+                .map(|v| {
+                    let (ed, node, handle, value) = (ed.clone(), node.clone(), handle.clone(), v.int());
+                    ListItem::new(
+                        v.label.clone(),
+                        Some(Some(value) == current),
+                        Rc::new(move |_, cx| {
+                            ed.update(cx, |e, cx| e.set_enum(&node, &handle, value, cx)).ok();
+                        }),
+                    )
+                })
+                .collect();
+            let ed = ed.clone();
+            picker(
+                SharedString::from(format!("enum-{}-{}", view.id, input.id)),
+                label,
+                z,
+                readonly,
+                cx,
+                move |at, _, cx| {
+                    let items = items.clone();
+                    ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                },
+            )
+            .into_any_element()
+        }
+        InputControl::Toggle { .. } => {
+            let n = ty.components();
+            div()
+                .flex()
+                .gap(px(4.0 * z))
+                .children((0..n).map(|i| {
+                    let on = input.value.as_ref().is_some_and(|v| v.component(i) != 0.0);
+                    let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
+                    check(
+                        SharedString::from(format!("t-{node}-{handle}-{i}")),
+                        on,
+                        z,
+                        readonly,
+                        cx,
+                        move |value, _, cx| {
+                            ed.update(cx, |e, cx| {
+                                e.set_component(&node, &handle, ty, i, f64::from(u8::from(value)), Edit::Commit, cx);
+                            })
+                            .ok();
+                        },
+                    )
+                }))
+                .into_any_element()
+        }
+        InputControl::Number { min, max, .. } => {
+            let n = ty.components();
+            let integer = ty.kind() != ScalarKind::F32;
+            let (min, max) = (*min, *max);
+            let color = matches!(input.control, Some(InputControl::Color | InputControl::Wheel));
+            let _ = color;
+            div()
+                .flex()
+                .gap(px(4.0 * z))
+                .children((0..n).map(|i| {
+                    let value = input.value.as_ref().map_or(0.0, |v| v.component(i));
+                    let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
+                    Scrub::new(SharedString::from(format!("n-{node}-{handle}-{i}")), value, z)
+                        .integer(integer)
+                        .range(min, max)
+                        .readonly(readonly)
+                        .on_change(move |v, edit, _, cx| {
+                            ed.update(cx, |e, cx| e.set_component(&node, &handle, ty, i, v, edit, cx)).ok();
+                        })
+                }))
+                .into_any_element()
+        }
+        InputControl::Color | InputControl::Wheel => {
+            let n = ty.components();
+            let channel = |i: usize| input.value.as_ref().map_or(0.0, |v| v.component(i)).clamp(0.0, 1.0) as f32;
+            let swatch = gpui::rgba(
+                (u32::from((channel(0) * 255.0) as u8) << 24)
+                    | (u32::from((channel(1) * 255.0) as u8) << 16)
+                    | (u32::from((channel(2) * 255.0) as u8) << 8)
+                    | 0xff,
+            );
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0 * z))
+                .child(div().h(px(14.0 * z)).rounded(px(3.0 * z)).bg(swatch).border(px(1.0)).border_color(cx.theme().colors.border))
+                .child(div().flex().gap(px(4.0 * z)).children((0..n).map(|i| {
+                    let value = input.value.as_ref().map_or(0.0, |v| v.component(i));
+                    let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
+                    Scrub::new(SharedString::from(format!("c-{node}-{handle}-{i}")), value, z)
+                        .range(Some(0.0), Some(1.0))
+                        .readonly(readonly)
+                        .on_change(move |v, edit, _, cx| {
+                            ed.update(cx, |e, cx| e.set_component(&node, &handle, ty, i, v, edit, cx)).ok();
+                        })
+                })))
+                .into_any_element()
+        }
+    }
+}
+
+fn label_text(text: String, z: f32, cx: &App) -> gpui::Div {
+    div()
+        .text_size(px(12.0 * z))
+        .text_color(cx.theme().colors.muted_foreground)
+        .whitespace_nowrap()
+        .child(text)
+}
+
+fn reroute(props: &NodeProps, view: &NodeView, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    let ty = view.reroute_type.unwrap_or(WgslType::F32);
+    let z = props.zoom;
+    let mk = |kind: HandleType, position: Position| {
+        let spec = SocketSpec { id: Some(if kind == HandleType::Target { "in" } else { "out" }.into()), kind, position, ty, inset: 0.0 };
+        let h = socket(props, &spec, theme);
+        h.left(px(0.0)).mt(px(-4.0 * z)).ml(px(5.0 * z))
+    };
+    div()
+        .relative()
+        .size(px(18.0 * z))
+        .rounded_full()
+        .when(props.selected, |d| d.border(px(1.0)).border_color(theme.colors.primary))
+        .child(mk(HandleType::Target, Position::Left))
+        .child(mk(HandleType::Source, Position::Right))
+        .into_any_element()
+}
+
+pub fn render_node(
+    view: &NodeView,
+    props: &NodeProps,
+    ed: &WeakEntity<Editor>,
+    _window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    if view.node_type == REROUTE {
+        return reroute(props, view, cx);
+    }
+    let z = props.zoom;
+    let theme = cx.theme().clone();
+    let c = &theme.colors;
+    let s = |v: f32| px(v * z);
+    let linked_in = props.connected_handles(HandleType::Target);
+    let linked_out = props.connected_handles(HandleType::Source);
+    let is_linked = |set: &HashSet<Option<gpui_flow::Id>>, id: &str| set.contains(&Some(id.to_owned().into()));
+
+    let settings_ed = ed.clone();
+    let settings_id = view.id.clone();
+    let header = div()
+        .flex()
+        .flex_col()
+        .gap(s(4.0))
+        .px(s(PAD))
+        .pt(s(PAD))
+        .pb(s(8.0))
+        .border_b(px(1.0))
+        .border_color(c.border)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(s(8.0))
+                .child(div().min_w_0().truncate().text_size(s(14.0)).font_weight(gpui::FontWeight::MEDIUM).child(view.label.clone()))
+                .child(
+                    div()
+                        .id("settings")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(s(20.0))
+                        .rounded(s(4.0))
+                        .text_size(s(13.0))
+                        .text_color(c.muted_foreground)
+                        .cursor_pointer()
+                        .hover(|st| st.bg(c.muted).text_color(c.foreground))
+                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            cx.stop_propagation();
+                            settings_ed.update(cx, |e, cx| e.open_sheet(&settings_id, cx)).ok();
+                        })
+                        .child("≡"),
+                ),
+        )
+        .when(view.node_type == NODE_GROUP, |d| {
+            let (ed, id) = (ed.clone(), view.id.clone());
+            d.child(
+                div()
+                    .id("enter")
+                    .h(s(26.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(s(6.0))
+                    .bg(c.secondary)
+                    .text_size(s(12.0))
+                    .cursor_pointer()
+                    .hover(|st| st.opacity(0.85))
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        cx.stop_propagation();
+                        ed.update(cx, |e, cx| e.enter_group(&id, cx)).ok();
+                    })
+                    .child(if view.group_locked { "Enter (locked)" } else { "Enter group" }),
+            )
+        })
+        .children(view.type_choice.clone().map(|choice| {
+            let label = match (choice.forced, choice.inferable) {
+                (Some(t), _) => t.id().to_owned(),
+                (None, true) => format!("{} (inferred)", choice.inferred.id()),
+                (None, false) => choice.inferred.id().to_owned(),
+            };
+            let items = type_items(ed, view, &choice);
+            let ed = ed.clone();
+            div().flex().child(picker(
+                SharedString::from(format!("type-{}", view.id)),
+                label,
+                z,
+                view.locked,
+                cx,
+                move |at, _, cx| {
+                    let items = items.clone();
+                    ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                },
+            ))
+        }))
+        .children(view.settings.iter().map(|setting| {
+            let label = setting
+                .options
+                .iter()
+                .find(|(v, _)| *v == setting.value)
+                .map_or_else(|| setting.value.clone(), |(_, l)| l.clone());
+            let items: Vec<ListItem> = setting
+                .options
+                .iter()
+                .map(|(value, label)| {
+                    let (ed, id, key, value) = (ed.clone(), view.id.clone(), setting.key.clone(), value.clone());
+                    ListItem::new(
+                        label.clone(),
+                        Some(value == setting.value),
+                        Rc::new(move |_, cx| {
+                            ed.update(cx, |e, cx| e.set_setting(&id, &key, &value, cx)).ok();
+                        }),
+                    )
+                })
+                .collect();
+            let ed = ed.clone();
+            div().flex().child(picker(
+                SharedString::from(format!("set-{}-{}", view.id, setting.key)),
+                label,
+                z,
+                view.locked,
+                cx,
+                move |at, _, cx| {
+                    let items = items.clone();
+                    ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                },
+            ))
+        }));
+
+    let row = || div().relative().flex().items_center().gap(s(6.0)).min_h(s(24.0));
+
+    let outputs = view.outputs.iter().filter(|o| !view.only_linked || is_linked(&linked_out, &o.id)).map(|o| {
+        let spec = SocketSpec { id: Some(o.id.clone()), kind: HandleType::Source, position: Position::Right, ty: o.ty, inset: PAD };
+        let shared = o.shared.as_ref().map(|n| format!(" ({n})")).unwrap_or_default();
+        row()
+            .justify_end()
+            .child(label_text(format!("{}: {}{shared}", o.label, o.ty.id()), z, cx))
+            .child(socket(props, &spec, &theme))
+    });
+
+    let hidden_handles = view.parked.iter().filter(|id| is_linked(&linked_in, id)).map(|id| {
+        props
+            .handle(Some(id.clone().into()), HandleType::Target, Position::Left)
+            .connectable(false)
+            .custom_look()
+            .free()
+            .absolute()
+            .size(px(1.0))
+            .opacity(0.0)
+    });
+
+    let inputs = view.inputs.iter().filter(|i| !view.only_linked || is_linked(&linked_in, &i.id)).map(|i| {
+        let linked = is_linked(&linked_in, &i.id);
+        let spec = SocketSpec { id: Some(i.id.clone()), kind: HandleType::Target, position: Position::Left, ty: i.ty, inset: PAD };
+        let shared = i.shared.as_ref().map(|n| format!(" ({n})")).unwrap_or_default();
+        let body: AnyElement = if i.variadic || linked {
+            label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
+        } else if i.fallback {
+            label_text(format!("{}: {} (default)", i.label, i.ty.id()), z, cx).into_any_element()
+        } else if i.control.is_some() {
+            let enum_control = matches!(i.control, Some(InputControl::Enum { .. }));
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .gap(s(2.0))
+                .child(label_text(
+                    if enum_control { i.label.clone() } else { format!("{}: {}", i.label, i.ty.id()) },
+                    z,
+                    cx,
+                ))
+                .child(value_control(props, view, i, ed, cx))
+                .into_any_element()
+        } else {
+            label_text(format!("{}: {}", i.label, i.ty.id()), z, cx).into_any_element()
+        };
+        row().child(socket(props, &spec, &theme)).child(body)
+    });
+
+    let (add_boundary, add_zone) = (
+        view.boundary.is_some() && !view.locked && !view.only_linked,
+        view.zone && !view.locked && !view.only_linked,
+    );
+    let add_button = |id: &'static str, label: &'static str, on_click: PointAction| {
+        picker(id, label, z, false, cx, move |at, _, cx| on_click(at, cx))
+    };
+
+    let virtual_row = |kind: HandleType| {
+        let handle = props
+            .handle(Some(NEW_ITEM_HANDLE.to_owned().into()), kind, if kind == HandleType::Target { Position::Left } else { Position::Right })
+            .sized(8.0)
+            .custom_look()
+            .free()
+            .absolute()
+            .top(gpui::relative(0.5))
+            .mt(px(-4.0 * z))
+            .rounded_full()
+            .border(px(1.0))
+            .border_color(c.muted_foreground);
+        let handle = if kind == HandleType::Target { handle.left(px(-(PAD + 4.0) * z)) } else { handle.right(px(-(PAD + 4.0) * z)) };
+        row()
+            .when(kind == HandleType::Source, |d| d.justify_end())
+            .child(label_text("new item".to_owned(), z, cx).opacity(0.6))
+            .child(handle)
+    };
+
+    let boundary_add = add_boundary.then(|| {
+        let ed = ed.clone();
+        let id = view.id.clone();
+        add_button(
+            "add-handle",
+            "+ socket",
+            Rc::new(move |at, cx| {
+                let (ed, id) = (ed.clone(), id.clone());
+                ed.update(cx, |e, cx| e.open_type_list(at, id, true, cx)).ok();
+            }),
+        )
+        .into_any_element()
+    });
+    let (add_top, add_bottom) = match view.boundary {
+        Some(GroupSide::Input) => (boundary_add, None),
+        Some(GroupSide::Output) => (None, boundary_add),
+        None => (None, None),
+    };
+    let zone_add = {
+        let ed = ed.clone();
+        let id = view.id.clone();
+        add_button(
+            "add-item",
+            "+ item",
+            Rc::new(move |at, cx| {
+                let (ed, id) = (ed.clone(), id.clone());
+                ed.update(cx, |e, cx| e.open_type_list(at, id, false, cx)).ok();
+            }),
+        )
+    };
+
+    div()
+        .relative()
+        .w(px(node_width(&view.node_type) * z))
+        .rounded(s(4.0))
+        .border(px(1.0))
+        .border_color(if props.selected { c.primary } else { c.border })
+        .bg(c.card)
+        .text_color(c.card_foreground)
+        .child(header)
+        .child(
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .gap(s(4.0))
+                .p(s(PAD))
+                .children(outputs)
+                .children(add_top.map(|b| div().flex().child(b)))
+                .when(view.zone && add_zone && !view.outputs.is_empty(), |d| d.child(virtual_row(HandleType::Source)))
+                .children(hidden_handles)
+                .children(inputs)
+                .children(add_bottom.map(|b| div().flex().child(b)))
+                .when(add_zone, |d| d.child(virtual_row(HandleType::Target)).child(div().flex().child(zone_add))),
+        )
+        .into_any_element()
+}

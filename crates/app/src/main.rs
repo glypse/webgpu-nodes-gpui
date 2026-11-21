@@ -1,8 +1,8 @@
 mod code_view;
 mod editor;
+mod graph;
 mod playback;
 mod preview;
-mod program;
 mod shell;
 mod timeline;
 

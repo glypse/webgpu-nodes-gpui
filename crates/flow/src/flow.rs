@@ -287,6 +287,8 @@ pub struct Flow {
     anim: Option<Anim>,
     fit_request: Option<FitViewOptions>,
     initialized: bool,
+    /// Every visible node has been measured.
+    ready: bool,
     pub(crate) layers: Layers,
     pub(crate) panels: Vec<Panel>,
     focus: FocusHandle,
@@ -324,6 +326,7 @@ impl Flow {
             anim: None,
             fit_request: None,
             initialized: false,
+            ready: false,
             layers: Layers { back: Vec::new(), front: Vec::new(), portals: Vec::new() },
             panels: Vec::new(),
             focus: cx.focus_handle(),
@@ -646,6 +649,7 @@ impl Flow {
                 lookup.get(&n.id).is_some_and(|i| i.size.is_some())
             });
         self.lookup = lookup;
+        self.ready = ready;
         if ready && !self.initialized {
             self.initialized = true;
             cx.emit(FlowEvent::Initialized);
@@ -741,7 +745,7 @@ impl Flow {
         }
 
         if let Some(options) = self.fit_request
-            && self.initialized
+            && self.ready
         {
             self.fit_request = None;
             let rects = self

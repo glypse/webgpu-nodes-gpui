@@ -560,7 +560,7 @@ fn match_text(query: &[String], name: &str, heading: &str) -> Option<(u8, Vec<(u
     let mut tier = 0u8;
     let mut ranges = Vec::new();
     for q in query {
-        let mut best: Option<(u8, usize, Vec<(usize, usize)>, bool)> = None;
+        let mut best: Option<WordMatch> = None;
         for (i, (offset, word)) in name_words.iter().enumerate() {
             if used_name[i] {
                 continue;
@@ -603,6 +603,9 @@ fn match_text(query: &[String], name: &str, heading: &str) -> Option<(u8, Vec<(u
     }
     Some((tier, merged))
 }
+
+/// Kind, word index, matched ranges, whether in the heading.
+type WordMatch = (u8, usize, Vec<(usize, usize)>, bool);
 
 const MAX_COMBINATIONS: usize = 64;
 

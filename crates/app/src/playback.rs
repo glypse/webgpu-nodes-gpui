@@ -159,6 +159,24 @@ impl Playback {
         self.changed(window, cx);
     }
 
+    /// Writes new uniform values into the running program, without compiling it again.
+    pub fn set_uniforms(
+        &mut self,
+        uniforms: &[(String, shader_graph::UniformValue)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let (Some(renderer), Some(program)) = (&self.renderer, &self.program) {
+            let values = uniforms
+                .iter()
+                .map(|(name, v)| (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect()))
+                .collect();
+            renderer.set_uniforms(program, &values);
+            self.player.invalidate();
+            self.changed(window, cx);
+        }
+    }
+
     pub fn set_resolution(
         &mut self,
         resolution: Size,
