@@ -228,6 +228,9 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
     }
 }
 
+/// Amber-500, the colour the original gives its outdated-version warning.
+const OUTDATED_AMBER: gpui::Hsla = gpui::Hsla { h: 38.0 / 360.0, s: 0.92, l: 0.50, a: 1.0 };
+
 const PAD: f32 = 12.0;
 
 type PointAction = Rc<dyn Fn(gpui::Point<gpui::Pixels>, &mut App)>;
@@ -492,13 +495,7 @@ pub fn render_node(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .size(s(16.0))
-                        .rounded_full()
-                        .text_size(s(11.0))
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .bg(c.destructive)
-                        .text_color(c.background)
-                        .child("!")
+                        .child(Icon::new(IconName::Warning).size(s(16.0)).color(OUTDATED_AMBER))
                         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(message.clone()).build(window, cx))
                 }))
                 .children(view.only_linked.then(|| {

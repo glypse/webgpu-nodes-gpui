@@ -71,6 +71,7 @@ icons! {
     Trash => regular::TRASH, "trash",
     TreeStructure => regular::TREE_STRUCTURE, "tree-structure",
     TreeView => regular::TREE_VIEW, "tree-view",
+    Warning => fill::WARNING, "warning-fill",
     X => regular::X, "x",
 }
 
