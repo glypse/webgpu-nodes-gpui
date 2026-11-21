@@ -7,4 +7,9 @@ license.workspace = true
 [dependencies]
 guard = { path = "../guard" }
 gpui.workspace = true
+graph-math = { path = "../graph-math" }
+image = { version = "0.25", default-features = false }
 unicode-segmentation = "1"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

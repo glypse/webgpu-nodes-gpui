@@ -657,10 +657,16 @@ impl Render for TextInput {
             .w_full()
             .min_w_0()
             .px(px(if self.compact.is_some() { 4.0 } else { 10.0 }))
-            .rounded(if self.compact.is_some() { px(4.0) } else { theme.radius.lg })
+            .rounded(if self.compact.is_some() {
+                px(4.0)
+            } else {
+                theme.radius.lg
+            })
             .border_1()
             .border_color(if focused { c.ring } else { c.input })
-            .when(theme.is_dark() && self.compact.is_none(), |d| d.bg(c.input.opacity(0.3)))
+            .when(theme.is_dark() && self.compact.is_none(), |d| {
+                d.bg(c.input.opacity(0.3))
+            })
             .text_color(c.foreground)
             .font_family(theme.font.clone())
             .text_size(self.compact.map_or(theme.text.sm, |(_, t)| t))

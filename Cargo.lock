@@ -5929,7 +5929,9 @@ name = "theme"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "graph-math",
  "guard",
+ "image",
  "unicode-segmentation",
 ]
 
