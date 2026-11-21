@@ -140,3 +140,27 @@ fn helper_groups_are_searched_after_the_main_results() {
     assert_eq!(sections.first().map(|(s, _)| s.clone()), Some(None));
     assert!(sections.iter().any(|(s, _)| s.as_deref() == Some("Helpers")));
 }
+
+#[test]
+fn the_texture_groups_are_in_the_library() {
+    for id in [
+        "std-fit-uv",
+        "std-gaussian-blur",
+        "std-gaussian-blur-1d",
+        "std-gaussian-blur-2d",
+        "std-box-blur",
+        "std-box-blur-1d",
+        "std-box-blur-2d",
+        "std-box-blur-once",
+    ] {
+        assert!(entries().iter().any(|e| e.id == id), "{id} is in the library");
+    }
+}
+
+#[test]
+fn a_blur_takes_and_gives_a_texture() {
+    let entry = entries().iter().find(|e| e.id == "std-gaussian-blur").expect("the blur");
+    let texture = HandleType::Fixed(WgslType::Texture);
+    assert!(entry.definition.inputs.iter().any(|h| h.ty == texture));
+    assert_eq!(entry.definition.outputs.iter().map(|h| &h.ty).collect::<Vec<_>>(), [&texture]);
+}

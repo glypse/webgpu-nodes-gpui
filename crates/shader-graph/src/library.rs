@@ -53,6 +53,14 @@ const SOURCES: &[&str] = &[
     include_str!("library/std-octave-shift.json"),
     include_str!("library/std-fractal-noise-octaves.json"),
     include_str!("library/std-fractal-noise.json"),
+    include_str!("library/std-fit-uv.json"),
+    include_str!("library/std-gaussian-blur-1d.json"),
+    include_str!("library/std-box-blur-1d.json"),
+    include_str!("library/std-gaussian-blur.json"),
+    include_str!("library/std-box-blur.json"),
+    include_str!("library/std-box-blur-once.json"),
+    include_str!("library/std-gaussian-blur-2d.json"),
+    include_str!("library/std-box-blur-2d.json"),
 ];
 
 /// Separates a library id from its version in a definition ref.
