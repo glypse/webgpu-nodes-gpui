@@ -1,4 +1,5 @@
 use guard::SafeListener as _;
+use gpui::prelude::FluentBuilder as _;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -23,8 +24,8 @@ use crate::export_dialog;
 use crate::graph::breadcrumbs::Breadcrumbs;
 use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
-use crate::preferences;
-use crate::settings::{SettingsDialog, SettingsEvent};
+use crate::preferences::{self, Preferences};
+use crate::settings::{Page, SettingsDialog, SettingsEvent};
 use crate::project::{self, AssetFiles, Loaded};
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
@@ -40,14 +41,19 @@ actions!(
         OpenProject,
         SaveProject,
         SaveProjectAs,
-        Undo,
-        Redo,
         OpenSettings,
+        OpenProjectSettings,
+        OpenPreferences,
+        ExportFrame,
         ToggleMode,
         ZoomPreviewIn,
         ZoomPreviewOut,
         FitPreview,
         ActualSizePreview,
+        MenuZoomPreviewIn,
+        MenuZoomPreviewOut,
+        MenuFitPreview,
+        MenuActualSizePreview,
         ImportMedia,
         ExportVideo,
     ]
@@ -75,6 +81,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("0", FitPreview, Some(CONTEXT)),
         KeyBinding::new("1", ActualSizePreview, Some(CONTEXT)),
     ]);
+    cx.observe_global::<Preferences>(crate::refresh_menus).detach();
 }
 
 /// The kinds of panel an area shows.
@@ -201,6 +208,8 @@ impl Shell {
         cx.subscribe_in(&playback, window, |this, playback, event: &PlaybackEvent, _, cx| {
             let PlaybackEvent::Changed = event;
             guard::guard("playback settings", || this.adopt_playback_settings(playback, cx));
+            let playing = playback.read(cx).playing();
+            crate::set_playing(cx, playing);
         })
         .detach();
 
@@ -306,6 +315,17 @@ impl Shell {
         false
     }
 
+    /// The preview areas the pointer is over.
+    fn previews_under_pointer(&self, window: &Window, cx: &App) -> Vec<Entity<PreviewArea>> {
+        self.views
+            .borrow()
+            .previews
+            .values()
+            .map(|(area, _)| area.clone())
+            .filter(|area| area.read(cx).pointer_over(window))
+            .collect()
+    }
+
     /// Applies `f` to the preview areas the pointer is over. Keys reach the shell whatever has focus,
     /// so the pointer decides which preview they act on.
     fn over_previews(
@@ -314,15 +334,26 @@ impl Shell {
         cx: &mut Context<Self>,
         f: fn(&mut PreviewArea, &mut Context<PreviewArea>),
     ) {
-        let hovered: Vec<_> = self
-            .views
-            .borrow()
-            .previews
-            .values()
-            .map(|(area, _)| area.clone())
-            .filter(|area| area.read(cx).pointer_over(window))
-            .collect();
-        for area in hovered {
+        for area in self.previews_under_pointer(window, cx) {
+            area.update(cx, f);
+        }
+    }
+
+    /// Applies `f` for a Display menu item. The pointer is on the menu bar when one is chosen, so with no
+    /// preview under the pointer it applies to every preview.
+    fn menu_previews(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+        f: fn(&mut PreviewArea, &mut Context<PreviewArea>),
+    ) {
+        let hovered = self.previews_under_pointer(window, cx);
+        let targets = if hovered.is_empty() {
+            self.views.borrow().previews.values().map(|(area, _)| area.clone()).collect()
+        } else {
+            hovered
+        };
+        for area in targets {
             area.update(cx, f);
         }
     }
@@ -345,13 +376,16 @@ impl Shell {
         }
     }
 
-    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings.is_some() {
+    /// Opens the settings dialog on `page`, or moves the open one there.
+    fn open_settings(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.settings.clone() {
+            dialog.update(cx, |dialog, cx| dialog.show_page(page, cx));
             return;
         }
         let editor = self.editor.clone();
         let playback = self.playback.clone();
         let dialog = cx.new(|cx| SettingsDialog::new(editor, playback, window, cx));
+        dialog.update(cx, |dialog, cx| dialog.show_page(page, cx));
         cx.subscribe_in(&dialog, window, |this, _, SettingsEvent::Close, window, cx| {
             this.settings = None;
             let editor_focus = this.editor.read(cx).focus_handle(cx);
@@ -589,6 +623,7 @@ fn dirs_home() -> Option<PathBuf> {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("shell", || {
         preferences::apply(window, cx);
+        let has_preview = !self.views.borrow().previews.is_empty();
         let theme = cx.theme();
         div()
             .key_context("Shell")
@@ -628,31 +663,46 @@ impl Render for Shell {
                 export_dialog::open(this.editor.clone(), this.playback.clone(), window, cx);
             }))
             .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
-                this.open_settings(window, cx);
+                this.open_settings(Page::Canvas, window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, window, cx| {
+                this.open_settings(Page::Canvas, window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &OpenPreferences, window, cx| {
+                this.open_settings(Page::Appearance, window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &ExportFrame, window, cx| {
+                preview::export_png(&this.playback, window, cx);
             }))
             .on_action(cx.safe_listener(|_, _: &ToggleMode, window, cx| {
                 preferences::toggle_mode(window, cx);
             }))
-            .on_action(cx.safe_listener(|this, _: &ZoomPreviewIn, window, cx| {
-                this.over_previews(window, cx, PreviewArea::zoom_in);
-            }))
-            .on_action(cx.safe_listener(|this, _: &ZoomPreviewOut, window, cx| {
-                this.over_previews(window, cx, PreviewArea::zoom_out);
-            }))
-            .on_action(cx.safe_listener(|this, _: &FitPreview, window, cx| {
-                this.over_previews(window, cx, PreviewArea::fit);
-            }))
-            .on_action(cx.safe_listener(|this, _: &ActualSizePreview, window, cx| {
-                this.over_previews(window, cx, PreviewArea::actual_size);
-            }))
-            .on_action(cx.safe_listener(|this, _: &Undo, window, cx| {
-                this.editor.update(cx, |e, cx| e.undo(cx));
-                this.refresh_title(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &Redo, window, cx| {
-                this.editor.update(cx, |e, cx| e.redo(cx));
-                this.refresh_title(window, cx);
-            }))
+            .when(has_preview, |d| {
+                d.on_action(cx.safe_listener(|this, _: &ZoomPreviewIn, window, cx| {
+                    this.over_previews(window, cx, PreviewArea::zoom_in);
+                }))
+                .on_action(cx.safe_listener(|this, _: &ZoomPreviewOut, window, cx| {
+                    this.over_previews(window, cx, PreviewArea::zoom_out);
+                }))
+                .on_action(cx.safe_listener(|this, _: &FitPreview, window, cx| {
+                    this.over_previews(window, cx, PreviewArea::fit);
+                }))
+                .on_action(cx.safe_listener(|this, _: &ActualSizePreview, window, cx| {
+                    this.over_previews(window, cx, PreviewArea::actual_size);
+                }))
+                .on_action(cx.safe_listener(|this, _: &MenuZoomPreviewIn, window, cx| {
+                    this.menu_previews(window, cx, PreviewArea::zoom_in);
+                }))
+                .on_action(cx.safe_listener(|this, _: &MenuZoomPreviewOut, window, cx| {
+                    this.menu_previews(window, cx, PreviewArea::zoom_out);
+                }))
+                .on_action(cx.safe_listener(|this, _: &MenuFitPreview, window, cx| {
+                    this.menu_previews(window, cx, PreviewArea::fit);
+                }))
+                .on_action(cx.safe_listener(|this, _: &MenuActualSizePreview, window, cx| {
+                    this.menu_previews(window, cx, PreviewArea::actual_size);
+                }))
+            })
             .on_drop(cx.safe_listener(|this, paths: &ExternalPaths, window, cx| {
                 assets::import_paths(&this.editor, &this.playback, &paths.0, window, cx);
             }))
@@ -848,5 +898,42 @@ mod tests {
             ("a2".to_owned(), std::sync::Arc::new(vec![0])),
         ]))
         .is_empty());
+    }
+
+    #[gpui::test]
+    fn the_display_menu_zooms_the_preview_with_the_pointer_elsewhere(cx: &mut TestAppContext) {
+        let (shell, mut cx) = open(cx);
+        let cx = &mut cx;
+        let area = preview_area(&shell, cx);
+        let zoom = |cx: &mut gpui::VisualTestContext| area.read_with(cx, |a, cx| a.zoom(cx));
+        let before = zoom(cx);
+        let focus = shell.read_with(cx, |s, cx| s.editor.read(cx).focus_handle(cx));
+        cx.update(|window, cx| window.focus(&focus, cx));
+        cx.run_until_parked();
+
+        cx.dispatch_action(MenuZoomPreviewIn);
+        cx.run_until_parked();
+        assert!((zoom(cx) - before * 1.2).abs() < 1e-4, "Zoom preview in zooms in by one step");
+        cx.dispatch_action(MenuActualSizePreview);
+        cx.run_until_parked();
+        assert!((zoom(cx) - 1.0).abs() < 1e-6, "Preview at actual size shows the canvas at 100%");
+    }
+
+    #[gpui::test]
+    fn developer_tools_toggle_the_preference_and_its_menu_item(cx: &mut TestAppContext) {
+        let (_shell, mut cx) = open(cx);
+        let before = cx.update(|_, cx| cx.global::<Preferences>().developer_tools_enabled());
+        cx.update(|_, cx| cx.dispatch_action(&preferences::ToggleDeveloperTools));
+        assert_eq!(cx.update(|_, cx| cx.global::<Preferences>().developer_tools_enabled()), !before);
+
+        let checked = cx.update(|_, cx| {
+            cx.get_menus()
+                .into_iter()
+                .flatten()
+                .find(|m| m.name.as_ref() == "File")
+                .and_then(|m| m.items.into_iter().last())
+                .is_some_and(|item| matches!(item, gpui::OwnedMenuItem::Action { checked: true, .. }))
+        });
+        assert_eq!(checked, !before, "the Developer tools item shows the new state");
     }
 }

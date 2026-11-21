@@ -17,7 +17,7 @@ mod shell;
 mod timeline;
 
 use gpui::{
-    AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
+    App, AppContext as _, Bounds, Global, KeyBinding, Menu, MenuItem, TitlebarOptions,
     WindowBounds, WindowOptions, actions, px, size,
 };
 
@@ -27,11 +27,44 @@ use std::time::{Duration, Instant};
 
 use clap::Parser as _;
 use gpui::{AsyncApp, WindowHandle};
-use shell::{ExportVideo, ImportMedia, NewProject, OpenProject, OpenSettings, Redo, SaveProject, SaveProjectAs, Shell, Undo};
+use preferences::ToggleDeveloperTools;
+use shell::{
+    ExportFrame, ExportVideo, ImportMedia, MenuActualSizePreview, MenuFitPreview, MenuZoomPreviewIn,
+    MenuZoomPreviewOut, OpenPreferences, OpenProject, OpenProjectSettings, OpenSettings, SaveProject, Shell,
+    ToggleMode, TogglePlayback,
+};
 
 actions!(app, [Quit]);
 
-fn menus() -> Vec<Menu> {
+/// Whether developer tools are on and playback runs, as the menus show them.
+#[derive(Default)]
+struct MenuState {
+    playing: bool,
+}
+
+impl Global for MenuState {}
+
+/// Sets the menus from the preferences and playback. gpui reads a menu's labels and checks only when
+/// they are set, so this runs again whenever either changes.
+pub(crate) fn refresh_menus(cx: &mut App) {
+    let developer_tools = preferences::developer_tools_on(cx);
+    let playing = cx.try_global::<MenuState>().is_some_and(|state| state.playing);
+    cx.set_menus(menus(developer_tools, playing));
+}
+
+/// Records whether playback runs, for the Play and Pause item.
+pub(crate) fn set_playing(cx: &mut App, playing: bool) {
+    if cx.try_global::<MenuState>().is_some_and(|state| state.playing == playing) {
+        return;
+    }
+    cx.set_global(MenuState { playing });
+    refresh_menus(cx);
+}
+
+/// The File, Edit and Display menus of the original, in its order. An item whose action the focused
+/// element doesn't handle is greyed out; the original's items with no action yet are left out.
+fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
+    let play_or_pause = if playing { "Pause" } else { "Play" };
     vec![
         Menu {
             name: "webgpu-nodes".into(),
@@ -46,21 +79,57 @@ fn menus() -> Vec<Menu> {
             name: "File".into(),
             disabled: false,
             items: vec![
-                MenuItem::action("New", NewProject),
-                MenuItem::action("Open...", OpenProject),
-                MenuItem::separator(),
                 MenuItem::action("Save", SaveProject),
-                MenuItem::action("Save As...", SaveProjectAs),
+                MenuItem::action("Upload", OpenProject),
+                MenuItem::action("Import media…", ImportMedia),
                 MenuItem::separator(),
-                MenuItem::action("Import media...", ImportMedia),
+                MenuItem::action("Export frame as PNG", ExportFrame),
+                MenuItem::action("Export video…", ExportVideo),
                 MenuItem::separator(),
-                MenuItem::action("Export video...", ExportVideo),
+                MenuItem::action("Project settings…", OpenProjectSettings),
+                MenuItem::separator(),
+                MenuItem::action("Developer tools", ToggleDeveloperTools).checked(developer_tools),
             ],
         },
         Menu {
             name: "Edit".into(),
             disabled: false,
-            items: vec![MenuItem::action("Undo", Undo), MenuItem::action("Redo", Redo)],
+            items: vec![
+                MenuItem::action("Undo", editor::Undo),
+                MenuItem::action("Redo", editor::Redo),
+                MenuItem::separator(),
+                MenuItem::action("Group selected", editor::GroupSelected),
+                MenuItem::action("Ungroup selected", editor::UngroupSelected),
+                MenuItem::separator(),
+                MenuItem::action("Preview selected node", editor::PreviewSelectedNode),
+                MenuItem::separator(),
+                MenuItem::action("Layout selected nodes", editor::LayoutSelected),
+                MenuItem::action("Layout graph", editor::LayoutGraph),
+                MenuItem::action("Layout document", editor::LayoutDocument),
+                MenuItem::separator(),
+                MenuItem::action("Remove all unused group references", editor::PruneUnusedGroups),
+                MenuItem::separator(),
+                MenuItem::action("Enter node group", editor::EnterNodeGroup),
+                MenuItem::action("Exit node group", editor::ExitNodeGroup),
+                MenuItem::separator(),
+                MenuItem::action("Toggle node sheet", editor::ToggleNodeSheet),
+                MenuItem::separator(),
+                MenuItem::action("Preferences…", OpenPreferences),
+            ],
+        },
+        Menu {
+            name: "Display".into(),
+            disabled: false,
+            items: vec![
+                MenuItem::action("Toggle mode", ToggleMode),
+                MenuItem::separator(),
+                MenuItem::action(play_or_pause, TogglePlayback),
+                MenuItem::separator(),
+                MenuItem::action("Zoom preview in", MenuZoomPreviewIn),
+                MenuItem::action("Zoom preview out", MenuZoomPreviewOut),
+                MenuItem::action("Fit preview", MenuFitPreview),
+                MenuItem::action("Preview at actual size", MenuActualSizePreview),
+            ],
         },
     ]
 }
@@ -86,9 +155,10 @@ fn main() -> ExitCode {
         theme::init(cx);
         preferences::init(cx);
         shell::init(cx);
+        editor::init(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| shell::request_quit(cx));
-        cx.set_menus(menus());
+        refresh_menus(cx);
         let window_size = launch.window.unwrap_or(cli::Size { width: 1400.0, height: 860.0 });
         let bounds = Bounds::centered(None, size(px(window_size.width), px(window_size.height)), cx);
         let options = WindowOptions {
@@ -181,4 +251,61 @@ async fn wind_down(launch: cli::Cli, handle: WindowHandle<gpui_component::Root>,
         }
     }
     cx.update(|cx| cx.quit());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The item labels of a menu, separators as "-".
+    fn labels(menu: &Menu) -> Vec<String> {
+        menu.items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Action { name, .. } => name.to_string(),
+                MenuItem::Separator => "-".to_owned(),
+                _ => "?".to_owned(),
+            })
+            .collect()
+    }
+
+    fn menu<'a>(menus: &'a [Menu], name: &str) -> &'a Menu {
+        menus.iter().find(|m| m.name.as_ref() == name).expect("the menu exists")
+    }
+
+    #[test]
+    fn file_edit_and_display_menus_list_the_original_items_in_order() {
+        let menus = menus(false, false);
+        assert_eq!(
+            labels(menu(&menus, "File")),
+            [
+                "Save", "Upload", "Import media…", "-", "Export frame as PNG", "Export video…", "-",
+                "Project settings…", "-", "Developer tools",
+            ]
+        );
+        assert_eq!(
+            labels(menu(&menus, "Edit")),
+            [
+                "Undo", "Redo", "-", "Group selected", "Ungroup selected", "-", "Preview selected node", "-",
+                "Layout selected nodes", "Layout graph", "Layout document", "-",
+                "Remove all unused group references", "-", "Enter node group", "Exit node group", "-",
+                "Toggle node sheet", "-", "Preferences…",
+            ]
+        );
+        assert_eq!(
+            labels(menu(&menus, "Display")),
+            [
+                "Toggle mode", "-", "Play", "-", "Zoom preview in", "Zoom preview out", "Fit preview",
+                "Preview at actual size",
+            ]
+        );
+    }
+
+    #[test]
+    fn developer_tools_is_checked_when_on_and_play_reads_pause_while_playing() {
+        let menus = menus(true, true);
+        let file = menu(&menus, "File");
+        assert!(matches!(file.items.last(), Some(item) if item.is_checked()));
+        assert_eq!(labels(menu(&menus, "Display"))[2], "Pause");
+    }
 }

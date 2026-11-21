@@ -447,7 +447,7 @@ impl PreviewToolbar {
     }
 }
 
-fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
+pub(crate) fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
     let frame = playback.update(cx, |p, _| p.export_frame().and_then(|f| f.to_png()));
     let png = match frame {
         Ok(png) => png,

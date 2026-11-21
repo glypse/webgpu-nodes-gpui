@@ -367,6 +367,10 @@ impl Playback {
         self.changed(window, cx);
     }
 
+    pub fn playing(&self) -> bool {
+        self.player.playing()
+    }
+
     pub fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.player.toggle();
         self.changed(window, cx);

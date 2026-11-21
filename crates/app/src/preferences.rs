@@ -111,11 +111,16 @@ pub fn toggle_developer_tools(cx: &mut App) {
     cx.refresh_windows();
 }
 
+/// Whether developer tools are on, or the build's default before preferences are set up.
+pub fn developer_tools_on(cx: &App) -> bool {
+    cx.try_global::<Preferences>()
+        .map_or_else(|| Preferences::default().developer_tools_enabled(), Preferences::developer_tools_enabled)
+}
+
 /// Logs a shader's generated code while developer tools are on. Callers pass
 /// only code that changed since their last call.
-#[expect(dead_code, reason = "the editor calls this when the generated shader changes")]
 pub fn log_generated_code(cx: &App, code: &str) {
-    if cx.global::<Preferences>().developer_tools_enabled() {
+    if developer_tools_on(cx) {
         log::info!("[shader debug] compiled passes:\n{code}");
     }
 }

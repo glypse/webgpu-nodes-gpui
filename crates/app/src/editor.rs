@@ -1,4 +1,5 @@
 use guard::SafeListener as _;
+use gpui::prelude::FluentBuilder as _;
 use std::cell::Ref;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
@@ -8,7 +9,7 @@ use std::time::{Duration, Instant};
 use handle::{ModelHandle, ModelMut};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels,
+    Focusable, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Pixels,
     Point, Render, SharedString, Styled as _, Window, div,
     px,
 };
@@ -18,7 +19,7 @@ use gpui_flow::{
     Node, Viewport, Xy,
 };
 use shader_graph::catalog::{
-    self, AddMenuEntry, Pending, add_entry, add_entry_connected, add_menu_entries,
+    self, AddMenuEntry, Pending, add_entry, add_entry_connected, add_menu_entries_with,
     connectable_entries,
 };
 use shader_graph::codegen::Program;
@@ -45,12 +46,43 @@ use crate::graph::socket::socket_color;
 use crate::graph::zones::{self, Bubble};
 use crate::layout::GraphView;
 use crate::playback::Playback;
+use crate::preferences;
 use crate::project::AssetFiles;
 
 mod handle;
 mod widget_edits;
 
-gpui::actions!(editor, [PruneUnusedGroups, LayoutSelected, LayoutDocument, LayoutGraph]);
+gpui::actions!(
+    editor,
+    [
+        PruneUnusedGroups,
+        LayoutSelected,
+        LayoutDocument,
+        LayoutGraph,
+        Undo,
+        Redo,
+        GroupSelected,
+        UngroupSelected,
+        PreviewSelectedNode,
+        EnterNodeGroup,
+        ExitNodeGroup,
+        ToggleNodeSheet,
+    ]
+);
+
+/// Keys of the editor's menu items. They apply while the graph has focus, not while typing in a field.
+pub fn init(cx: &mut App) {
+    const CONTEXT: &str = "GraphEditor && !Input";
+    cx.bind_keys([
+        KeyBinding::new("cmd-z", Undo, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-z", Redo, Some(CONTEXT)),
+        KeyBinding::new("cmd-g", GroupSelected, Some(CONTEXT)),
+        KeyBinding::new("alt-cmd-g", UngroupSelected, Some(CONTEXT)),
+        KeyBinding::new("enter", EnterNodeGroup, Some(CONTEXT)),
+        KeyBinding::new("escape", ExitNodeGroup, Some(CONTEXT)),
+        KeyBinding::new("n", ToggleNodeSheet, Some(CONTEXT)),
+    ]);
+}
 
 /// What another area's editor starts from.
 pub struct Share {
@@ -808,6 +840,7 @@ impl Editor {
                     }
                     cx.emit(EditorEvent::Uniforms(program.uniforms));
                 } else {
+                    preferences::log_generated_code(cx, &program.program.code);
                     self.code = program.program.code.clone();
                     self.generated = Ok(program.clone());
                     cx.emit(EditorEvent::Shader(Ok(program)));
@@ -824,6 +857,7 @@ impl Editor {
     fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.sync(cx);
         self.regenerate(cx);
+        cx.notify();
         cx.emit(EditorEvent::Edited);
     }
 
@@ -1295,7 +1329,7 @@ impl Editor {
         let position = flow_position.unwrap_or_else(|| self.flow.read(cx).screen_to_flow(at));
         let (entries, placeholder): (Vec<AddMenuEntry>, String) = {
             let model = self.model.borrow();
-            let all = add_menu_entries(&model);
+            let all = add_menu_entries_with(&model, preferences::developer_tools_on(cx));
             match &pending {
                 Some(p) => {
                     let ty = if p.from_output {
@@ -1600,10 +1634,56 @@ impl Editor {
         self.select(ids, cx);
     }
 
+    fn preview_selected(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected();
+        if let [node] = selected.as_slice() {
+            self.preview_node(node, cx);
+        }
+    }
+
+    /// Enters the first selected group, returning whether there was one.
+    fn enter_selected_group(&mut self, cx: &mut Context<Self>) -> bool {
+        let group = self
+            .selected()
+            .into_iter()
+            .find(|id| self.model.borrow().node(id).is_some_and(|n| n.definition_ref().is_some()));
+        match group {
+            Some(id) => {
+                self.enter_group(&id, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Escape closes the node sheet first, then leaves the group.
+    fn close_sheet_or_exit_group(&mut self, cx: &mut Context<Self>) {
+        if self.sheet.is_some() {
+            self.sheet = None;
+            cx.notify();
+        } else {
+            self.exit_group(cx);
+        }
+    }
+
+    /// Opens the sheet of the selected node, or of the group entered, or closes the sheet when neither exists.
+    fn toggle_node_sheet(&mut self, cx: &mut Context<Self>) {
+        let target = self.selected().first().cloned().or_else(|| self.model.borrow().path().last().cloned());
+        match target {
+            Some(id) => self.open_sheet(&id, cx),
+            None => {
+                self.sheet = None;
+                cx.notify();
+            }
+        }
+    }
+
     pub fn undo(&mut self, cx: &mut Context<Self>) {
         let before = self.model.borrow().active_definition_ref();
         if self.model_mut().undo() {
             self.enter_document(cx, before);
+            cx.notify();
+            cx.emit(EditorEvent::Edited);
         }
     }
 
@@ -1611,6 +1691,8 @@ impl Editor {
         let before = self.model.borrow().active_definition_ref();
         if self.model_mut().redo() {
             self.enter_document(cx, before);
+            cx.notify();
+            cx.emit(EditorEvent::Edited);
         }
     }
 
@@ -1623,8 +1705,6 @@ impl Editor {
         let cmd = m.platform || m.control;
         let locked = self.model.borrow().is_locked();
         match key {
-            "z" if cmd && m.shift => self.redo(cx),
-            "z" if cmd => self.undo(cx),
             "y" if cmd => self.redo(cx),
             "c" if cmd => self.copy(cx),
             "x" if cmd && !locked => self.cut(cx),
@@ -1644,8 +1724,6 @@ impl Editor {
                     self.delete_selection(cx);
                 }
             }
-            "g" if cmd && m.alt && !locked => self.ungroup_selection(cx),
-            "g" if cmd && !locked => self.group_selection(cx),
             "h" if m.control && !m.platform => {
                 let ids = self.selected();
                 self.edit(cx, |model| model.toggle_unlinked_sockets(&ids));
@@ -1654,32 +1732,9 @@ impl Editor {
                 let ids = self.selected();
                 self.edit(cx, |model| model.reset_nodes(&ids));
             }
-            "n" if !cmd => {
-                let target = self.selected().first().cloned().or_else(|| self.model.borrow().path().last().cloned());
-                match target {
-                    Some(id) => self.open_sheet(&id, cx),
-                    None => {
-                        self.sheet = None;
-                        cx.notify();
-                    }
-                }
-            }
-            "enter" | "tab" => {
-                let group = self
-                    .selected()
-                    .into_iter()
-                    .find(|id| self.model.borrow().node(id).is_some_and(|n| n.definition_ref().is_some()));
-                match group {
-                    Some(id) => self.enter_group(&id, cx),
-                    None if key == "tab" => self.exit_group(cx),
-                    None => {}
-                }
-            }
-            "escape" => {
-                if self.sheet.is_some() {
-                    self.sheet = None;
-                    cx.notify();
-                } else {
+            "tab" => {
+                let entered = self.enter_selected_group(cx);
+                if !entered {
                     self.exit_group(cx);
                 }
             }
@@ -1746,23 +1801,95 @@ fn to_model(c: &FlowConnection) -> Connection {
     )
 }
 
+/// Which of the editor's menu actions apply now. gpui greys out an action that the focused element
+/// doesn't handle, so each handler is attached only while its action applies.
+#[derive(Clone, Copy)]
+struct Enabled {
+    undo: bool,
+    redo: bool,
+    group: bool,
+    ungroup: bool,
+    preview: bool,
+    prune: bool,
+    layout_selected: bool,
+    layout_document: bool,
+    enter: bool,
+    exit: bool,
+    sheet: bool,
+}
+
+impl Editor {
+    fn enabled(&self) -> Enabled {
+        let model = self.model.borrow();
+        let locked = model.is_locked();
+        let selected = model.selected_node_ids();
+        let has_selection = !selected.is_empty();
+        let selected_group = selected.iter().any(|id| model.node(id).is_some_and(|n| n.definition_ref().is_some()));
+        let can_exit = !model.path().is_empty();
+        let idle = self.add_menu.is_none();
+        Enabled {
+            undo: model.can_undo() && idle,
+            redo: model.can_redo() && idle,
+            group: has_selection && !locked && idle,
+            ungroup: selected_group && !locked && idle,
+            preview: selected.len() == 1 && !locked,
+            prune: !model.prunable_groups().is_empty(),
+            layout_selected: has_selection && !locked,
+            layout_document: !locked,
+            enter: selected_group && idle,
+            exit: (can_exit || self.sheet.is_some()) && idle,
+            sheet: (has_selection || can_exit || self.sheet.is_some()) && idle,
+        }
+    }
+}
+
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("graph editor", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let sheet = self.render_sheet(window, cx);
+        let on = self.enabled();
         div()
             .flex()
             .size_full()
             .bg(c.background)
             .text_color(c.foreground)
             .on_key_down(cx.safe_listener(|this, e, w, cx| this.key_down(e, w, cx)))
-            .on_action(cx.safe_listener(|this, _: &PruneUnusedGroups, window, cx| {
-                this.prune_unused_groups(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &LayoutSelected, _, cx| this.layout_selected(cx)))
-            .on_action(cx.safe_listener(|this, _: &LayoutDocument, _, cx| this.layout_document(cx)))
+            .key_context("GraphEditor")
+            .when(on.undo, |d| d.on_action(cx.safe_listener(|this, _: &Undo, _, cx| this.undo(cx))))
+            .when(on.redo, |d| d.on_action(cx.safe_listener(|this, _: &Redo, _, cx| this.redo(cx))))
+            .when(on.group, |d| {
+                d.on_action(cx.safe_listener(|this, _: &GroupSelected, _, cx| this.group_selection(cx)))
+            })
+            .when(on.ungroup, |d| {
+                d.on_action(cx.safe_listener(|this, _: &UngroupSelected, _, cx| this.ungroup_selection(cx)))
+            })
+            .when(on.preview, |d| {
+                d.on_action(cx.safe_listener(|this, _: &PreviewSelectedNode, _, cx| this.preview_selected(cx)))
+            })
+            .when(on.prune, |d| {
+                d.on_action(cx.safe_listener(|this, _: &PruneUnusedGroups, window, cx| {
+                    this.prune_unused_groups(window, cx);
+                }))
+            })
+            .when(on.layout_selected, |d| {
+                d.on_action(cx.safe_listener(|this, _: &LayoutSelected, _, cx| this.layout_selected(cx)))
+            })
+            .when(on.layout_document, |d| {
+                d.on_action(cx.safe_listener(|this, _: &LayoutDocument, _, cx| this.layout_document(cx)))
+            })
             .on_action(cx.safe_listener(|this, _: &LayoutGraph, _, cx| this.layout_graph(cx)))
+            .when(on.enter, |d| {
+                d.on_action(cx.safe_listener(|this, _: &EnterNodeGroup, _, cx| {
+                    this.enter_selected_group(cx);
+                }))
+            })
+            .when(on.exit, |d| {
+                d.on_action(cx.safe_listener(|this, _: &ExitNodeGroup, _, cx| this.close_sheet_or_exit_group(cx)))
+            })
+            .when(on.sheet, |d| {
+                d.on_action(cx.safe_listener(|this, _: &ToggleNodeSheet, _, cx| this.toggle_node_sheet(cx)))
+            })
             .child(
                 div()
                     .flex()
@@ -2303,5 +2430,131 @@ mod tests {
         files.insert(asset.clone(), Arc::new(png_of_width(2)));
         set_files(&playback, files, vcx);
         assert!(vcx.debug_bounds("missing-file").is_none(), "the file arrived, so the warning is gone");
+    }
+
+    /// Focuses the flow and draws, as the window has them when a menu item is chosen.
+    fn focus_flow(scene: &Scene, cx: &mut gpui::VisualTestContext) {
+        let handle = scene.editor.read_with(cx, |e, cx| e.flow.focus_handle(cx));
+        cx.update(|window, cx| window.focus(&handle, cx));
+        render_frame(cx);
+    }
+
+    fn enabled(cx: &mut gpui::VisualTestContext, action: &dyn gpui::Action) -> bool {
+        cx.update(|window, cx| window.is_action_available(action, cx))
+    }
+
+    fn select_nodes(scene: &Scene, cx: &mut gpui::VisualTestContext, ids: Vec<String>) {
+        scene.editor.update(cx, |e, cx| e.select(ids, cx));
+        render_frame(cx);
+    }
+
+    #[gpui::test]
+    fn menu_actions_follow_the_selection_as_the_original_enables_them(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        select_nodes(&scene, cx, Vec::new());
+        assert!(enabled(cx, &LayoutGraph) && enabled(cx, &LayoutDocument));
+        assert!(!enabled(cx, &LayoutSelected) && !enabled(cx, &GroupSelected) && !enabled(cx, &PreviewSelectedNode));
+
+        select_nodes(&scene, cx, vec![scene.member.clone()]);
+        assert!(enabled(cx, &LayoutSelected) && enabled(cx, &GroupSelected) && enabled(cx, &ToggleNodeSheet));
+        assert!(enabled(cx, &PreviewSelectedNode), "one selected node can be previewed");
+        assert!(!enabled(cx, &UngroupSelected) && !enabled(cx, &EnterNodeGroup) && !enabled(cx, &ExitNodeGroup));
+
+        select_nodes(&scene, cx, vec![scene.member.clone(), scene.loose.clone()]);
+        assert!(!enabled(cx, &PreviewSelectedNode), "only a single selected node can be previewed");
+    }
+
+    #[gpui::test]
+    fn layout_graph_is_one_undo_step(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        cx.dispatch_action(LayoutGraph);
+        render_frame(cx);
+        assert!(scene.editor.read_with(cx, |e, _| e.model().can_undo()), "the layout is an edit");
+
+        cx.dispatch_action(Undo);
+        render_frame(cx);
+        assert!(scene.editor.read_with(cx, |e, _| e.model().can_redo()), "undo leaves the layout to redo");
+    }
+
+    #[gpui::test]
+    fn remove_unused_groups_is_enabled_only_with_unused_groups_and_asks_first(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        assert!(!enabled(cx, &PruneUnusedGroups));
+
+        let group = scene.editor.update(cx, |e, cx| {
+            let id = e.model_mut().create_group(GraphPoint::new(0.0, 0.0)).expect("creates");
+            e.after_edit(cx);
+            id
+        });
+        render_frame(cx);
+        assert!(!enabled(cx, &PruneUnusedGroups), "a group the project uses isn't unused");
+
+        scene.editor.update(cx, |e, cx| {
+            assert!(e.model_mut().delete_nodes(std::slice::from_ref(&group), &[]));
+            e.after_edit(cx);
+        });
+        render_frame(cx);
+        assert!(enabled(cx, &PruneUnusedGroups));
+
+        cx.dispatch_action(PruneUnusedGroups);
+        render_frame(cx);
+        assert!(
+            !scene.editor.read_with(cx, |e, _| e.model().prunable_groups().is_empty()),
+            "the groups stay until the user confirms the prompt"
+        );
+    }
+
+    #[gpui::test]
+    fn preview_selected_node_previews_the_single_selection(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        select_nodes(&scene, cx, vec![scene.loose.clone()]);
+        cx.dispatch_action(PreviewSelectedNode);
+        render_frame(cx);
+        assert_eq!(scene.editor.read_with(cx, |e, _| e.selected()), vec![scene.loose.clone()]);
+    }
+
+    #[gpui::test]
+    fn group_ungroup_enter_and_exit_act_as_their_menu_items(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        select_nodes(&scene, cx, vec![scene.member.clone(), scene.loose.clone()]);
+
+        cx.dispatch_action(GroupSelected);
+        render_frame(cx);
+        let group = scene.editor.read_with(cx, |e, _| e.selected());
+        assert_eq!(group.len(), 1, "the group is selected once made");
+        assert!(enabled(cx, &UngroupSelected) && enabled(cx, &EnterNodeGroup));
+
+        cx.dispatch_action(EnterNodeGroup);
+        render_frame(cx);
+        assert_eq!(scene.editor.read_with(cx, |e, _| e.model().path().to_vec()), group);
+
+        cx.dispatch_action(ExitNodeGroup);
+        render_frame(cx);
+        assert!(scene.editor.read_with(cx, |e, _| e.model().path().is_empty()));
+
+        select_nodes(&scene, cx, group.clone());
+        cx.dispatch_action(UngroupSelected);
+        render_frame(cx);
+        assert!(scene.editor.read_with(cx, |e, _| e.model().node(&group[0]).is_none()));
+    }
+
+    #[gpui::test]
+    fn toggle_node_sheet_opens_the_selection_and_escape_closes_it(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        select_nodes(&scene, cx, vec![scene.member.clone()]);
+
+        cx.dispatch_action(ToggleNodeSheet);
+        render_frame(cx);
+        assert_eq!(scene.editor.read_with(cx, |e, _| e.sheet.clone()), Some(scene.member.clone()));
+
+        cx.dispatch_action(ExitNodeGroup);
+        render_frame(cx);
+        assert!(scene.editor.read_with(cx, |e, _| e.sheet.is_none()), "escape closes the sheet first");
     }
 }

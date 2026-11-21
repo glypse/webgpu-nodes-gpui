@@ -257,6 +257,11 @@ impl SettingsDialog {
             .into_any_element()
     }
 
+    pub fn show_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.page = page;
+        cx.notify();
+    }
+
     fn canvas_page(&mut self, settings: &ProjectSettings, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let canvas = settings.canvas;
         let follow = canvas.follow_preview;
