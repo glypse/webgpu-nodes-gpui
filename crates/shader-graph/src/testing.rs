@@ -53,6 +53,11 @@ impl TestGraph {
         self
     }
 
+    /// An output of a node, computed on the CPU.
+    pub fn eval(&self, node: &str, handle: &str) -> Vec<f64> {
+        crate::evaluate::evaluate(&self.model, node, handle).expect("evaluates")
+    }
+
     pub fn program(&self) -> Program {
         self.model.generate().expect("generates")
     }

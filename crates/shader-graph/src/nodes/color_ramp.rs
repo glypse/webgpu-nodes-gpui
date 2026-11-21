@@ -440,6 +440,7 @@ pub fn build_color_ramp_descriptor(data: &NodeData) -> NodeDescriptor {
     }
 
     let primary = stops.first().map(|s| s.id.clone());
+    let cpu_stops = stops.clone();
     let mut d = NodeDescriptor::new(COLOR_RAMP, "Color Ramp", NodeCategory::Color)
         .aliases(&[
             "ColorRamp",
@@ -454,6 +455,30 @@ pub fn build_color_ramp_descriptor(data: &NodeData) -> NodeDescriptor {
         .inputs(inputs)
         .outputs(vec![NodeOutputDef::new("color", "color", WgslType::Vec3f)])
         .defaults(defaults)
+        .cpu(move |ctx| {
+            let mode = |id: &str| ctx.input(id).first().copied().unwrap_or(0.0) as i64;
+            let width = ctx.output_type.components();
+            let colors: Vec<crate::ramp::RampColorStop> = cpu_stops
+                .iter()
+                .map(|stop| {
+                    let c = ctx.input(&stop.id);
+                    let at = |i: usize, d: f64| c.get(i).copied().unwrap_or(d);
+                    let alpha = if width == 4 { at(3, 1.0) } else { 1.0 };
+                    crate::ramp::RampColorStop {
+                        position: stop.position,
+                        color: [at(0, 0.0), at(1, 0.0), at(2, 0.0), alpha],
+                    }
+                })
+                .collect();
+            let factor = ctx.input(RAMP_FACTOR).first().copied().unwrap_or(0.0);
+            let modes = crate::ramp::RampModes {
+                interpolation: mode(RAMP_INTERPOLATION),
+                space: mode(RAMP_SPACE),
+                hue: mode(RAMP_HUE),
+            };
+            let color = crate::ramp::evaluate_ramp(&colors, factor, modes);
+            super::cpu::output("color", super::cpu::coerce(&color[..width], ctx.output_type))
+        })
         .wgsl(move |ctx| ramp_statements(ctx, &stops));
     d.primary_input = primary;
     d.widget = Some(NodeWidget::Ramp);

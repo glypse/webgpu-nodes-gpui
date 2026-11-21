@@ -48,21 +48,25 @@ struct Registry {
 static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     let mut all = Vec::new();
     all.extend(standard::input_nodes());
-    all.extend(standard::math_nodes());
-    all.push(curve::curve_node());
+    let mut math = standard::math_nodes();
+    let after_pow = math.iter().position(|d| d.type_id == "pow").map_or(math.len(), |i| i + 1);
+    math.insert(after_pow, curve::curve_node());
+    all.extend(math);
     all.extend(standard::vector_nodes());
     all.extend(standard::logic_nodes());
-    all.extend(standard::integer_nodes());
-    all.extend(standard::converter_nodes());
-    all.extend(standard::color_nodes());
-    all.push(color_ramp::color_ramp_node());
-    all.extend(texture::texture_nodes());
-    all.push(build_render_texture_descriptor(&NodeData::default()));
-    all.push(width_switch_node());
     all.push(build_match_descriptor(&[]));
     all.push(build_index_switch_descriptor(&NodeData::default()));
-    all.push(build_custom_wgsl_descriptor(&NodeData::default()));
-    all.extend(standard::misc_nodes());
+    all.push(width_switch_node());
+    all.extend(standard::integer_nodes());
+    all.extend(standard::converter_nodes());
+    all.push(color_ramp::color_ramp_node());
+    all.extend(standard::color_nodes());
+    all.extend(texture::texture_nodes());
+    all.push(build_render_texture_descriptor(&NodeData::default()));
+    let mut misc = standard::misc_nodes();
+    let after_reroute = misc.iter().position(|d| d.type_id == "reroute").map_or(0, |i| i + 1);
+    misc.insert(after_reroute, build_custom_wgsl_descriptor(&NodeData::default()));
+    all.extend(misc);
     let ordered: Vec<_> = all
         .into_iter()
         .map(|mut d| {

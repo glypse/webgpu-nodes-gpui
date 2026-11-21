@@ -5,6 +5,7 @@ pub mod codegen;
 pub mod color;
 pub mod curve;
 pub mod enums;
+pub mod evaluate;
 pub mod graph;
 pub mod library;
 pub mod nodes;

@@ -86,6 +86,16 @@ pub(super) fn curve_node() -> NodeDescriptor {
         .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
         .primary("value")
         .defaults(defaults)
+        .cpu(|ctx| {
+            let points: Vec<CurvePoint> = ctx.data.curve.clone().unwrap_or_else(linear_curve);
+            let factor = ctx.input("factor").first().copied().unwrap_or(0.0);
+            let mapped: Vec<f64> = ctx
+                .input("value")
+                .into_iter()
+                .map(|x| x * (1.0 - factor) + crate::curve::evaluate_curve(&points, x) * factor)
+                .collect();
+            super::cpu::result(super::cpu::coerce(&mapped, ctx.output_type))
+        })
         .wgsl(|ctx| {
             let points: Vec<CurvePoint> = ctx.data.curve.clone().unwrap_or_else(linear_curve);
             let segments = curve_segments(&points);

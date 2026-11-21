@@ -375,6 +375,51 @@ impl WgslCtx<'_> {
     }
 }
 
+/// A value as its components.
+pub type Value = Vec<f64>;
+
+/// Where a node's CPU implementation reads its inputs from. Inputs are
+/// converted to their resolved types and read lazily: a Switch computes
+/// only the case it picks.
+pub trait CpuInputs {
+    fn input(&self, id: &str) -> Value;
+    /// The values of a variadic input's operands, each converted to its resolved type.
+    fn operands(&self, id: &str) -> Vec<Value>;
+    /// Whether something feeds the input (see `WgslCtx::is_present`).
+    fn is_present(&self, id: &str) -> bool;
+}
+
+/// What a node's CPU implementation reads.
+pub struct CpuCtx<'a> {
+    pub inputs: &'a dyn CpuInputs,
+    pub input_types: &'a BTreeMap<String, WgslType>,
+    /// The resolved type of each active output.
+    pub output_types: &'a BTreeMap<String, WgslType>,
+    pub output_type: WgslType,
+    pub resolved_inputs: &'a [NodeInputDef],
+    pub data: &'a NodeData,
+}
+
+impl CpuCtx<'_> {
+    pub fn input(&self, id: &str) -> Value {
+        self.inputs.input(id)
+    }
+
+    pub fn operands(&self, id: &str) -> Vec<Value> {
+        self.inputs.operands(id)
+    }
+
+    pub fn is_present(&self, id: &str) -> bool {
+        self.inputs.is_present(id)
+    }
+
+    pub fn input_type(&self, id: &str) -> WgslType {
+        self.input_types.get(id).copied().unwrap_or(WgslType::F32)
+    }
+}
+
+pub type CpuFn = Arc<dyn Fn(&CpuCtx<'_>) -> BTreeMap<String, Value> + Send + Sync>;
+
 pub type WgslFn = Arc<dyn Fn(&mut WgslCtx<'_>) -> Vec<String> + Send + Sync>;
 pub type ResolveOutputType =
     Arc<dyn Fn(WgslType, &BTreeMap<String, WgslType>) -> WgslType + Send + Sync>;
@@ -413,6 +458,11 @@ pub struct NodeDescriptor {
     pub resolve_inputs: Option<ResolveInputs>,
     pub type_family: Option<TypeFamily>,
     pub widget: Option<NodeWidget>,
+    /// The node's outputs computed on the CPU, one value per output id.
+    /// f32 results are rounded and integers wrap as in WGSL, so both agree.
+    /// Nodes with no meaning on the CPU (they read a pixel, a texture or
+    /// custom code) have none.
+    pub cpu: Option<CpuFn>,
     /// Emits the statements defining the node's output variables.
     pub wgsl: WgslFn,
 }
@@ -436,6 +486,7 @@ impl NodeDescriptor {
             resolve_inputs: None,
             type_family: None,
             widget: None,
+            cpu: None,
             wgsl: Arc::new(|_| Vec::new()),
         }
     }
@@ -478,6 +529,19 @@ impl NodeDescriptor {
         f: impl Fn(&mut WgslCtx<'_>) -> Vec<String> + Send + Sync + 'static,
     ) -> Self {
         self.wgsl = Arc::new(f);
+        self
+    }
+
+    pub fn cpu(
+        mut self,
+        f: impl Fn(&CpuCtx<'_>) -> BTreeMap<String, Value> + Send + Sync + 'static,
+    ) -> Self {
+        self.cpu = Some(Arc::new(f));
+        self
+    }
+
+    pub fn cpu_fn(mut self, f: CpuFn) -> Self {
+        self.cpu = Some(f);
         self
     }
 

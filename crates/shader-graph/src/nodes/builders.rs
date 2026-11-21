@@ -156,7 +156,21 @@ pub fn convert_node(ty: &str, label: &str, kind: ScalarKind, rounding: bool) -> 
     if rounding {
         descriptor = descriptor.settings(vec![setting.clone()]);
     }
-    descriptor.wgsl(move |ctx| {
+    descriptor
+        .cpu(move |ctx| {
+            let mode = if rounding { setting_mode(ctx.data.settings.get("rounding")) } else { "trunc" };
+            let round: fn(f64) -> f64 = match mode {
+                "floor" => f64::floor,
+                "ceil" => f64::ceil,
+                "round" => super::cpu::round_half_even,
+                _ => f64::trunc,
+            };
+            let e = ctx.input("e");
+            let rounded: Vec<f64> =
+                if rounding { e.into_iter().map(round).collect() } else { e };
+            super::cpu::result(super::cpu::coerce(&rounded, ctx.output_type))
+        })
+        .wgsl(move |ctx| {
         let source = ctx.input_type("e");
         let mut expr = ctx.promote_input("e");
         if rounding && source.kind() == ScalarKind::F32 {
@@ -165,6 +179,10 @@ pub fn convert_node(ty: &str, label: &str, kind: ScalarKind, rounding: bool) -> 
         let converted = crate::types::convert_var(&expr, source, ctx.output_type);
         vec![format!("let {} = {converted};", ctx.var_name)]
     })
+}
+
+fn setting_mode(stored: Option<&String>) -> &str {
+    stored.map_or("trunc", String::as_str)
 }
 
 pub const FLOATS: &[WgslType] = FLOAT_TYPES;
