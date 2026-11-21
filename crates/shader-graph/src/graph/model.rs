@@ -54,6 +54,8 @@ pub struct GraphModel {
     pub(crate) path: Vec<String>,
     pub(crate) selected: Vec<String>,
     history: History,
+    /// Nesting depth of `batched` calls; history steps wait for the outermost.
+    batch_depth: u32,
     saved: String,
 }
 
@@ -76,6 +78,7 @@ impl GraphModel {
             path: Vec::new(),
             selected: Vec::new(),
             history,
+            batch_depth: 0,
             saved: snapshot,
         }
     }
@@ -136,8 +139,21 @@ impl GraphModel {
         self.resolver.clear();
         let valid = self.valid_path(&self.path);
         self.path = valid;
-        let snapshot = Self::snapshot_of(&self.project);
-        self.history.record(snapshot);
+        if self.batch_depth == 0 {
+            let snapshot = Self::snapshot_of(&self.project);
+            self.history.record(snapshot);
+        }
+    }
+
+    /// Runs `f`, whose edits make one undo step together.
+    pub fn batched<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        self.batch_depth += 1;
+        let result = f(self);
+        self.batch_depth -= 1;
+        if self.batch_depth == 0 {
+            self.changed();
+        }
+        result
     }
 
     /// Like `edit`, but a gesture's steps (`first` false) replace the step

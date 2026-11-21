@@ -22,9 +22,10 @@ use shader_graph::catalog::{
 };
 use shader_graph::codegen::Program;
 use shader_graph::graph::{
-    Connection, FRAG_OUTPUT, GraphModel, GraphProject, LAYOUT_FRAME, NodeClipboard,
+    Connection, FRAG_OUTPUT, GraphModel, GraphNode, GraphProject, LAYOUT_FRAME, NodeClipboard,
     Point as GraphPoint, ProjectSettings, REROUTE, frame_note, frame_tint,
 };
+use shader_graph::layout::{LayoutError, LayoutOptions, NodeGeometry};
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
 use gpui_component::menu::PopupMenu;
@@ -45,7 +46,7 @@ use crate::layout::GraphView;
 mod handle;
 mod widget_edits;
 
-gpui::actions!(editor, [PruneUnusedGroups]);
+gpui::actions!(editor, [PruneUnusedGroups, LayoutSelected, LayoutDocument, LayoutGraph]);
 
 /// What another area's editor starts from.
 pub struct Share {
@@ -933,6 +934,76 @@ impl Editor {
         });
     }
 
+    /// Edit › Layout selected nodes.
+    pub(crate) fn layout_selected(&mut self, cx: &mut Context<Self>) {
+        self.layout(cx, false, |m, options| m.layout_selection(options));
+    }
+
+    /// Edit › Layout document.
+    pub(crate) fn layout_document(&mut self, cx: &mut Context<Self>) {
+        if self.model.borrow().is_locked() {
+            return;
+        }
+        self.layout(cx, true, |m, options| {
+            let key = m.active_definition_ref();
+            m.layout_document(&key, None, options)
+        });
+    }
+
+    /// Edit › Layout graph.
+    pub(crate) fn layout_graph(&mut self, cx: &mut Context<Self>) {
+        self.layout(cx, true, |m, options| m.layout_project(options));
+    }
+
+    /// Runs a layout as one undo step, using what the flow drew of the active
+    /// document's nodes. Other documents are estimated.
+    fn layout(
+        &mut self,
+        cx: &mut Context<Self>,
+        fit: bool,
+        run: impl FnOnce(&mut GraphModel, &LayoutOptions<'_>) -> Result<bool, LayoutError>,
+    ) {
+        let active = self.model.borrow().active_definition_ref();
+        let drawn = self.drawn_geometry(cx);
+        let measure = |doc: &str, node: &GraphNode| {
+            if doc == active { drawn.get(&node.id).cloned() } else { None }
+        };
+        let options = LayoutOptions { measure: Some(&measure), ..Default::default() };
+        let result = self.model_mut().batched(|m| run(m, &options));
+        let moved = match result {
+            Ok(moved) => moved,
+            Err(error) => {
+                log::error!("layout failed: {error}");
+                false
+            }
+        };
+        self.after_edit(cx);
+        if fit && moved {
+            self.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx));
+        }
+    }
+
+    /// Each node of the flow's active document as drawn: its size and the
+    /// vertical offset of each handle's centre from its top.
+    fn drawn_geometry(&self, cx: &App) -> HashMap<String, NodeGeometry> {
+        let flow = self.flow.read(cx);
+        flow.nodes()
+            .iter()
+            .filter_map(|n| {
+                let rect = flow.node_rect(&n.id)?;
+                let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
+                for (handle, kind, centre) in flow.handle_centres(&n.id) {
+                    let entry = (handle.map(|h| h.to_string()).unwrap_or_default(), centre.y);
+                    match kind {
+                        gpui_flow::HandleType::Target => inputs.push(entry),
+                        gpui_flow::HandleType::Source => outputs.push(entry),
+                    }
+                }
+                Some((n.id.to_string(), NodeGeometry { width: rect.width, height: rect.height, inputs, outputs }))
+            })
+            .collect()
+    }
+
     /// Makes an editable copy of a locked group for the node.
     pub(crate) fn clone_group(&mut self, node: &str, cx: &mut Context<Self>) {
         self.edit(cx, |m| {
@@ -1570,6 +1641,9 @@ impl Render for Editor {
             .on_action(cx.safe_listener(|this, _: &PruneUnusedGroups, window, cx| {
                 this.prune_unused_groups(window, cx);
             }))
+            .on_action(cx.safe_listener(|this, _: &LayoutSelected, _, cx| this.layout_selected(cx)))
+            .on_action(cx.safe_listener(|this, _: &LayoutDocument, _, cx| this.layout_document(cx)))
+            .on_action(cx.safe_listener(|this, _: &LayoutGraph, _, cx| this.layout_graph(cx)))
             .child(
                 div()
                     .flex()
@@ -1686,6 +1760,24 @@ mod tests {
         scene.editor.update(cx, |e, cx| e.undo(cx));
         let member = node(&scene, cx, &scene.member);
         assert_eq!((member.position.x, member.position.y), (100.0, 100.0));
+    }
+
+    /// Layout moves nodes, and one undo puts every node back.
+    #[gpui::test]
+    fn a_layout_is_one_undo_step(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let positions = |cx: &mut gpui::VisualTestContext| {
+            scene.editor.read_with(cx, |e, _| {
+                e.model().active_document().nodes.iter().map(|n| (n.id.clone(), n.position)).collect::<Vec<_>>()
+            })
+        };
+        let before = positions(cx);
+        scene.editor.update(cx, |e, cx| e.layout_graph(cx));
+        render_frame(cx);
+        assert_ne!(positions(cx), before, "the layout moves nodes");
+        scene.editor.update(cx, |e, cx| e.undo(cx));
+        render_frame(cx);
+        assert_eq!(positions(cx), before);
     }
 
     /// Card heights grow with the zoom and stay within a device pixel or two of

@@ -608,6 +608,17 @@ impl Flow {
         self.lookup.get(id).filter(|n| n.size.is_some()).map(|n| n.rect())
     }
 
+    /// Each handle of a measured node, with its centre relative to the node's
+    /// top-left corner, in flow units.
+    pub fn handle_centres(&self, id: &Id) -> Vec<(Option<Id>, HandleType, Xy)> {
+        self.lookup.get(id).map_or_else(Vec::new, |n| {
+            n.handles
+                .iter()
+                .map(|h| (h.id.clone(), h.kind, Xy::new(h.x + h.width / 2.0, h.y + h.height / 2.0)))
+                .collect()
+        })
+    }
+
     pub fn selected_nodes(&self) -> Vec<Id> {
         self.nodes.iter().filter(|n| n.selected).map(|n| n.id.clone()).collect()
     }
