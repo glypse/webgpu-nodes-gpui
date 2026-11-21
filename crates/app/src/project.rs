@@ -91,6 +91,11 @@ pub fn file_name(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    /// Loading registers the standard library, so compare against a project that has it.
+    fn loaded_default() -> GraphProject {
+        GraphProject::from_json(&GraphProject::default().to_json()).expect("default project loads")
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("wgnodes-test-{}-{name}", std::process::id()));
         fs::create_dir_all(&dir).expect("scratch dir");
@@ -101,7 +106,7 @@ mod tests {
     fn a_saved_project_reads_back_the_same() {
         let dir = scratch("roundtrip");
         let path = dir.join("a.wgnodes");
-        let project = GraphProject::default();
+        let project = loaded_default();
         write(&path, &project).expect("write");
         assert_eq!(read(&path).expect("read"), project);
         fs::remove_dir_all(dir).ok();
@@ -109,7 +114,7 @@ mod tests {
 
     #[test]
     fn bare_json_reads_too() {
-        let project = GraphProject::default();
+        let project = loaded_default();
         assert_eq!(parse(project.to_json().as_bytes()).expect("parse"), project);
     }
 
