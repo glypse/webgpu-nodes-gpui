@@ -45,6 +45,8 @@ use crate::layout::GraphView;
 mod handle;
 mod widget_edits;
 
+gpui::actions!(editor, [PruneUnusedGroups]);
+
 /// What another area's editor starts from.
 pub struct Share {
     model: ModelHandle,
@@ -938,6 +940,47 @@ impl Editor {
         });
     }
 
+    /// Asks, listing the groups, before removing the definitions nothing in the
+    /// project uses. Bound to `PruneUnusedGroups`.
+    pub(crate) fn prune_unused_groups(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let groups = self.model().prunable_groups();
+        if groups.is_empty() {
+            return;
+        }
+        let listing: Vec<String> = groups
+            .iter()
+            .map(|g| {
+                let nodes = if g.node_count == 1 { "node" } else { "nodes" };
+                format!("{} ({} {nodes})", g.label, g.node_count)
+            })
+            .collect();
+        let detail = format!(
+            "These groups aren't used by any node in the project and will be permanently deleted:\n\n{}",
+            listing.join("\n")
+        );
+        let remove = format!("Remove {}", groups.len());
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            "Remove unused group references?",
+            Some(&detail),
+            &[remove.as_str(), "Cancel"],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await == Ok(0) {
+                this.update(cx, |this, cx| {
+                    guard::guard("prune unused groups", || {
+                        this.edit(cx, |m| {
+                            m.prune_unused_definitions();
+                        });
+                    });
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
     pub(crate) fn toggle_unlinked_sockets(&mut self, node: &str, cx: &mut Context<Self>) {
         let ids = vec![node.to_owned()];
         self.edit(cx, |m| m.toggle_unlinked_sockets(&ids));
@@ -1524,6 +1567,9 @@ impl Render for Editor {
             .bg(c.background)
             .text_color(c.foreground)
             .on_key_down(cx.safe_listener(|this, e, w, cx| this.key_down(e, w, cx)))
+            .on_action(cx.safe_listener(|this, _: &PruneUnusedGroups, window, cx| {
+                this.prune_unused_groups(window, cx);
+            }))
             .child(
                 div()
                     .flex()

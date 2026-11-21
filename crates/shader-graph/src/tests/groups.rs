@@ -58,3 +58,59 @@ fn a_group_nested_in_another_group_is_cloned_in_its_own_document() {
     let holder = &model.project().definitions[&outer_ref];
     assert_eq!(holder.node(&inner).and_then(|n| n.definition_ref()), Some(copy.as_str()));
 }
+
+fn definition_of(model: &GraphModel, node: &str) -> String {
+    model.node(node).and_then(|n| n.definition_ref()).expect("a group node").to_owned()
+}
+
+#[test]
+fn pruning_removes_groups_only_orphans_reach_too() {
+    let mut model = GraphModel::default();
+    let outer = model.create_group(Point::default()).expect("creates");
+    let outer_ref = definition_of(&model, &outer);
+    model.enter_group(&outer);
+    let inner = model.create_group(Point::default()).expect("creates");
+    let inner_ref = definition_of(&model, &inner);
+    model.exit_group();
+    let used = model.create_group(Point::new(400.0, 0.0)).expect("creates");
+    let used_ref = definition_of(&model, &used);
+    assert!(model.prunable_refs().is_empty());
+
+    assert!(model.delete_nodes(std::slice::from_ref(&outer), &[]));
+    let mut expected = vec![outer_ref.clone(), inner_ref.clone()];
+    expected.sort();
+    let mut listed = model.prunable_refs();
+    listed.sort();
+    assert_eq!(listed, expected);
+
+    let groups = model.prunable_groups();
+    let count = |reference: &str| groups.iter().find(|g| g.reference == reference).map(|g| g.node_count);
+    assert_eq!(count(&outer_ref), Some(1), "the inner group node counts, the boundaries don't");
+    assert_eq!(count(&inner_ref), Some(0));
+
+    let mut removed = model.prune_unused_definitions();
+    removed.sort();
+    assert_eq!(removed, expected);
+    let kept: Vec<&String> = model.project().definitions.keys().collect();
+    assert!(kept.contains(&&used_ref));
+    assert!(!model.project().definitions.contains_key(&outer_ref));
+    assert!(!model.project().definitions.contains_key(&inner_ref));
+    assert!(model.prune_unused_definitions().is_empty());
+}
+
+#[test]
+fn pruning_does_nothing_inside_a_locked_group() {
+    let entry = library_entry("std-color");
+    let mut model = GraphModel::default();
+    let orphan = model.create_group(Point::default()).expect("creates");
+    let orphan_ref = definition_of(&model, &orphan);
+    model.delete_nodes(std::slice::from_ref(&orphan), &[]);
+
+    let locked = model.add_group_instance(&entry.reference, Point::new(400.0, 0.0)).expect("adds");
+    model.enter_group(&locked);
+    assert!(model.is_locked());
+    assert!(model.prunable_groups().is_empty());
+    assert!(model.prune_unused_definitions().is_empty());
+    model.exit_group();
+    assert!(model.project().definitions.contains_key(&orphan_ref));
+}

@@ -20,6 +20,15 @@ use crate::zones::paired_output_id;
 const UNGROUPABLE_TYPES: [&str; 3] = ["frag-output", GROUP_INPUT, GROUP_OUTPUT];
 const GROUP_OFFSET: f32 = 300.0;
 
+/// A group definition that pruning would remove.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrunableGroup {
+    pub reference: String,
+    pub label: String,
+    /// Its nodes, not counting the group's input and output boundaries.
+    pub node_count: usize,
+}
+
 fn reachable_from(doc: &GraphDocument, starts: &[&str]) -> HashSet<String> {
     let mut seen: HashSet<String> = starts.iter().map(|s| (*s).to_owned()).collect();
     let mut stack: Vec<String> = seen.iter().cloned().collect();
@@ -441,7 +450,31 @@ impl GraphModel {
             .collect()
     }
 
+    /// What `prune_unused_definitions` would remove, for confirming it with
+    /// the user. Empty inside a locked group, where pruning isn't allowed.
+    pub fn prunable_groups(&self) -> Vec<PrunableGroup> {
+        if self.is_locked() {
+            return Vec::new();
+        }
+        self.prunable_refs()
+            .into_iter()
+            .filter_map(|reference| {
+                let def = self.project.document(&reference)?;
+                Some(PrunableGroup {
+                    label: def.label.clone().unwrap_or_else(|| "Group".to_owned()),
+                    node_count: def.nodes.iter().filter(|n| n.side().is_none()).count(),
+                    reference,
+                })
+            })
+            .collect()
+    }
+
+    /// Removes the definitions `prunable_refs` lists, returning them. Nothing
+    /// is removed inside a locked group.
     pub fn prune_unused_definitions(&mut self) -> Vec<String> {
+        if self.is_locked() {
+            return Vec::new();
+        }
         let refs = self.prunable_refs();
         for r in &refs {
             self.project.definitions.remove(r);
