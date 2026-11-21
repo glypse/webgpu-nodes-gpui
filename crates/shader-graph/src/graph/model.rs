@@ -35,6 +35,8 @@ pub struct TypeChoice {
 /// Nodes and the links among them, copied to paste elsewhere.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NodeClipboard {
+    /// The definition the nodes were copied from.
+    pub from: String,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
@@ -773,15 +775,31 @@ impl GraphModel {
             .filter(|e| kept.contains(e.source.as_str()) && kept.contains(e.target.as_str()))
             .cloned()
             .collect();
-        Some(NodeClipboard { nodes, edges })
+        Some(NodeClipboard { from: self.active_definition_ref(), nodes, edges })
     }
 
     /// Paste a clipboard into the active document, its top-left at `position`
-    /// (where it was copied from by default). Returns the new nodes' ids.
+    /// (where it was copied from by default). Group nodes of a group that's
+    /// gone, or that would contain itself, are skipped, and so are boundary
+    /// nodes of another group: they show their own group's inputs and outputs.
+    /// Returns the new nodes' ids.
     pub fn paste_nodes(&mut self, clipboard: &NodeClipboard, position: Option<Point>) -> Vec<String> {
-        if self.is_locked() || clipboard.nodes.is_empty() {
+        if self.is_locked() {
             return Vec::new();
         }
+        let home = clipboard.from == self.active_definition_ref();
+        let pasted: Vec<GraphNode> = clipboard
+            .nodes
+            .iter()
+            .filter(|n| (home || n.side().is_none()) && n.definition_ref().is_none_or(|r| {
+                self.project.document(r).is_some() && !self.would_create_group_cycle(r)
+            }))
+            .cloned()
+            .collect();
+        if pasted.is_empty() {
+            return Vec::new();
+        }
+        let clipboard = &NodeClipboard { from: clipboard.from.clone(), nodes: pasted, edges: clipboard.edges.clone() };
         let min_x = clipboard.nodes.iter().map(|n| n.position.x).fold(f32::INFINITY, f32::min);
         let min_y = clipboard.nodes.iter().map(|n| n.position.y).fold(f32::INFINITY, f32::min);
         let offset = position.map_or(Point::new(40.0, 40.0), |p| Point::new(p.x - min_x, p.y - min_y));

@@ -715,7 +715,7 @@ impl GraphModel {
         self.remove_handles(definition_ref, side, &ids);
     }
 
-    fn remove_handles(&mut self, definition_ref: &str, side: GroupSide, ids: &[String]) {
+    pub(super) fn remove_handles(&mut self, definition_ref: &str, side: GroupSide, ids: &[String]) {
         let Some(def) = self.user_definition(definition_ref) else { return };
         def.interface_mut(side).retain(|h| !ids.contains(&h.id));
         if side == GroupSide::Input {
