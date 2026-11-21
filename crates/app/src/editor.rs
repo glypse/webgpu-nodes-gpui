@@ -55,6 +55,13 @@ pub struct Share {
     settings: ProjectSettings,
 }
 
+/// A breadcrumb of the group path: its depth, its label, and the group's node id when that group is locked.
+pub(crate) struct Crumb {
+    pub depth: usize,
+    pub label: String,
+    pub locked_group: Option<String>,
+}
+
 /// What the shell needs from the editor.
 #[derive(Clone, Debug)]
 pub enum EditorEvent {
@@ -65,6 +72,8 @@ pub enum EditorEvent {
     Uniforms(Vec<(String, UniformValue)>),
     /// The project's settings changed, by an edit, a load, undo or redo.
     Settings(ProjectSettings),
+    /// The project's model was edited, after the edit is shown. Listeners compare what they show.
+    Edited,
 }
 
 /// What a menu entry does to the editor.
@@ -773,6 +782,7 @@ impl Editor {
     fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.sync(cx);
         self.regenerate(cx);
+        cx.emit(EditorEvent::Edited);
     }
 
     /// Runs an edit of the model, then shows it.
@@ -1569,11 +1579,11 @@ impl Editor {
     }
 
     /// The group path as crumbs, the root first, each with its depth, and whether the group is locked.
-    pub(crate) fn breadcrumbs(&self) -> (Vec<(usize, String)>, bool) {
+    pub(crate) fn breadcrumbs(&self) -> (Vec<Crumb>, bool) {
         let model = self.model.borrow();
-        let mut crumbs: Vec<(usize, String)> = vec![(0, "Root".to_owned())];
-        for (i, (_, label, _)) in model.path_labels(model.path()).into_iter().enumerate() {
-            crumbs.push((i + 1, label));
+        let mut crumbs = vec![Crumb { depth: 0, label: "Root".to_owned(), locked_group: None }];
+        for (i, (id, label, locked)) in model.path_labels(model.path()).into_iter().enumerate() {
+            crumbs.push(Crumb { depth: i + 1, label, locked_group: locked.then_some(id) });
         }
         (crumbs, model.is_locked())
     }
