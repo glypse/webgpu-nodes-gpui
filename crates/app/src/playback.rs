@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Window};
 use shader_graph::assets::{AssetKind, asset_hash};
-use shader_graph::codegen::ResourceDecl;
+use shader_graph::codegen::{RenderPlan, ResourceDecl};
 use shader_graph::graph::MAX_CANVAS_SIZE;
 
 use crate::project::AssetFiles;
@@ -169,22 +169,13 @@ impl Playback {
     /// thread: `media_ready` shows each one as it arrives.
     fn sync_media(&mut self) {
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else { return };
-        let mut sources = BTreeMap::new();
-        for resource in &program.plan().resources {
-            let ResourceDecl::Media { asset, video, .. } = resource else { continue };
-            let Some(bytes) = self.files.get(asset) else { continue };
-            let kind = if video.is_some() { AssetKind::Video } else { AssetKind::Image };
-            let hash = match self.hashes.get(asset) {
-                Some((known, hash)) if Arc::ptr_eq(known, bytes) => hash.clone(),
-                _ => {
-                    let hash = asset_hash(bytes);
-                    self.hashes.insert(asset.clone(), (bytes.clone(), hash.clone()));
-                    hash
-                }
-            };
-            sources.insert(asset.clone(), MediaSource { kind, hash, bytes: bytes.clone() });
-        }
+        let sources = media_sources(&self.files, &mut self.hashes, program.plan());
         renderer.sync_media(&sources);
+    }
+
+    /// The media a program of `plan` reads, for an export to draw with.
+    pub fn export_media(&mut self, plan: &RenderPlan) -> BTreeMap<String, MediaSource> {
+        media_sources(&self.files, &mut self.hashes, plan)
     }
 
     /// Starts polling the renderer for decoded images, once, when the renderer
@@ -532,6 +523,30 @@ impl Playback {
 }
 
 /// The size frames render at: the followed pane's while following it, else `stored`.
+/// The media `plan` reads, from the project's files. Each file is hashed once: its hash is kept until the file changes.
+fn media_sources(
+    files: &AssetFiles,
+    hashes: &mut HashMap<String, (Arc<Vec<u8>>, String)>,
+    plan: &RenderPlan,
+) -> BTreeMap<String, MediaSource> {
+    let mut sources = BTreeMap::new();
+    for resource in &plan.resources {
+        let ResourceDecl::Media { asset, video, .. } = resource else { continue };
+        let Some(bytes) = files.get(asset) else { continue };
+        let kind = if video.is_some() { AssetKind::Video } else { AssetKind::Image };
+        let hash = match hashes.get(asset) {
+            Some((known, hash)) if Arc::ptr_eq(known, bytes) => hash.clone(),
+            _ => {
+                let hash = asset_hash(bytes);
+                hashes.insert(asset.clone(), (bytes.clone(), hash.clone()));
+                hash
+            }
+        };
+        sources.insert(asset.clone(), MediaSource { kind, hash, bytes: bytes.clone() });
+    }
+    sources
+}
+
 fn canvas_size(follow: bool, pane: Option<Size>, stored: Size) -> Size {
     match (follow, pane) {
         (true, Some(pane)) => pane,

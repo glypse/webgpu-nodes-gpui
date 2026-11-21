@@ -8409,6 +8409,7 @@ dependencies = [
  "clap",
  "dirs 7.0.0",
  "env_logger",
+ "export",
  "gpui-component",
  "gpui-fast",
  "gpui-fast-platform",

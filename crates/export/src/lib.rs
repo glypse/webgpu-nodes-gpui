@@ -49,6 +49,13 @@ pub enum Quality {
 }
 
 impl Quality {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::VeryHigh => "Very high",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,8 +170,9 @@ fn validate(settings: &Settings) -> Result<(), ExportError> {
     if !(settings.fps.is_finite() && settings.fps > 0.0) {
         return invalid("the frame rate must be above zero");
     }
-    if !(settings.duration.is_finite() && settings.duration > 0.0) {
-        return invalid("the duration must be above zero");
+    // A zero duration still exports one frame, as the original's frame count does.
+    if !(settings.duration.is_finite() && settings.duration >= 0.0) {
+        return invalid("the duration can't be negative");
     }
     if !(settings.start.is_finite() && settings.start >= 0.0) {
         return invalid("the start can't be negative");
@@ -222,7 +230,8 @@ mod tests {
 
     #[test]
     fn bad_settings_are_refused() {
-        assert!(validate(&settings(0.0, 0.0, 30.0)).is_err());
+        assert!(validate(&settings(0.0, -1.0, 30.0)).is_err());
+        assert!(validate(&settings(0.0, 0.0, 30.0)).is_ok());
         assert!(validate(&settings(-1.0, 1.0, 30.0)).is_err());
         assert!(validate(&settings(0.0, 1.0, f64::NAN)).is_err());
         assert!(validate(&settings(0.0, 1.0, 30.0)).is_ok());

@@ -16,6 +16,7 @@ gpui-flow = { path = "../flow" }
 shader-graph = { path = "../shader-graph" }
 pollster.workspace = true
 runtime = { path = "../runtime" }
+export = { path = "../export" }
 theme = { path = "../theme" }
 screen = { path = "../screen" }
 image = { version = "0.25", default-features = false, features = ["png"] }

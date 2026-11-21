@@ -19,6 +19,7 @@ use theme::{ActiveTheme as _, IconName};
 use crate::assets::{self, AssetsPanel};
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
+use crate::export_dialog;
 use crate::graph::breadcrumbs::Breadcrumbs;
 use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
@@ -48,6 +49,7 @@ actions!(
         FitPreview,
         ActualSizePreview,
         ImportMedia,
+        ExportVideo,
     ]
 );
 
@@ -621,6 +623,9 @@ impl Render for Shell {
             }))
             .on_action(cx.safe_listener(|this, _: &ImportMedia, window, cx| {
                 assets::pick_and_import(&this.editor, &this.playback, window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &ExportVideo, window, cx| {
+                export_dialog::open(this.editor.clone(), this.playback.clone(), window, cx);
             }))
             .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
                 this.open_settings(window, cx);

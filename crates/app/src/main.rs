@@ -2,6 +2,7 @@ mod assets;
 mod cli;
 mod code_view;
 mod editor;
+mod export_dialog;
 mod graph;
 mod layout;
 mod playback;
@@ -26,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser as _;
 use gpui::{AsyncApp, WindowHandle};
-use shell::{ImportMedia, NewProject, OpenProject, OpenSettings, Redo, SaveProject, SaveProjectAs, Shell, Undo};
+use shell::{ExportVideo, ImportMedia, NewProject, OpenProject, OpenSettings, Redo, SaveProject, SaveProjectAs, Shell, Undo};
 
 actions!(app, [Quit]);
 
@@ -52,6 +53,8 @@ fn menus() -> Vec<Menu> {
                 MenuItem::action("Save As...", SaveProjectAs),
                 MenuItem::separator(),
                 MenuItem::action("Import media...", ImportMedia),
+                MenuItem::separator(),
+                MenuItem::action("Export video...", ExportVideo),
             ],
         },
         Menu {
@@ -97,13 +100,19 @@ fn main() -> ExitCode {
             ..Default::default()
         };
         let project = launch.project.clone();
+        // The root hosts the window's dialogs, which the shell opens.
         let opened = cx.open_window(options, |window, cx| {
-            cx.new(|cx| Shell::new(project, launch.zoom, window, cx))
+            let shell = cx.new(|cx| Shell::new(project, launch.zoom, window, cx));
+            cx.new(|cx| gpui_component::Root::new(gpui::AnyView::from(shell), window, cx))
         });
         match opened {
             Ok(handle) => {
                 if launch.play
-                    && let Err(error) = handle.update(cx, |shell, window, cx| shell.play(window, cx))
+                    && let Err(error) = handle.update(cx, |root, window, cx| {
+                        if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                            shell.update(cx, |shell, cx| shell.play(window, cx));
+                        }
+                    })
                 {
                     log::error!("failed to start playback: {error:#}");
                 }
@@ -134,7 +143,7 @@ fn main() -> ExitCode {
 
 /// Quits once the `--seconds` or `--frames` bound is reached, after taking the
 /// `--screenshot` if asked for.
-async fn wind_down(launch: cli::Cli, handle: WindowHandle<Shell>, cx: &mut AsyncApp) {
+async fn wind_down(launch: cli::Cli, handle: WindowHandle<gpui_component::Root>, cx: &mut AsyncApp) {
     if launch.bounded() {
         let started = Instant::now();
         let mut frames = probe::frames();

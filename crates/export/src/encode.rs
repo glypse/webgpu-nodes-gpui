@@ -20,15 +20,26 @@ pub trait VideoEncoder: Sized {
     fn abandon(self);
 }
 
-/// Bits per pixel per frame of each quality preset. These are our choices: the
-/// original's `Quality` presets are opaque to us, so they need checking against
-/// its output before being relied on.
-pub fn bits_per_pixel(quality: Quality) -> f64 {
-    match quality {
-        Quality::Medium => 0.05,
-        Quality::High => 0.1,
-        Quality::VeryHigh => 0.2,
-    }
+/// The average bitrate in bits per second for `quality` at `size`: mediabunny's
+/// H.264 estimate, which the original's export uses. It scales with the frame's
+/// pixels and not with its frame rate.
+pub fn average_bitrate(quality: Quality, size: Size) -> i64 {
+    const REFERENCE_PIXELS: f64 = 1920.0 * 1080.0;
+    const REFERENCE_BITRATE: f64 = 3_000_000.0;
+    let pixels = f64::from(size.width) * f64::from(size.height);
+    let scaled = REFERENCE_BITRATE * (pixels / REFERENCE_PIXELS).powf(0.95);
+    let bitrate = scaled * quality_factor(quality);
+    ((bitrate / 1000.0).ceil() * 1000.0) as i64
+}
+
+/// The multiplier of mediabunny's `Quality` levels (0.5, 0.75 and 1 on its 0-1 scale).
+fn quality_factor(quality: Quality) -> f64 {
+    let level: f64 = match quality {
+        Quality::Medium => 0.5,
+        Quality::High => 0.75,
+        Quality::VeryHigh => 1.0,
+    };
+    0.3 * (2.5538 * level).exp()
 }
 
 /// The frame timestamps' timescale: milliframes, so fractional rates stay exact.
@@ -52,8 +63,11 @@ mod av {
     use objc2_av_foundation::{
         AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVAssetWriterStatus,
         AVFileTypeMPEG4, AVMediaTypeVideo, AVVideoAverageBitRateKey, AVVideoCodecKey,
-        AVVideoCodecTypeH264, AVVideoCompressionPropertiesKey, AVVideoHeightKey,
-        AVVideoMaxKeyFrameIntervalKey, AVVideoWidthKey,
+        AVVideoCodecTypeH264, AVVideoColorPrimariesKey, AVVideoColorPrimaries_ITU_R_709_2,
+        AVVideoColorPropertiesKey, AVVideoCompressionPropertiesKey, AVVideoHeightKey,
+        AVVideoMaxKeyFrameIntervalKey, AVVideoTransferFunctionKey,
+        AVVideoTransferFunction_ITU_R_709_2, AVVideoWidthKey, AVVideoYCbCrMatrixKey,
+        AVVideoYCbCrMatrix_ITU_R_709_2,
     };
     use objc2_core_foundation::CFRetained;
     use objc2_core_media::CMTime;
@@ -64,7 +78,7 @@ mod av {
     };
     use objc2_foundation::{NSDictionary, NSError, NSNumber, NSString, NSURL};
 
-    use super::{VideoEncoder, bits_per_pixel, timescale};
+    use super::{VideoEncoder, average_bitrate, timescale};
     use std::path::Path;
 
     use runtime::Size;
@@ -108,16 +122,28 @@ mod av {
             }
             .map_err(|error| write_error(ns_error(&error)))?;
 
-            // Quality is set as a bitrate proportional to the frame's pixels per second, so every size gets the same quality.
-            let bitrate = f64::from(size.width) * f64::from(size.height) * fps * bits_per_pixel(quality);
+            let bitrate = average_bitrate(quality, size);
             let compression = NSDictionary::<NSString, AnyObject>::from_slices(
                 &[
                     key(unsafe { AVVideoAverageBitRateKey }, "average bitrate")?,
                     key(unsafe { AVVideoMaxKeyFrameIntervalKey }, "keyframe interval")?,
                 ],
                 &[
-                    &*NSNumber::new_i64(bitrate as i64) as &AnyObject,
+                    &*NSNumber::new_i64(bitrate) as &AnyObject,
                     &*NSNumber::new_i64(fps.round().max(1.0) as i64) as &AnyObject,
+                ],
+            );
+            // BT.709 throughout, so players show the colours the frames were rendered in.
+            let colour = NSDictionary::<NSString, AnyObject>::from_slices(
+                &[
+                    key(unsafe { AVVideoColorPrimariesKey }, "colour primaries")?,
+                    key(unsafe { AVVideoTransferFunctionKey }, "transfer function")?,
+                    key(unsafe { AVVideoYCbCrMatrixKey }, "YCbCr matrix")?,
+                ],
+                &[
+                    key(unsafe { AVVideoColorPrimaries_ITU_R_709_2 }, "BT.709 primaries")? as &AnyObject,
+                    key(unsafe { AVVideoTransferFunction_ITU_R_709_2 }, "BT.709 transfer")? as &AnyObject,
+                    key(unsafe { AVVideoYCbCrMatrix_ITU_R_709_2 }, "BT.709 matrix")? as &AnyObject,
                 ],
             );
             let codec = unsafe { AVVideoCodecTypeH264 }
@@ -128,12 +154,14 @@ mod av {
                     key(unsafe { AVVideoWidthKey }, "width")?,
                     key(unsafe { AVVideoHeightKey }, "height")?,
                     key(unsafe { AVVideoCompressionPropertiesKey }, "compression")?,
+                    key(unsafe { AVVideoColorPropertiesKey }, "colour properties")?,
                 ],
                 &[
                     codec as &AnyObject,
                     &*NSNumber::new_i64(i64::from(size.width)) as &AnyObject,
                     &*NSNumber::new_i64(i64::from(size.height)) as &AnyObject,
                     &*compression as &AnyObject,
+                    &*colour as &AnyObject,
                 ],
             );
             let media = unsafe { AVMediaTypeVideo }.ok_or_else(|| write_error("AVFoundation has no video type"))?;
@@ -260,5 +288,54 @@ mod av {
             CVPixelBufferUnlockBaseAddress(buffer, CVPixelBufferLockFlags(0));
             if usable { Ok(()) } else { Err(write_error("a pixel buffer has no usable memory")) }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bitrates_follow_mediabunny() {
+        // 1080p medium: 3 Mbit/s x 0.3 x e^(2.5538 x 0.5), rounded up to the kilobit.
+        assert_eq!(average_bitrate(Quality::Medium, Size::new(1920, 1080)), 3_227_000);
+        assert_eq!(average_bitrate(Quality::High, Size::new(1920, 1080)), 6_111_000);
+        assert_eq!(average_bitrate(Quality::VeryHigh, Size::new(1920, 1080)), 11_571_000);
+    }
+
+    #[test]
+    fn bitrates_scale_with_pixels_not_frame_rate() {
+        let hd = average_bitrate(Quality::High, Size::new(1280, 720));
+        let full = average_bitrate(Quality::High, Size::new(1920, 1080));
+        assert!(hd < full, "{hd} >= {full}");
+        let ratio = full as f64 / hd as f64;
+        let expected = (1920.0_f64 * 1080.0 / (1280.0 * 720.0)).powf(0.95);
+        assert!((ratio - expected).abs() < 0.01, "{ratio}");
+    }
+
+    /// Finds the `colr` box in an MP4 and returns its `nclx` primaries, transfer and matrix.
+    fn colour_tags(bytes: &[u8]) -> Option<(u16, u16, u16)> {
+        let at = bytes.windows(4).position(|w| w == b"colr")? + 4;
+        if bytes.get(at..at + 4)? != b"nclx" {
+            return None;
+        }
+        let value = |i: usize| Some(u16::from_be_bytes([*bytes.get(at + 4 + 2 * i)?, *bytes.get(at + 5 + 2 * i)?]));
+        Some((value(0)?, value(1)?, value(2)?))
+    }
+
+    #[test]
+    fn mp4_is_tagged_bt709() {
+        let path = std::env::temp_dir().join(format!("export-colour-{}.mp4", std::process::id()));
+        let size = Size::new(64, 64);
+        let mut encoder = AvFoundationEncoder::open(&path, Format::Mp4, Quality::Medium, size, 30.0)
+            .expect("the encoder opens");
+        for _ in 0..3 {
+            encoder.push(&vec![0u8; 64 * 64 * 4]).expect("a frame is pushed");
+        }
+        encoder.finish().expect("the file is written");
+        let bytes = std::fs::read(&path).expect("the file is readable");
+        std::fs::remove_file(&path).ok();
+        // ISO/IEC 23001-8 code points: 1 is BT.709 for primaries, transfer and matrix.
+        assert_eq!(colour_tags(&bytes), Some((1, 1, 1)));
     }
 }
