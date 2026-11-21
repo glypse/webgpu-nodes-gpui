@@ -1,10 +1,10 @@
 use guard::SafeListener as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent,
-    Empty, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
-    Render, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point,
-    prelude::FluentBuilder as _, px, relative,
+    AnyElement, AnyView, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle,
+    DragMoveEvent, Empty, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
+    Pixels, Point, Render, StatefulInteractiveElement as _, Styled as _, StyleRefinement, Window,
+    canvas, div, point, prelude::FluentBuilder as _, px, relative,
 };
 use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
 
@@ -19,10 +19,12 @@ pub trait Editor: Clone + PartialEq + 'static {
 }
 
 /// What an area shows: its panel's controls, drawn in the header after the
-/// type picker, and its body.
+/// type picker, and its body. Both are cached views, drawn again only when
+/// their entity is notified, so each must stay correct at the size the area
+/// gives it.
 pub struct AreaContent {
-    pub toolbar: Option<AnyElement>,
-    pub body: AnyElement,
+    pub toolbar: Option<AnyView>,
+    pub body: Option<AnyView>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,7 +369,7 @@ impl<E: Editor> ScreenView<E> {
     fn render_header(
         &self,
         area: &Area<E>,
-        toolbar: Option<AnyElement>,
+        toolbar: Option<AnyView>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
@@ -418,7 +420,9 @@ impl<E: Editor> ScreenView<E> {
                     .tooltip("Editor type")
                     .on_click(cx.safe_listener(move |this, event, _, cx| open_type(this, event, cx))),
             )
-            .children(toolbar)
+            .children(toolbar.map(|toolbar| {
+                toolbar.cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+            }))
             .into_any_element()
     }
 
@@ -785,7 +789,11 @@ impl<E: Editor> Render for ScreenView<E> {
                             .min_h_0()
                             .relative()
                             .overflow_hidden()
-                            .child(content.body),
+                            .children(
+                                content
+                                    .body
+                                    .map(|body| body.cached(StyleRefinement::default().size_full())),
+                            ),
                     )
                     .children(self.corner_handles(id, cx))
                     .into_any_element()
@@ -907,7 +915,7 @@ mod ui_tests {
             ]);
             ScreenView::new(
                 screen,
-                |_, _, _, _| AreaContent { toolbar: None, body: div().into_any_element() },
+                |_, _, _, _| AreaContent { toolbar: None, body: None },
                 cx,
             )
         });

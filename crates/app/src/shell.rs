@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, Window, actions, div,
+    ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, StyleRefinement, Window,
+    actions, div,
 };
 use runtime::{Size, Timing};
 use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
@@ -198,7 +199,7 @@ impl Shell {
                                 area
                             }
                         };
-                        AreaContent { toolbar: None, body: area.into_any_element() }
+                        AreaContent { toolbar: None, body: Some(area.into()) }
                     }
                     Panel::Preview => {
                         let (area, toolbar) = views
@@ -207,8 +208,8 @@ impl Shell {
                             .or_insert_with(|| preview::new_area(&playback, cx))
                             .clone();
                         AreaContent {
-                            toolbar: Some(toolbar.into_any_element()),
-                            body: area.into_any_element(),
+                            toolbar: Some(toolbar.into()),
+                            body: Some(area.into()),
                         }
                     }
                     Panel::Timeline => {
@@ -219,19 +220,18 @@ impl Shell {
                                 cx.new(|cx| TimelineBar::new(playback.clone(), window, cx))
                             })
                             .clone();
-                        AreaContent {
-                            toolbar: Some(bar.into_any_element()),
-                            body: div().into_any_element(),
-                        }
+                        AreaContent { toolbar: Some(bar.into()), body: None }
                     }
                     Panel::Code => AreaContent {
                         toolbar: None,
-                        body: views
-                            .code
-                            .entry(id)
-                            .or_insert_with(|| code_view::new(&playback, cx))
-                            .clone()
-                            .into_any_element(),
+                        body: Some(
+                            views
+                                .code
+                                .entry(id)
+                                .or_insert_with(|| code_view::new(&playback, cx))
+                                .clone()
+                                .into(),
+                        ),
                     },
                 }
             }, cx)
@@ -515,7 +515,7 @@ impl Render for Shell {
                 this.editor.update(cx, |e, cx| e.redo(cx));
                 this.refresh_title(window, cx);
             }))
-            .child(self.screen.clone())
+            .child(self.screen.clone().cached(StyleRefinement::default().size_full()))
             .children(self.settings.clone())
     })
     }
