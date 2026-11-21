@@ -353,6 +353,9 @@ pub fn fallback_handle_ids(
         if node.is("fallback") {
             return handle == "value";
         }
+        if node.is(super::SAMPLE_TEXTURE) {
+            return handle == super::SAMPLE_TEXTURE_UV;
+        }
         if node.is("reroute") && depth < 64 {
             return definition.edges_from(target).any(|e| {
                 is_fallback(definition, project, visiting, &e.target, &e.target_handle, depth + 1)

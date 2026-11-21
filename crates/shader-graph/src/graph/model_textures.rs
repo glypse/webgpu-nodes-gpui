@@ -4,14 +4,21 @@ use std::collections::HashSet;
 
 use super::model::GraphModel;
 use super::new_id;
+use crate::codegen::CodegenGraph;
 use crate::nodes::{
     DEFAULT_RENDER_FORMAT, RENDER_LIKE, RENDER_PIXELS, RENDER_SCALE, RENDER_TEXTURE,
     render_texture_items,
 };
-use crate::passes::TextureFormat;
+use crate::passes::{PassAnalysis, TextureFormat};
 use crate::types::{HandleType, WgslType, ZoneItem};
 
 impl GraphModel {
+    /// What the project's links do with textures, as it's compiled now: the
+    /// same sources codegen reads.
+    pub fn pass_analysis(&self) -> PassAnalysis<'_> {
+        PassAnalysis::new(CodegenGraph { project: &self.project, resolver: &self.resolver })
+    }
+
     fn render_node_in_active(&self, node_id: &str) -> Option<&super::GraphNode> {
         let node = self.active_document().node(node_id)?;
         (node.is(RENDER_TEXTURE) && !self.is_locked()).then_some(node)

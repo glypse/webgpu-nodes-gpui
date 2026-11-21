@@ -176,3 +176,293 @@ fn simulation_state_survives_a_recompile_of_the_same_graph() {
     let next = scene.draw(&recompiled, size, 2);
     assert_eq!(pixel(&next, 2, 0, 0)[0], srgb(0.3), "the state carries over into the new program");
 }
+
+/// A Render Texture of `pixels` square holding the UV of each texel, in `format`.
+fn uv_texture(scene: &mut Scene, pixels: f64, format: shader_graph::passes::TextureFormat) -> (String, String) {
+    let uv = scene.add("uv");
+    let texture = scene.add("render-texture");
+    scene.model.update_node_data(&texture, |d| {
+        d.settings.insert("mode".to_owned(), "pixels".to_owned());
+        d.values.insert("pixels".to_owned(), InputValue::vector(&[pixels, pixels]));
+    });
+    let item = scene.model.render_items_of(&texture)[0].id.clone();
+    scene.model.set_render_item_format(&texture, &item, format);
+    scene.link((&uv, "uv"), (&texture, &item));
+    (texture, item)
+}
+
+#[test]
+fn load_texel_reads_the_exact_texel_rows_down() {
+    use shader_graph::passes::TextureFormat;
+    for format in [TextureFormat::Rgba32Float, TextureFormat::Rgba16Float] {
+        let mut scene = Scene::new();
+        let (texture, item) = uv_texture(&mut scene, 4.0, format);
+        let load = scene.add("load-texel");
+        scene.model.set_node_type(&load, Some(WgslType::Vec4f));
+        scene.link((&texture, &item), (&load, "texture"));
+        scene.model.set_input_value(&load, "texel", Some(InputValue::vector(&[2.0, 1.0])));
+        let out = scene.output();
+        scene.link((&load, "value"), (&out, "color"));
+        let program = scene.compile();
+        let pixels = scene.draw(&program, Size::new(2, 2), 0);
+        let [red, green, ..] = pixel(&pixels, 2, 0, 0);
+        assert_eq!(red, srgb(0.625), "u at the centre of the third texel, {format:?}");
+        assert_eq!(green, srgb(0.625), "v counts up from the bottom, the second row from the top is 1 - 1.5 / 4: {format:?}");
+    }
+}
+
+#[test]
+fn integer_textures_keep_their_values_exactly() {
+    use shader_graph::passes::TextureFormat;
+    let mut scene = Scene::new();
+    let texture = scene.add("render-texture");
+    let item = scene.model.render_items_of(&texture)[0].id.clone();
+    scene.model.set_render_item_type(&texture, &item, WgslType::U32);
+    scene.model.set_render_item_format(&texture, &item, TextureFormat::R32Uint);
+    let seven = scene.add("declare");
+    scene.model.set_node_type(&seven, Some(WgslType::U32));
+    scene.model.set_input_value(&seven, "x", Some(InputValue::from(7.0)));
+    scene.link((&seven, "value"), (&texture, &item));
+    let load = scene.add("load-texel");
+    scene.model.set_node_type(&load, Some(WgslType::Vec4u));
+    scene.link((&texture, &item), (&load, "texture"));
+    let float = scene.add("to-float");
+    scene.link((&load, "value"), (&float, "e"));
+    let tenth = scene.constant(0.1);
+    let scale = scene.add("mul");
+    scene.link((&float, "result"), (&scale, "operands"));
+    scene.link((&tenth, "value"), (&scale, "operands"));
+    let out = scene.output();
+    scene.link((&scale, "result"), (&out, "color"));
+    let program = scene.compile();
+    let pixels = scene.draw(&program, Size::new(2, 2), 0);
+    assert_eq!(pixel(&pixels, 2, 1, 1)[0], srgb(0.7), "7 as an integer, a tenth of it as the red");
+}
+
+#[test]
+fn the_last_mip_level_is_the_mean_of_the_texture() {
+    use shader_graph::passes::TextureFormat;
+    let mut scene = Scene::new();
+    let (texture, item) = uv_texture(&mut scene, 8.0, TextureFormat::Rgba16Float);
+    scene.model.update_node_data(&texture, |d| {
+        d.settings.insert("mips".to_owned(), "on".to_owned());
+    });
+    let sample = scene.add("sample-texture");
+    scene.link((&texture, &item), (&sample, "texture"));
+    scene.model.set_input_value(&sample, "level", Some(InputValue::from(3.0)));
+    scene.model.set_input_value(&sample, "interpolation", Some(InputValue::from(1.0)));
+    let out = scene.output();
+    scene.link((&sample, "color"), (&out, "color"));
+    let program = scene.compile();
+    let pixels = scene.draw(&program, Size::new(2, 2), 0);
+    let [red, green, ..] = pixel(&pixels, 2, 0, 0);
+    assert!(red.abs_diff(srgb(0.5)) <= 1 && green.abs_diff(srgb(0.5)) <= 1, "the mean of u and v is a half: {red} {green}");
+    let base = {
+        scene.model.set_input_value(&sample, "level", Some(InputValue::from(0.0)));
+        let program = scene.compile();
+        scene.draw(&program, Size::new(8, 8), 0)
+    };
+    assert!(pixel(&base, 8, 0, 4)[0] < pixel(&base, 8, 7, 4)[0], "level 0 keeps the gradient");
+}
+
+#[test]
+fn a_simulations_texture_item_feeds_back_frame_to_frame() {
+    use shader_graph::types::HandleType;
+    let mut scene = Scene::new();
+    let sim = scene.model.create_zone(ZoneKind::Simulation, Point::default()).expect("zone");
+    let item = scene
+        .model
+        .add_zone_item(&sim, HandleType::Fixed(WgslType::Texture), Some("Frame"))
+        .expect("an item")
+        .id;
+    let output = scene.model.zone_nodes(&sim).expect("nodes").output.id;
+    let previous = scene.add("sample-texture");
+    scene.link((&sim, &item), (&previous, "texture"));
+    let step = scene.add("declare");
+    scene.model.set_node_type(&step, Some(WgslType::Vec4f));
+    scene.model.set_input_value(&step, "x", Some(InputValue::from(0.1)));
+    let sum = scene.add("add");
+    scene.model.set_node_type(&sum, Some(WgslType::Vec4f));
+    scene.link((&previous, "color"), (&sum, "operands"));
+    scene.link((&step, "value"), (&sum, "operands"));
+    scene.link((&sum, "result"), (&output, &item));
+    let out = scene.output();
+    scene.link((&output, &item), (&out, "color"));
+    let program = scene.compile();
+    for frame in 0..4u64 {
+        let pixels = scene.draw(&program, Size::new(2, 2), frame);
+        let red = pixel(&pixels, 2, 1, 0)[0];
+        assert!(red.abs_diff(srgb((frame + 1) as f64 * 0.1)) <= 1, "frame {frame}: {red}");
+    }
+}
+
+const IMPULSE_SIZE: u32 = 9;
+
+fn group_handle(id: &str, label: &str, outputs: bool) -> String {
+    let entry = shader_graph::library::entries().iter().find(|e| e.id == id).expect("a library group");
+    let handles = if outputs { &entry.definition.outputs } else { &entry.definition.inputs };
+    handles.iter().find(|h| h.label == label).map(|h| h.id.clone()).expect("the handle exists")
+}
+
+/// The alpha of the image `id` blurs, a white pixel at the centre of a transparent
+/// 9 by 9 image, at `radius` pixels, one value per pixel.
+fn blurred_alpha(id: &str, radius: f64, values: &[(&str, f64)]) -> (usize, Vec<Vec<f64>>) {
+    use shader_graph::types::{CustomSockets, HandleDef};
+    let mut scene = Scene::new();
+    let uv = scene.add("uv");
+    let image = scene.add("custom-wgsl");
+    let size = IMPULSE_SIZE;
+    scene.model.update_node_data(&image, |d| {
+        d.sockets = Some(CustomSockets {
+            inputs: vec![HandleDef::new("uv", "uv", WgslType::Vec2f)],
+            outputs: vec![HandleDef::new("color", "color", WgslType::Vec4f)],
+        });
+        d.code = Some(format!(
+            "let p = abs(uv - vec2f(0.5));\ncolor = select(vec4f(0.0), vec4f(1.0), all(p < vec2f(0.5 / {size}.0)));"
+        ));
+    });
+    scene.link((&uv, "uv"), (&image, "uv"));
+    let texture = scene.add("render-texture");
+    scene.model.update_node_data(&texture, |d| {
+        d.settings.insert("mode".to_owned(), "pixels".to_owned());
+        d.values.insert("pixels".to_owned(), InputValue::vector(&[f64::from(size), f64::from(size)]));
+    });
+    let item = scene.model.render_items_of(&texture)[0].id.clone();
+    scene.link((&image, "color"), (&texture, &item));
+
+    let entry = shader_graph::library::entries().iter().find(|e| e.id == id).expect("a library group");
+    let blur = scene.model.add_group_instance(&entry.reference, Point::default()).expect("adds");
+    scene.model.set_input_value(&blur, &group_handle(id, "Radius", false), Some(InputValue::from(radius / f64::from(size))));
+    for (label, value) in values {
+        scene.model.set_input_value(&blur, &group_handle(id, label, false), Some(InputValue::from(*value)));
+    }
+    scene.link((&texture, &item), (&blur, &group_handle(id, "Texture", false)));
+    let out = scene.output();
+    scene.link((&blur, &group_handle(id, "Texture", true)), (&out, "color"));
+    let program = scene.compile();
+    let passes = program.plan().passes.len();
+    let pixels = scene.draw(&program, Size::new(size, size), 0);
+    let alpha = (0..size)
+        .map(|y| (0..size).map(|x| f64::from(pixel(&pixels, size, x, y)[3]) / 255.0).collect())
+        .collect();
+    (passes, alpha)
+}
+
+/// `weight`'s separable kernel around the centre, normalised.
+fn kernel(weight: impl Fn(f64) -> f64, reach: i32) -> Vec<Vec<f64>> {
+    let centre = (IMPULSE_SIZE as i32 - 1) / 2;
+    let sum: f64 = (-reach..=reach).map(|k| weight(f64::from(k))).sum();
+    let w = |d: i32| if d.abs() <= reach { weight(f64::from(d)) / sum } else { 0.0 };
+    (0..IMPULSE_SIZE as i32).map(|y| (0..IMPULSE_SIZE as i32).map(|x| w(x - centre) * w(y - centre)).collect()).collect()
+}
+
+fn assert_close(actual: &[Vec<f64>], expected: &[Vec<f64>]) {
+    for (y, row) in actual.iter().enumerate() {
+        for (x, value) in row.iter().enumerate() {
+            assert!((value - expected[y][x]).abs() < 0.012, "pixel {x}, {y}: {value} against {}", expected[y][x]);
+        }
+    }
+}
+
+#[test]
+fn gaussian_blur_weights_taps_by_a_gaussian_of_a_third_of_the_radius() {
+    let radius = 3.0_f64;
+    let sigma = radius / 3.0;
+    let (_, alpha) = blurred_alpha("std-gaussian-blur", radius, &[]);
+    let weight = |k: f64| {
+        ((-(k * k) / (2.0 * sigma * sigma)).exp() - (-((radius + 1.0).powi(2)) / (2.0 * sigma * sigma)).exp()).max(0.0)
+    };
+    assert_close(&alpha, &kernel(weight, 3));
+}
+
+#[test]
+fn box_blur_weights_taps_equally_the_outermost_by_the_radius_fraction() {
+    let radius = 1.5_f64;
+    let (_, alpha) = blurred_alpha("std-box-blur", radius, &[]);
+    assert_close(&alpha, &kernel(|k| (radius + 1.0 - k.abs()).clamp(0.0, 1.0), 2));
+}
+
+#[test]
+fn a_blur_with_a_direction_blurs_along_the_angle_alone() {
+    let centre = (IMPULSE_SIZE as usize - 1) / 2;
+    for id in ["std-gaussian-blur", "std-box-blur"] {
+        let (_, alpha) = blurred_alpha(id, 2.0, &[("Direction", 1.0), ("Angle", 90.0)]);
+        for (y, row) in alpha.iter().enumerate() {
+            for (x, value) in row.iter().enumerate() {
+                if x != centre {
+                    assert!(*value < 0.01, "{id}: pixel {x}, {y} is {value}");
+                }
+            }
+        }
+        assert!(alpha[centre - 1][centre] > 0.0, "{id} blurs along the angle");
+    }
+}
+
+#[test]
+fn a_blur_renders_only_the_passes_its_settings_reach() {
+    let passes = |id, values: &[(&str, f64)]| blurred_alpha(id, 2.0, values).0;
+    // The pass drawing the image, the blur's, and the frame's, which samples the result.
+    assert_eq!(passes("std-gaussian-blur", &[]), 4);
+    assert_eq!(passes("std-gaussian-blur", &[("Direction", 1.0)]), 3);
+    assert_eq!(passes("std-box-blur", &[("Iterations", 3.0)]), 8);
+    assert_eq!(passes("std-gaussian-blur", &[("Separable", 0.0)]), 3);
+}
+
+/// A simulation adding its step's seconds to its state each frame, scaled to show as red.
+fn clock_scene(skip: bool) -> Scene {
+    let mut scene = Scene::new();
+    let input = scene.model.create_zone(ZoneKind::Simulation, Point::default()).expect("zone");
+    let item = scene.model.zone_items_of(&input)[0].id.clone();
+    let output = scene.model.zone_nodes(&input).expect("nodes").output.id;
+    let sum = scene.add("add");
+    scene.link((&input, &item), (&sum, "operands"));
+    scene.link((&input, "delta-time"), (&sum, "operands"));
+    scene.link((&sum, "result"), (&output, &item));
+    scene.model.set_input_value(&output, "skip", Some(InputValue::from(skip)));
+    let scale = scene.constant(10.0);
+    let scaled = scene.add("mul");
+    scene.link((&output, &item), (&scaled, "operands"));
+    scene.link((&scale, "value"), (&scaled, "operands"));
+    let declare = scene.add("declare");
+    scene.model.set_node_type(&declare, Some(WgslType::Vec4f));
+    scene.link((&scaled, "result"), (&declare, "x"));
+    let out = scene.output();
+    scene.link((&declare, "value"), (&out, "color"));
+    scene
+}
+
+#[test]
+fn a_simulation_reads_the_seconds_since_its_previous_step() {
+    let mut scene = clock_scene(false);
+    let program = scene.compile();
+    let size = Size::new(2, 2);
+    for frame in 0..4u64 {
+        let pixels = scene.draw(&program, size, frame);
+        // The first step has no seconds, each other a sixtieth.
+        let expected = frame as f64 / 60.0 * 10.0;
+        let red = pixel(&pixels, 2, 0, 0)[0];
+        assert!(red.abs_diff(srgb(expected)) <= 1, "frame {frame}: {red}");
+    }
+}
+
+#[test]
+fn a_simulation_that_skips_keeps_its_previous_state() {
+    let mut scene = clock_scene(true);
+    let program = scene.compile();
+    let size = Size::new(2, 2);
+    for frame in 0..3u64 {
+        let pixels = scene.draw(&program, size, frame);
+        assert_eq!(pixel(&pixels, 2, 0, 0)[0], 0, "frame {frame} keeps the initial state");
+    }
+}
+
+#[test]
+fn frames_before_the_first_can_be_simulated_without_drawing() {
+    let mut scene = counting_scene();
+    let program = scene.compile();
+    let size = Size::new(2, 2);
+    let frames = (0..5u64).map(|frame| FrameInputs { time: frame as f64 / 60.0, delta: 1.0 / 60.0, frame });
+    scene.renderer.simulate(&program, frames, size).expect("simulates");
+    let pixels = scene.draw(&program, size, 5);
+    assert_eq!(pixel(&pixels, 2, 0, 0)[0], srgb(0.6), "the sixth step");
+}

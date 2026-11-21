@@ -612,10 +612,6 @@ impl BodyEmitter {
     }
 
     fn emit_node(&mut self, state: &mut ShaderState, node: &GraphNode, indent: &str) {
-        if node.is(NODE_GROUP) {
-            self.emit_group_call(state, node, indent);
-            return;
-        }
         let project = state.graph.project;
         let resolved = state.graph.resolver.resolve(project, node, &self.bindings);
         // A node only textures are read from computes nothing: they're read where they're used.
@@ -625,6 +621,10 @@ impl BodyEmitter {
         };
         let seed = self.probe.as_ref().is_some_and(|p| p.seed_node() == node.id);
         if !resolved.resolved_outputs.is_empty() && read.is_none_or(|r| r.iter().all(is_texture)) && !seed {
+            return;
+        }
+        if node.is(NODE_GROUP) {
+            self.emit_group_call(state, node, indent);
             return;
         }
         let descriptor = resolve_descriptor(node, project);

@@ -666,6 +666,26 @@ impl Renderer {
         self.queue.write_buffer(&pass.frame_buffer, 0, &bytes);
     }
 
+    /// Draws `frames` at `size` without reading them back, only to step the
+    /// simulations: for the frames before an export's first.
+    pub fn simulate(
+        &mut self,
+        program: &Program,
+        frames: impl IntoIterator<Item = FrameInputs>,
+        size: Size,
+    ) -> Result<()> {
+        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        self.ensure_targets(size, PixelFormat::Rgba8);
+        let linear = self.linear.clone().context("no target")?;
+        for inputs in frames {
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            self.encode_plan(&mut encoder, program, inputs, &linear);
+            self.queue.submit([encoder.finish()]);
+        }
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        Ok(())
+    }
+
     /// Draws one frame of `program` and reads it back.
     pub fn render(
         &mut self,

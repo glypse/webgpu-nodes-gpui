@@ -23,7 +23,7 @@ use crate::types::TypeResolver;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     /// The pass drawing the frame (the plan's last).
-    pub program: ShaderProgram,
+    pub program: Box<ShaderProgram>,
     /// The uniform values of every pass.
     pub uniforms: Vec<(String, UniformValue)>,
     /// The lines of `program`'s code each node's statements are on, by node id.
@@ -40,7 +40,7 @@ pub fn generate_program(
     let plan = generate_render_plan(CodegenGraph { project, resolver }, options)?;
     let target = plan.target().ok_or_else(|| CodegenError::Unsupported("the frame has no pass".to_owned()))?;
     Ok(Program {
-        program: target.program.clone(),
+        program: Box::new(target.program.clone()),
         uniforms: plan.uniforms.clone(),
         line_map: target.line_map.clone(),
         plan: Box::new(plan),
