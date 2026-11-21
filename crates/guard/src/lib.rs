@@ -62,3 +62,18 @@ impl<T: 'static> SafeListener<T> for Context<'_, T> {
         })
     }
 }
+
+/// Runs a view's render body under [`guard`]; a panic draws a placeholder for this frame.
+pub fn render<E: gpui::IntoElement>(context: &str, f: impl FnOnce() -> E) -> gpui::AnyElement {
+    use gpui::{IntoElement as _, ParentElement as _, Styled as _};
+    guard(context, || f().into_any_element()).unwrap_or_else(|| {
+        gpui::div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(gpui::red())
+            .child(format!("{context} failed to render; see the log"))
+            .into_any_element()
+    })
+}
