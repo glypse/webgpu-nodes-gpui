@@ -21,7 +21,7 @@ use shader_graph::catalog::{
 use shader_graph::codegen::Program;
 use shader_graph::graph::{
     Connection, FRAG_OUTPUT, GraphModel, GraphProject, LAYOUT_FRAME, NodeClipboard,
-    Point as GraphPoint, ProjectSettings, frame_note, frame_tint,
+    Point as GraphPoint, ProjectSettings, REROUTE, frame_note, frame_tint,
 };
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
@@ -34,6 +34,7 @@ use crate::graph::node::{node_width, render_node, view_of};
 use crate::graph::sheet;
 use crate::graph::socket::socket_color;
 use crate::graph::zones::{self, Bubble};
+use crate::layout::GraphView;
 
 /// What the shell needs from the editor.
 #[derive(Clone, Debug)]
@@ -47,6 +48,9 @@ pub enum EditorEvent {
     Settings(ProjectSettings),
 }
 
+/// What a menu entry does to the editor.
+type Handler = Rc<dyn Fn(&mut Editor, &mut Context<Editor>)>;
+
 /// An entry of a small list popup: an enum's variants, a type to pick.
 pub type OnSelect = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -55,6 +59,12 @@ pub struct ListItem {
     pub label: SharedString,
     pub checked: Option<bool>,
     pub on_select: OnSelect,
+    /// Text on the right: a shortcut, or what the entry holds.
+    pub detail: Option<SharedString>,
+    pub disabled: bool,
+    pub destructive: bool,
+    /// A separator goes above the entry.
+    pub separated: bool,
 }
 
 impl ListItem {
@@ -63,13 +73,43 @@ impl ListItem {
         checked: Option<bool>,
         on_select: OnSelect,
     ) -> Self {
-        Self { label: label.into(), checked, on_select }
+        Self {
+            label: label.into(),
+            checked,
+            on_select,
+            detail: None,
+            disabled: false,
+            destructive: false,
+            separated: false,
+        }
+    }
+
+    pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
+    }
+
+    pub fn separated(mut self) -> Self {
+        self.separated = true;
+        self
     }
 }
 
 struct Popup {
     at: Point<Pixels>,
     items: Vec<ListItem>,
+    /// Which list this is: a selection can open another, which the first's dismissal mustn't close.
+    serial: u64,
 }
 
 pub struct Editor {
@@ -78,6 +118,7 @@ pub struct Editor {
     code: String,
     generated: Result<Program, String>,
     popup: Option<Popup>,
+    popup_serial: u64,
     add_menu: Option<Entity<AddMenu>>,
     viewports: HashMap<String, Viewport>,
     gesture: bool,
@@ -110,6 +151,14 @@ fn demo_project() -> GraphProject {
         model.try_connect(Connection::new(uv, "uv", output, "color"));
     }
     model.project().clone()
+}
+
+fn flow_viewport(v: shader_graph::graph::Viewport) -> Viewport {
+    Viewport { x: v.x, y: v.y, zoom: v.zoom }
+}
+
+fn graph_viewport(v: Viewport) -> shader_graph::graph::Viewport {
+    shader_graph::graph::Viewport { x: v.x, y: v.y, zoom: v.zoom }
 }
 
 fn flow_point(p: GraphPoint) -> Xy {
@@ -152,6 +201,7 @@ impl Editor {
             code: String::new(),
             generated: Err(String::new()),
             popup: None,
+            popup_serial: 0,
             add_menu: None,
             viewports: HashMap::new(),
             gesture: false,
@@ -183,21 +233,61 @@ impl Editor {
         &self.generated
     }
 
-    /// Replaces the whole project, or starts over from the demo graph.
-    pub fn load_project(&mut self, project: Option<GraphProject>, cx: &mut Context<Self>) {
+    /// Replaces the whole project, or starts over from the demo graph. A saved
+    /// view puts the editor in the group it was left in, at the camera it had.
+    pub fn load_project(&mut self, project: Option<GraphProject>, view: Option<&GraphView>, cx: &mut Context<Self>) {
         self.model_mut().set_project(project.unwrap_or_else(demo_project));
-        self.viewports.clear();
+        self.viewports = self
+            .model
+            .borrow()
+            .project()
+            .definitions
+            .iter()
+            .filter_map(|(key, doc)| Some((key.clone(), flow_viewport(doc.viewport?))))
+            .collect();
+        if let Some(view) = view {
+            let path = self.model.borrow().valid_path(&view.path);
+            self.model_mut().set_path(path);
+            if let Some(v) = view.viewport {
+                let key = self.model.borrow().active_definition_ref();
+                self.viewports.insert(key, flow_viewport(v));
+            }
+        }
         self.popup = None;
         self.add_menu = None;
         self.sheet = None;
         self.code.clear();
         *self.frame_drag.borrow_mut() = None;
         self.after_edit(cx);
-        self.flow.update(cx, |flow, cx| flow.fit_view(Default::default(), cx));
+        let saved = self.viewports.get(&self.model.borrow().active_definition_ref()).copied();
+        self.flow.update(cx, |flow, cx| {
+            flow.options.fit_view_on_init = saved.is_none();
+            match saved {
+                Some(vp) => flow.set_viewport(vp, None, cx),
+                None => flow.fit_view(Default::default(), cx),
+            }
+        });
     }
 
-    pub fn project(&self) -> GraphProject {
-        self.model.borrow().project().clone()
+    /// The project as it is now, with each group's camera as it was left.
+    pub fn project(&self, cx: &App) -> GraphProject {
+        let mut project = self.model.borrow().project().clone();
+        let mut cameras = self.viewports.clone();
+        cameras.insert(self.model.borrow().active_definition_ref(), self.flow.read(cx).viewport());
+        for (key, viewport) in cameras {
+            if let Some(doc) = project.definitions.get_mut(&key) {
+                doc.viewport = Some(graph_viewport(viewport));
+            }
+        }
+        project
+    }
+
+    /// The group entered and the camera on it, for saving with the layout.
+    pub fn view(&self, cx: &App) -> GraphView {
+        GraphView {
+            path: self.model.borrow().path().to_vec(),
+            viewport: Some(graph_viewport(self.flow.read(cx).viewport())),
+        }
     }
 
     pub fn settings(&self) -> ProjectSettings {
@@ -611,7 +701,8 @@ impl Editor {
     }
 
     pub(crate) fn open_list(&mut self, at: Point<Pixels>, items: Vec<ListItem>, cx: &mut Context<Self>) {
-        self.popup = Some(Popup { at, items });
+        self.popup_serial += 1;
+        self.popup = Some(Popup { at, items, serial: self.popup_serial });
         cx.notify();
     }
 
@@ -703,8 +794,8 @@ impl Editor {
                     self.enter_group(&id, cx);
                 }
             }
-            FlowEvent::PaneContextMenu { window, flow } => self.open_pane_menu(window, flow, cx),
-            FlowEvent::NodeContextMenu { window, flow, .. } => self.open_node_menu(window, flow, cx),
+            FlowEvent::PaneContextMenu { window, flow } => self.open_context_menu(window, flow, false, cx),
+            FlowEvent::NodeContextMenu { window, flow, .. } => self.open_context_menu(window, flow, true, cx),
             FlowEvent::EdgeContextMenu { id, window, .. } => {
                 let weak = cx.entity().downgrade();
                 let id = id.to_string();
@@ -819,58 +910,106 @@ impl Editor {
         flow.flow_to_screen(at)
     }
 
-    fn open_pane_menu(&mut self, at: Point<Pixels>, flow: Xy, cx: &mut Context<Self>) {
+    /// The context menu: on a node, or on the canvas, with what applies to the selection.
+    fn open_context_menu(&mut self, at: Point<Pixels>, flow: Xy, on_node: bool, cx: &mut Context<Self>) {
         let weak = cx.entity().downgrade();
-        let locked = self.model.borrow().is_locked();
-        let mut items = Vec::new();
-        if !locked {
-            let w = weak.clone();
-            items.push(ListItem::new("Add…", None, Rc::new(move |_, cx| {
-                w.update(cx, |e, cx| e.open_add_menu(at, Some(flow), None, cx)).ok();
-            })));
-            if self.clipboard.is_some() {
-                let w = weak.clone();
-                items.push(ListItem::new("Paste", None, Rc::new(move |_, cx| {
-                    w.update(cx, |e, cx| e.paste(Some(flow), cx)).ok();
-                })));
-            }
-        }
-        let w = weak.clone();
-        items.push(ListItem::new("Fit view", None, Rc::new(move |_, cx| {
-            w.update(cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx))).ok();
-        })));
-        if !self.model.borrow().path().is_empty() {
-            let w = weak.clone();
-            items.push(ListItem::new("Exit group", None, Rc::new(move |_, cx| {
-                w.update(cx, |e, cx| e.exit_group(cx)).ok();
-            })));
-        }
-        self.open_list(at, items, cx);
-    }
-
-    fn open_node_menu(&mut self, at: Point<Pixels>, _flow: Xy, cx: &mut Context<Self>) {
-        let weak = cx.entity().downgrade();
-        let locked = self.model.borrow().is_locked();
-        let mut items = Vec::new();
-        let mut push = |label: &'static str, f: fn(&mut Editor, &mut Context<Editor>)| {
-            let w = weak.clone();
-            items.push(ListItem::new(label, None, Rc::new(move |_, cx| {
-                w.update(cx, f).ok();
-            })));
+        let selected = self.selected();
+        let (locked, reroutes, all_hidden, all_links_hidden, in_frame, ungroupable, single) = {
+            let model = self.model.borrow();
+            let doc = model.active_document();
+            let nodes: Vec<&shader_graph::graph::GraphNode> =
+                selected.iter().filter_map(|id| doc.node(id)).collect();
+            let reroutes: Vec<&&shader_graph::graph::GraphNode> =
+                nodes.iter().filter(|n| n.is(REROUTE)).collect();
+            let frames = model.frame_analysis(doc);
+            (
+                model.is_locked(),
+                reroutes.len(),
+                !nodes.is_empty() && nodes.iter().all(|n| n.data.hide_unlinked == Some(true)),
+                reroutes.iter().all(|n| n.data.hide_links == Some(true)),
+                selected.iter().any(|id| frames.frame_of.contains_key(id)),
+                nodes.iter().any(|n| n.definition_ref().is_some()),
+                (nodes.len() == 1).then(|| nodes[0].id.clone()),
+            )
         };
-        push("Settings", |e, cx| {
-            if let Some(id) = e.selected().first().cloned() {
-                e.open_sheet(&id, cx);
+        let can_paste = self.clipboard.is_some();
+        let mut items: Vec<ListItem> = Vec::new();
+        let run = |f: Handler| -> OnSelect {
+            let weak = weak.clone();
+            Rc::new(move |_, cx| {
+                let f = f.clone();
+                weak.update(cx, |e, cx| f(e, cx)).ok();
+            })
+        };
+        let mut push = |label: &str, detail: Option<&str>, disabled: bool, f: Handler| {
+            let mut item = ListItem::new(label.to_owned(), None, run(f)).disabled(disabled);
+            if let Some(d) = detail {
+                item = item.detail(d.to_owned());
             }
-        });
-        if !locked {
-            push("Duplicate", Editor::duplicate);
-            push("Copy", Editor::copy);
-            push("Delete", Editor::delete_selection);
-            push("Frame selected", Editor::frame_selection);
-            push("Remove from frame", Editor::remove_from_frame);
-            push("Group", Editor::group_selection);
-            push("Ungroup", Editor::ungroup_selection);
+            items.push(item);
+        };
+        if !on_node {
+            push("Add…", Some("⇧A"), locked, Rc::new(move |e, cx| e.open_add_menu(at, Some(flow), None, cx)));
+        }
+        if let Some(id) = single.clone() {
+            push("Settings", Some("N"), false, Rc::new(move |e, cx| e.open_sheet(&id, cx)));
+        }
+        if !selected.is_empty() {
+            push("Cut", Some("⌘X"), locked, Rc::new(|e, cx| e.cut(cx)));
+            push("Copy", Some("⌘C"), false, Rc::new(|e, cx| e.copy(cx)));
+        }
+        push("Paste", Some("⌘V"), locked || !can_paste, Rc::new(move |e, cx| e.paste(Some(flow), cx)));
+        if !selected.is_empty() {
+            push("Move", Some("G"), locked, Rc::new(|e, cx| e.grab(cx)));
+            push("Duplicate", Some("⇧D"), locked, Rc::new(|e, cx| e.duplicate(cx)));
+            if reroutes > 0 {
+                push(
+                    if all_links_hidden { "Show links" } else { "Hide links" },
+                    None,
+                    locked,
+                    Rc::new(|e, cx| e.toggle_hidden_links(cx)),
+                );
+            }
+            push(
+                if all_hidden { "Show all sockets" } else { "Hide unlinked sockets" },
+                Some("⌃H"),
+                locked,
+                Rc::new(|e, cx| {
+                    let ids = e.selected();
+                    e.edit(cx, |m| m.toggle_unlinked_sockets(&ids));
+                }),
+            );
+        }
+        let mut separated = Vec::new();
+        if !selected.is_empty() {
+            separated.push(ListItem::new("Delete", None, run(Rc::new(|e, cx| e.delete_selection(cx)))).detail("⌫").disabled(locked).destructive().separated());
+            separated.push(ListItem::new("Dissolve", None, run(Rc::new(|e, cx| e.dissolve_selection(cx)))).detail("⌘⌫").disabled(locked));
+            separated.push(ListItem::new("Frame selected", None, run(Rc::new(|e, cx| e.frame_selection(cx)))).detail("⌘J").disabled(locked).separated());
+            if in_frame {
+                separated.push(ListItem::new("Remove from frame", None, run(Rc::new(|e, cx| e.remove_from_frame(cx)))).detail("⌥P").disabled(locked));
+            }
+            if selected.len() > 1 {
+                separated.push(ListItem::new("Group selected", None, run(Rc::new(|e, cx| e.group_selection(cx)))).detail("⌘G").disabled(locked));
+            }
+            if ungroupable {
+                separated.push(ListItem::new("Ungroup", None, run(Rc::new(|e, cx| e.ungroup_selection(cx)))).detail("⌘⌥G").disabled(locked));
+            }
+        }
+        items.extend(separated);
+        if !on_node {
+            let w = weak.clone();
+            items.push(
+                ListItem::new("Fit view", None, Rc::new(move |_, cx| {
+                    w.update(cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx))).ok();
+                }))
+                .separated(),
+            );
+            if !self.model.borrow().path().is_empty() {
+                let w = weak.clone();
+                items.push(ListItem::new("Exit group", None, Rc::new(move |_, cx| {
+                    w.update(cx, |e, cx| e.exit_group(cx)).ok();
+                })).detail("⇥"));
+            }
         }
         self.open_list(at, items, cx);
     }
@@ -894,6 +1033,31 @@ impl Editor {
             m.delete_nodes(&nodes, &edges);
         });
         self.model_mut().set_selected_node_ids(Vec::new());
+    }
+
+    fn cut(&mut self, cx: &mut Context<Self>) {
+        self.copy(cx);
+        self.delete_selection(cx);
+    }
+
+    fn toggle_hidden_links(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected();
+        self.edit(cx, |m| m.toggle_hidden_links(&ids));
+        let unnamed = {
+            let model = self.model.borrow();
+            ids.iter()
+                .find(|id| {
+                    model.node(id).is_some_and(|n| {
+                        n.is(REROUTE) && n.data.hide_links == Some(true) && n.data.label.is_none()
+                    })
+                })
+                .cloned()
+        };
+        // A reroute whose links get hidden is named by its tags: an unnamed one asks for a name.
+        if let Some(id) = unnamed {
+            self.sheet = Some(id);
+            cx.notify();
+        }
     }
 
     fn dissolve_selection(&mut self, cx: &mut Context<Self>) {
@@ -991,10 +1155,7 @@ impl Editor {
             "z" if cmd => self.undo(cx),
             "y" if cmd => self.redo(cx),
             "c" if cmd => self.copy(cx),
-            "x" if cmd && !locked => {
-                self.copy(cx);
-                self.delete_selection(cx);
-            }
+            "x" if cmd && !locked => self.cut(cx),
             "v" if cmd && !locked => self.paste(None, cx),
             "a" if m.shift && !cmd && !locked => {
                 let at = self.pointer_window(cx);
@@ -1095,18 +1256,32 @@ impl Editor {
     fn render_popup(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let popup = self.popup.as_ref()?;
         let weak = cx.entity().downgrade();
-        let mut menu = Menu::new("editor-list").at(popup.at).on_dismiss(move |_, cx| {
+        let serial = popup.serial;
+        let mut menu = Menu::new(SharedString::from(format!("editor-list-{serial}"))).at(popup.at).on_dismiss(move |_, cx| {
             weak.update(cx, |e, cx| {
-                e.popup = None;
-                cx.notify();
+                if e.popup.as_ref().is_some_and(|p| p.serial == serial) {
+                    e.popup = None;
+                    cx.notify();
+                }
             })
             .ok();
         });
         for item in &popup.items {
             let on_select = item.on_select.clone();
-            let mut entry = MenuItem::new(item.label.clone()).on_select(move |w, cx| on_select(w, cx));
+            let mut entry = MenuItem::new(item.label.clone())
+                .disabled(item.disabled)
+                .on_select(move |w, cx| on_select(w, cx));
             if let Some(checked) = item.checked {
                 entry = entry.checked(checked);
+            }
+            if let Some(detail) = &item.detail {
+                entry = entry.shortcut(detail.clone());
+            }
+            if item.destructive {
+                entry = entry.destructive();
+            }
+            if item.separated {
+                menu = menu.separator();
             }
             menu = menu.item(entry);
         }

@@ -17,6 +17,7 @@ use theme::{ActiveTheme as _, IconName};
 
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
+use crate::layout;
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences;
 use crate::settings::{SettingsDialog, SettingsEvent};
@@ -122,10 +123,13 @@ impl Shell {
         let playback = cx.new(|_| Playback::new());
         let editor = cx.new(|cx| Editor::new(window, cx));
         let mut path = None;
+        let mut layout = None;
         if let Some(last) = project::last() {
             match project::read(&last) {
                 Ok(loaded) => {
-                    editor.update(cx, |e, cx| e.load_project(Some(loaded), cx));
+                    layout = layout::load(&loaded);
+                    let view = layout.as_ref().map(|l| &l.graph);
+                    editor.update(cx, |e, cx| e.load_project(Some(loaded), view, cx));
                     path = Some(last);
                 }
                 Err(e) => log::warn!("couldn't reopen {}: {e:#}", last.display()),
@@ -159,10 +163,10 @@ impl Shell {
         .detach();
 
         let views = Rc::new(RefCell::new(AreaViews::default()));
-        let screen = cx.new(|_| {
+        let screen = cx.new(|cx| {
             let playback = playback.clone();
             let editor = editor.clone();
-            ScreenView::new(default_screen(), move |id, panel, window, cx| {
+            ScreenView::new(layout.map_or_else(default_screen, |l| l.screen), move |id, panel, window, cx| {
                 let mut views = views.borrow_mut();
                 match panel {
                     Panel::Graph => AreaContent {
@@ -203,7 +207,7 @@ impl Shell {
                             .into_any_element(),
                     },
                 }
-            })
+            }, cx)
         });
         let shell = Self { screen, playback, editor, path, settings: None };
         shell.refresh_title(window, cx);
@@ -294,7 +298,8 @@ impl Shell {
 
     fn new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.confirm_discard(window, cx, |this, window, cx| {
-            this.editor.update(cx, |e, cx| e.load_project(None, cx));
+            this.editor.update(cx, |e, cx| e.load_project(None, None, cx));
+            this.screen.update(cx, |s, cx| s.set_screen(default_screen(), cx));
             this.adopt(None, window, cx);
         });
     }
@@ -330,7 +335,11 @@ impl Shell {
     pub fn load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         match project::read(&path) {
             Ok(loaded) => {
-                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), cx));
+                let layout = layout::load(&loaded);
+                let view = layout.as_ref().map(|l| &l.graph);
+                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), view, cx));
+                let screen = layout.map_or_else(default_screen, |l| l.screen);
+                self.screen.update(cx, |s, cx| s.set_screen(screen, cx));
                 self.adopt(Some(path), window, cx);
             }
             Err(e) => {
@@ -380,7 +389,10 @@ impl Shell {
     }
 
     fn save_to(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let result: Result<()> = project::write(&path, &self.editor.read(cx).project());
+        let editor = self.editor.read(cx);
+        let mut project = editor.project(cx);
+        layout::store(&mut project, self.screen.read(cx).screen(), &editor.view(cx));
+        let result: Result<()> = project::write(&path, &project);
         match result {
             Ok(()) => {
                 self.editor.read(cx).mark_saved();

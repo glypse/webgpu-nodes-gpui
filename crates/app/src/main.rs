@@ -1,6 +1,7 @@
 mod code_view;
 mod editor;
 mod graph;
+mod layout;
 mod playback;
 mod preferences;
 mod preview;

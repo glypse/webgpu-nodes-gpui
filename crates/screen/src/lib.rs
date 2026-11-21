@@ -8,11 +8,13 @@
 
 use serde::{Deserialize, Serialize};
 
+mod gestures;
 mod view;
 
 #[cfg(test)]
 mod tests;
 
+pub use gestures::{CORNER_DRAG_PX, JOIN_ZONE_PX, Outcome, Pixels as ScreenPixels, corner_outcome, split_at};
 pub use view::{AreaContent, Editor, ScreenEvent, ScreenView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

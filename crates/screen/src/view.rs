@@ -1,12 +1,14 @@
 use guard::SafeListener as _;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent,
-    Empty, EventEmitter, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement as _, Styled as _,
-    Window, canvas, div, point, prelude::FluentBuilder as _, px, relative,
+    Empty, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Render, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point,
+    prelude::FluentBuilder as _, px, relative,
 };
 use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
 
+use crate::gestures::{self, Outcome, Pixels as ScreenPixels};
 use crate::{Area, AreaId, Axis, EdgeSelection, MinSize, Part, Screen};
 
 /// The kinds of panel an area can show.
@@ -34,6 +36,7 @@ const MIN_AREA: (f32, f32) = (96.0, 56.0);
 /// How far from an edge the pointer grabs it.
 const EDGE_GRAB: f32 = 4.0;
 const HEADER_HEIGHT: f32 = 36.0;
+const CORNER_SIZE: f32 = 12.0;
 
 #[derive(Clone, Copy)]
 struct EdgeDrag;
@@ -50,6 +53,32 @@ struct OpenMenu {
     at: Point<Pixels>,
 }
 
+/// A drag from an area's corner.
+struct CornerDrag {
+    source: AreaId,
+    start: gestures::Point,
+    swap: bool,
+    outcome: Option<Outcome>,
+}
+
+/// A split following the pointer until a click puts it down.
+struct Splitting {
+    axis: Axis,
+    area: Option<AreaId>,
+    at: f64,
+}
+
+/// The options of the edge between two areas, as Blender's right-click on an edge offers.
+struct EdgeMenu<E> {
+    at: Point<Pixels>,
+    axis: Axis,
+    before: AreaId,
+    after: AreaId,
+    /// The screen once the area before the edge grew over the one after it, if it can.
+    forward: Option<Screen<E>>,
+    backward: Option<Screen<E>>,
+}
+
 type RenderArea<E> = Box<dyn Fn(AreaId, &E, &mut Window, &mut App) -> AreaContent>;
 
 /// Renders a `Screen`: its areas with a header each, and draggable dividers
@@ -62,6 +91,15 @@ pub struct ScreenView<E: Editor> {
     /// The edge being dragged, and the screen as it was when the drag began.
     drag: Option<(EdgeSelection, Screen<E>)>,
     menu: Option<OpenMenu>,
+    edge_menu: Option<EdgeMenu<E>>,
+    corner: Option<CornerDrag>,
+    splitting: Option<Splitting>,
+    hovered: Option<AreaId>,
+    /// Where the pointer last was, in pixels from the screen's corner.
+    pointer: gestures::Point,
+    /// Held by the gesture overlay, so Escape reaches it.
+    focus: FocusHandle,
+    previous_focus: Option<FocusHandle>,
 }
 
 impl<E: Editor> EventEmitter<ScreenEvent> for ScreenView<E> {}
@@ -70,6 +108,7 @@ impl<E: Editor> ScreenView<E> {
     pub fn new(
         screen: Screen<E>,
         render_area: impl Fn(AreaId, &E, &mut Window, &mut App) -> AreaContent + 'static,
+        cx: &mut Context<Self>,
     ) -> Self {
         Self {
             screen,
@@ -78,6 +117,13 @@ impl<E: Editor> ScreenView<E> {
             maximized: None,
             drag: None,
             menu: None,
+            edge_menu: None,
+            corner: None,
+            splitting: None,
+            hovered: None,
+            pointer: (0.0, 0.0),
+            focus: cx.focus_handle(),
+            previous_focus: None,
         }
     }
 
@@ -160,6 +206,143 @@ impl<E: Editor> ScreenView<E> {
         }
     }
 
+    fn pixels(&self) -> ScreenPixels {
+        ScreenPixels {
+            width: f64::from(self.bounds.size.width).max(1.0),
+            height: f64::from(self.bounds.size.height).max(1.0),
+        }
+    }
+
+    /// A window position in pixels from the screen's top-left corner.
+    fn local(&self, position: Point<Pixels>) -> gestures::Point {
+        let local = position - self.bounds.origin;
+        (f64::from(local.x), f64::from(local.y))
+    }
+
+    fn gesture_active(&self) -> bool {
+        self.corner.is_some() || self.splitting.is_some()
+    }
+
+    /// Takes the keyboard for the gesture, so Escape cancels it.
+    fn begin_gesture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.previous_focus = window.focused(cx);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn end_gesture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.corner = None;
+        self.splitting = None;
+        if let Some(previous) = self.previous_focus.take() {
+            window.focus(&previous);
+        }
+        cx.notify();
+    }
+
+    fn start_corner_drag(&mut self, area: AreaId, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.maximized.is_some() || self.gesture_active() {
+            return;
+        }
+        self.corner = Some(CornerDrag {
+            source: area,
+            start: self.local(event.position),
+            swap: event.modifiers.control,
+            outcome: None,
+        });
+        self.begin_gesture(window, cx);
+    }
+
+    fn update_split(&mut self) {
+        let Some(axis) = self.splitting.as_ref().map(|s| s.axis) else { return };
+        let (area, at) =
+            match gestures::split_at(&self.screen, axis, self.pointer, self.pixels(), self.min_size()) {
+                Some((area, at)) => (Some(area), at),
+                None => (None, 0.0),
+            };
+        self.splitting = Some(Splitting { axis, area, at });
+    }
+
+    fn gesture_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.pointer = self.local(event.position);
+        if self.corner.is_some() && event.pressed_button != Some(MouseButton::Left) {
+            // The button was let go where we couldn't see it.
+            self.finish_corner(window, cx);
+            return;
+        }
+        if let Some(corner) = &self.corner {
+            let outcome = self.screen.area(corner.source).and_then(|source| {
+                gestures::corner_outcome(
+                    &self.screen,
+                    source,
+                    corner.start,
+                    self.pointer,
+                    corner.swap,
+                    self.pixels(),
+                    self.min_size(),
+                )
+            });
+            if let Some(corner) = &mut self.corner {
+                corner.outcome = outcome;
+            }
+        } else {
+            self.update_split();
+        }
+        cx.notify();
+    }
+
+    fn finish_corner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let drag = self.corner.take();
+        self.end_gesture(window, cx);
+        let Some(CornerDrag { source, outcome: Some(outcome), .. }) = drag else { return };
+        if let Some(screen) = gestures::apply(&self.screen, source, &outcome, self.min_size()) {
+            self.set_screen(screen, cx);
+        }
+    }
+
+    fn finish_split(&mut self, confirm: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let split = self.splitting.take();
+        self.end_gesture(window, cx);
+        let (true, Some(Splitting { axis, area: Some(area), at })) = (confirm, split) else { return };
+        if let Some((screen, _)) = self.screen.split(area, axis, at, Part::After, self.min_size()) {
+            self.set_screen(screen, cx);
+        }
+    }
+
+    fn cancel_gesture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.gesture_active() {
+            self.end_gesture(window, cx);
+        }
+    }
+
+    fn open_edge_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.maximized.is_some() || self.gesture_active() {
+            return;
+        }
+        let (x, y) = self.fractions(position);
+        let grab = self.grab_size();
+        let Some(edge) = self.screen.edge_at(x, y, grab, false) else { return };
+        let offset = 2.0 * if edge.axis == Axis::X { grab.width } else { grab.height };
+        let beside = |delta: f64| match edge.axis {
+            Axis::X => self.screen.area_at(edge.position + delta, y),
+            Axis::Y => self.screen.area_at(x, edge.position + delta),
+        };
+        let (Some(before), Some(after)) = (beside(-offset), beside(offset)) else { return };
+        if before.id == after.id {
+            return;
+        }
+        let min = self.min_size();
+        self.pointer = self.local(position);
+        self.edge_menu = Some(EdgeMenu {
+            at: position,
+            axis: edge.axis,
+            before: before.id,
+            after: after.id,
+            forward: self.screen.join(before.id, after.id, min),
+            backward: self.screen.join(after.id, before.id, min),
+        });
+        cx.notify();
+    }
+
     fn start_edge_drag(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
         let (x, y) = self.fractions(event.position);
         self.drag = self
@@ -239,6 +422,84 @@ impl<E: Editor> ScreenView<E> {
             .into_any_element()
     }
 
+    fn render_edge_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let open = self.edge_menu.as_ref()?;
+        let view = cx.entity();
+        let axis = open.axis;
+        let dismiss = {
+            let view = view.clone();
+            move |_: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| {
+                    this.edge_menu = None;
+                    cx.notify();
+                });
+            }
+        };
+        let split = |split_axis: Axis| {
+            let view = view.clone();
+            move |window: &mut Window, cx: &mut App| {
+                guard::guard("split from an edge", || {
+                    view.update(cx, |this, cx| {
+                        this.splitting = Some(Splitting { axis: split_axis, area: None, at: 0.0 });
+                        this.update_split();
+                        this.begin_gesture(window, cx);
+                    });
+                });
+            }
+        };
+        let join = |forward: bool| {
+            let view = view.clone();
+            move |_: &mut Window, cx: &mut App| {
+                guard::guard("join from an edge", || {
+                    view.update(cx, |this, cx| {
+                        let next = this.edge_menu.as_ref().and_then(|m| {
+                            if forward { m.forward.clone() } else { m.backward.clone() }
+                        });
+                        if let Some(screen) = next {
+                            this.set_screen(screen, cx);
+                        }
+                    });
+                });
+            }
+        };
+        let swap = {
+            let view = view.clone();
+            move |_: &mut Window, cx: &mut App| {
+                guard::guard("swap from an edge", || {
+                    view.update(cx, |this, cx| {
+                        let next = this
+                            .edge_menu
+                            .as_ref()
+                            .and_then(|m| this.screen.swap(m.before, m.after));
+                        if let Some(screen) = next {
+                            this.set_screen(screen, cx);
+                        }
+                    });
+                });
+            }
+        };
+        let (forward_icon, backward_icon, swap_icon, forward_label, backward_label) = match axis {
+            Axis::X => (IconName::ArrowLineRight, IconName::ArrowLineLeft, IconName::ArrowsLeftRight, "Join right", "Join left"),
+            Axis::Y => (IconName::ArrowLineDown, IconName::ArrowLineUp, IconName::ArrowsDownUp, "Join down", "Join up"),
+        };
+        Some(
+            Menu::new("edge-menu")
+                .at(open.at)
+                .width(px(208.0))
+                .on_dismiss(dismiss)
+                .label("Area edge options")
+                .separator()
+                .item(MenuItem::new("Vertical split").icon(IconName::SquareSplitHorizontal).on_select(split(Axis::X)))
+                .item(MenuItem::new("Horizontal split").icon(IconName::SquareSplitVertical).on_select(split(Axis::Y)))
+                .separator()
+                .item(MenuItem::new(forward_label).icon(forward_icon).disabled(open.forward.is_none()).on_select(join(true)))
+                .item(MenuItem::new(backward_label).icon(backward_icon).disabled(open.backward.is_none()).on_select(join(false)))
+                .separator()
+                .item(MenuItem::new("Swap areas").icon(swap_icon).on_select(swap))
+                .into_any_element(),
+        )
+    }
+
     fn render_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.menu.as_ref()?;
         let area = self.screen.area(open.area)?;
@@ -309,6 +570,114 @@ impl<E: Editor> ScreenView<E> {
         )
     }
 
+    /// Handles in an area's corners: drag into the area to split it, out to join or dock, with Ctrl to swap.
+    fn corner_handles(&self, area: AreaId, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if self.maximized.is_some() {
+            return Vec::new();
+        }
+        (0..4)
+            .map(|corner| {
+                let handle = div()
+                    .id(("corner", area.0 as usize * 4 + corner))
+                    .absolute()
+                    .size(px(CORNER_SIZE))
+                    .cursor(CursorStyle::Crosshair)
+                    .occlude()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.safe_listener(move |this, event: &MouseDownEvent, window, cx| {
+                            this.start_corner_drag(area, event, window, cx);
+                        }),
+                    );
+                match corner {
+                    0 => handle.top_0().left_0(),
+                    1 => handle.top_0().right_0(),
+                    2 => handle.bottom_0().left_0(),
+                    _ => handle.bottom_0().right_0(),
+                }
+                .into_any_element()
+            })
+            .collect()
+    }
+
+    /// The part of the window the gesture under way would affect, and what it would do.
+    fn highlight(&self) -> Option<(crate::Rect, &'static str)> {
+        if let Some(split) = &self.splitting {
+            let area = self.screen.area(split.area?)?;
+            let r = area.rect;
+            let rect = match split.axis {
+                Axis::X => crate::Rect { left: split.at, ..r },
+                Axis::Y => crate::Rect { top: split.at, ..r },
+            };
+            return Some((rect, "Split"));
+        }
+        let corner = self.corner.as_ref()?;
+        let outcome = corner.outcome?;
+        Some((gestures::highlight(&self.screen, corner.source, &outcome)?, outcome.label()))
+    }
+
+    fn gesture_cursor(&self) -> CursorStyle {
+        let along = |axis: Axis| match axis {
+            Axis::X => CursorStyle::ResizeLeftRight,
+            Axis::Y => CursorStyle::ResizeUpDown,
+        };
+        if let Some(split) = &self.splitting {
+            return along(split.axis);
+        }
+        match self.corner.as_ref().and_then(|c| c.outcome) {
+            None => CursorStyle::Crosshair,
+            Some(Outcome::Split { axis, .. }) => along(axis),
+            Some(_) => CursorStyle::ClosedHand,
+        }
+    }
+
+    /// Covers the window during a gesture, so what's under the pointer doesn't react to it.
+    fn gesture_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.gesture_active() {
+            return None;
+        }
+        Some(
+            div()
+                .id("screen-gesture")
+                .track_focus(&self.focus)
+                .absolute()
+                .size_full()
+                .occlude()
+                .cursor(self.gesture_cursor())
+                .on_mouse_move(cx.safe_listener(|this, event: &MouseMoveEvent, window, cx| {
+                    this.gesture_move(event, window, cx);
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _: &MouseUpEvent, window, cx| {
+                        if this.corner.is_some() {
+                            this.finish_corner(window, cx);
+                        }
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _: &MouseDownEvent, window, cx| {
+                        if this.splitting.is_some() {
+                            this.finish_split(true, window, cx);
+                        }
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.safe_listener(|this, _: &MouseDownEvent, window, cx| {
+                        this.cancel_gesture(window, cx);
+                    }),
+                )
+                .on_key_down(cx.safe_listener(|this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape" {
+                        this.cancel_gesture(window, cx);
+                    }
+                }))
+                .into_any_element(),
+        )
+    }
+
     /// A draggable strip over each interior edge between areas.
     fn dividers(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut lines: Vec<(Axis, f64, f64, f64)> = Vec::new();
@@ -335,6 +704,12 @@ impl<E: Editor> ScreenView<E> {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.safe_listener(|this, event, _, cx| this.start_edge_drag(event, cx)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
+                            this.open_edge_menu(event.position, cx);
+                        }),
                     )
                     .on_drag(EdgeDrag, |_, _, _, cx| cx.new(|_| Empty));
                 match axis {
@@ -378,12 +753,21 @@ impl<E: Editor> Render for ScreenView<E> {
                 } else {
                     r
                 };
+                let id = area.id;
                 div()
+                    .id(("area", id.0 as usize))
                     .absolute()
                     .left(relative(rect.left as f32))
                     .top(relative(rect.top as f32))
                     .w(relative(rect.width() as f32))
                     .h(relative(rect.height() as f32))
+                    .on_hover(cx.listener(move |this, hovered: &bool, _, _| {
+                        if *hovered {
+                            this.hovered = Some(id);
+                        } else if this.hovered == Some(id) {
+                            this.hovered = None;
+                        }
+                    }))
                     .flex()
                     .flex_col()
                     .overflow_hidden()
@@ -403,6 +787,7 @@ impl<E: Editor> Render for ScreenView<E> {
                             .overflow_hidden()
                             .child(content.body),
                     )
+                    .children(self.corner_handles(id, cx))
                     .into_any_element()
             })
             .collect();
@@ -411,10 +796,48 @@ impl<E: Editor> Render for ScreenView<E> {
         } else {
             self.dividers(cx)
         };
+        let highlight = self.highlight().map(|(rect, label)| {
+            div()
+                .absolute()
+                .left(relative(rect.left as f32))
+                .top(relative(rect.top as f32))
+                .w(relative(rect.width() as f32))
+                .h(relative(rect.height() as f32))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(theme.radius.md)
+                .border_2()
+                .border_color(theme.colors.primary)
+                .bg(theme.colors.primary.opacity(0.15))
+                .child(
+                    div()
+                        .px_2()
+                        .py(px(2.0))
+                        .rounded(theme.radius.sm)
+                        .bg(theme.colors.background.opacity(0.8))
+                        .text_size(theme.text.xs)
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(label),
+                )
+        });
+        let overlay = self.gesture_overlay(cx);
         div()
             .relative()
             .size_full()
             .bg(background)
+            .on_key_down(cx.safe_listener(|this, event: &KeyDownEvent, _, cx| {
+                let m = event.keystroke.modifiers;
+                if event.keystroke.key == "space"
+                    && m.control
+                    && !m.platform
+                    && !m.alt
+                    && let Some(hovered) = this.hovered
+                {
+                    this.toggle_maximized(hovered, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .font_family(theme.font.clone())
             .text_size(theme.text.sm)
             .text_color(theme.colors.foreground)
@@ -435,11 +858,137 @@ impl<E: Editor> Render for ScreenView<E> {
             )
             .children(rendered)
             .children(dividers)
+            .children(highlight)
+            .children(overlay)
             .on_drag_move::<EdgeDrag>(cx.safe_listener(
                 |this, event: &DragMoveEvent<EdgeDrag>, _, cx| {
                     this.drag_edge(event.event.position, cx);
                 },
             ))
             .children(self.render_menu(cx))
+            .children(self.render_edge_menu(cx))
+    }
+}
+
+#[cfg(test)]
+mod ui_tests {
+    use gpui::{Modifiers, TestAppContext, VisualTestContext, size};
+
+    use super::*;
+    use crate::Rect;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Panel {
+        A,
+        B,
+    }
+
+    impl Editor for Panel {
+        fn all() -> &'static [Self] {
+            &[Self::A, Self::B]
+        }
+
+        fn label(&self) -> &'static str {
+            "panel"
+        }
+
+        fn icon(&self) -> IconName {
+            IconName::Code
+        }
+    }
+
+    fn open(cx: &mut TestAppContext) -> (gpui::Entity<ScreenView<Panel>>, &mut VisualTestContext) {
+        cx.update(theme::init);
+        let (view, cx) = cx.add_window_view(|_, cx| {
+            let screen = Screen::new([
+                (Rect::new(0.0, 0.0, 0.5, 1.0), Panel::A),
+                (Rect::new(0.5, 0.0, 1.0, 1.0), Panel::B),
+            ]);
+            ScreenView::new(
+                screen,
+                |_, _, _, _| AreaContent { toolbar: None, body: div().into_any_element() },
+                cx,
+            )
+        });
+        cx.simulate_resize(size(px(1000.0), px(800.0)));
+        cx.run_until_parked();
+        (view, cx)
+    }
+
+    fn drag_corner(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>, modifiers: Modifiers) {
+        cx.simulate_mouse_down(from, MouseButton::Left, modifiers);
+        cx.simulate_mouse_move(to, MouseButton::Left, modifiers);
+        cx.simulate_mouse_up(to, MouseButton::Left, modifiers);
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn dragging_a_corner_into_a_neighbour_joins_it(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        drag_corner(cx, point(px(495.0), px(795.0)), point(px(560.0), px(300.0)), Modifiers::default());
+        assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 1);
+    }
+
+    #[gpui::test]
+    fn dragging_a_corner_with_control_swaps_the_editors(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        let control = Modifiers { control: true, ..Modifiers::default() };
+        drag_corner(cx, point(px(495.0), px(795.0)), point(px(800.0), px(300.0)), control);
+        let editors: Vec<Panel> =
+            view.read_with(cx, |v, _| v.screen().areas().iter().map(|a| a.editor.clone()).collect());
+        assert_eq!(editors, [Panel::B, Panel::A]);
+    }
+
+    #[gpui::test]
+    fn dragging_a_corner_into_its_own_area_splits_it(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        drag_corner(cx, point(px(5.0), px(5.0)), point(px(200.0), px(60.0)), Modifiers::default());
+        assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 3);
+    }
+
+    #[gpui::test]
+    fn a_short_corner_drag_changes_nothing(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        drag_corner(cx, point(px(5.0), px(5.0)), point(px(10.0), px(10.0)), Modifiers::default());
+        assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 2);
+        assert!(view.read_with(cx, |v, _| v.corner.is_none()));
+    }
+
+    #[gpui::test]
+    fn the_edge_menu_opens_on_a_right_click_over_an_edge_and_split_follows_the_pointer(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        cx.simulate_mouse_down(point(px(500.0), px(300.0)), MouseButton::Right, Modifiers::default());
+        cx.run_until_parked();
+        let (before, after, axis) = view.read_with(cx, |v, _| {
+            let m = v.edge_menu.as_ref().expect("the edge menu opened");
+            (m.before, m.after, m.axis)
+        });
+        assert_eq!((before, after, axis), (AreaId(0), AreaId(1), Axis::X));
+        // Splitting is started by the menu's item: follow, then click to put it down.
+        view.update(cx, |v, cx| {
+            v.edge_menu = None;
+            v.splitting = Some(Splitting { axis: Axis::X, area: None, at: 0.0 });
+            v.update_split();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_mouse_move(point(px(750.0), px(300.0)), None, Modifiers::default());
+        cx.simulate_mouse_down(point(px(750.0), px(300.0)), MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 3);
+    }
+
+    #[gpui::test]
+    fn right_click_cancels_a_split_in_progress(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update(cx, |v, cx| {
+            v.splitting = Some(Splitting { axis: Axis::Y, area: None, at: 0.0 });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_mouse_down(point(px(750.0), px(300.0)), MouseButton::Right, Modifiers::default());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |v, _| v.splitting.is_none()));
+        assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 2);
     }
 }

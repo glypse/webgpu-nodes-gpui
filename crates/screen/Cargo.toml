@@ -9,3 +9,6 @@ guard = { path = "../guard" }
 serde.workspace = true
 gpui.workspace = true
 theme = { path = "../theme" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
