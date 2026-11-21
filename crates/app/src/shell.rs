@@ -264,7 +264,8 @@ impl Shell {
             return;
         }
         let editor = self.editor.clone();
-        let dialog = cx.new(|cx| SettingsDialog::new(editor, window, cx));
+        let playback = self.playback.clone();
+        let dialog = cx.new(|cx| SettingsDialog::new(editor, playback, window, cx));
         cx.subscribe_in(&dialog, window, |this, _, SettingsEvent::Close, window, cx| {
             this.settings = None;
             let editor_focus = this.editor.read(cx).focus_handle(cx);
@@ -456,9 +457,8 @@ fn apply_settings(
     window: &mut Window,
     cx: &mut Context<Playback>,
 ) {
-    if !settings.canvas.follow_preview {
-        playback.set_resolution(Size::new(settings.canvas.width, settings.canvas.height), window, cx);
-    }
+    let canvas = settings.canvas;
+    playback.set_canvas(canvas.follow_preview, Size::new(canvas.width, canvas.height), window, cx);
     let timing = Timing { fps: settings.timing.fps, realtime: settings.timing.realtime };
     if timing != playback.timing() {
         playback.set_timing(timing, window, cx);

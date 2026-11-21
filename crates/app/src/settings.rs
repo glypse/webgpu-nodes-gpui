@@ -8,6 +8,7 @@ use gpui::{
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
     Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
 };
+use runtime::Size;
 use shader_graph::graph::{ColorSpace, MAX_CANVAS_SIZE, MAX_FPS, ProjectSettings};
 use theme::{
     ActiveTheme as _, Button, ButtonSize, ButtonVariant, InputEvent, NumberEvent, NumberField,
@@ -15,6 +16,7 @@ use theme::{
 };
 
 use crate::editor::Editor;
+use crate::playback::Playback;
 use crate::preferences::{self, Preferences, ThemePreference};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +91,9 @@ pub enum SettingsEvent {
 
 pub struct SettingsDialog {
     editor: Entity<Editor>,
+    playback: Entity<Playback>,
+    /// The size frames render at, as last shown: the preview's while following it.
+    shown: Size,
     page: Page,
     focus: FocusHandle,
     width: Entity<NumberField>,
@@ -118,8 +123,14 @@ fn aspect(width: u32, height: u32) -> String {
 }
 
 impl SettingsDialog {
-    pub fn new(editor: Entity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        editor: Entity<Editor>,
+        playback: Entity<Playback>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let settings = editor.read(cx).settings();
+        let shown = playback.read(cx).render_size();
         let side = |value: u32, label: &'static str, cx: &mut Context<NumberField>| {
             NumberField::new(f64::from(value), cx)
                 .label(label)
@@ -138,6 +149,12 @@ impl SettingsDialog {
             input
         });
         let subscriptions = vec![
+            // Playback changes every frame; only a change of the size needs a redraw.
+            cx.observe(&playback, |this, playback, cx| {
+                if playback.read(cx).render_size() != this.shown {
+                    cx.notify();
+                }
+            }),
             cx.subscribe(&width, |this, _, NumberEvent::Change(v), cx| {
                 guard::guard("canvas width", || this.update(cx, |s| s.canvas.width = *v as u32));
             }),
@@ -160,6 +177,8 @@ impl SettingsDialog {
         window.focus(&focus, cx);
         Self {
             editor,
+            playback,
+            shown,
             page: Page::Canvas,
             focus,
             width,
@@ -235,10 +254,19 @@ impl SettingsDialog {
 
     fn canvas_page(&mut self, settings: &ProjectSettings, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let canvas = settings.canvas;
-        for (field, value) in [(&self.width, canvas.width), (&self.height, canvas.height)] {
-            field.update(cx, |f, cx| f.set_value(f64::from(value), cx));
-        }
         let follow = canvas.follow_preview;
+        self.shown = self.playback.read(cx).render_size();
+        let (width, height) = if follow {
+            (self.shown.width, self.shown.height)
+        } else {
+            (canvas.width, canvas.height)
+        };
+        for (field, value) in [(&self.width, width), (&self.height, height)] {
+            field.update(cx, |f, cx| {
+                f.set_value(f64::from(value), cx);
+                f.set_read_only(follow, cx);
+            });
+        }
         let size = self.field(
             "Size",
             Some(
@@ -274,7 +302,7 @@ impl SettingsDialog {
         };
         let resolution = self.field(
             "Resolution",
-            Some(format!("In pixels, {}.", aspect(canvas.width, canvas.height))),
+            Some(format!("In pixels, {}.", aspect(width, height))),
             div()
                 .flex()
                 .items_center()
@@ -675,7 +703,8 @@ mod tests {
         let (dialog, cx) = cx.add_window_view(move |window, cx| {
             let e = cx.new(|cx| Editor::new(window, cx));
             *shared.borrow_mut() = Some(e.clone());
-            SettingsDialog::new(e, window, cx)
+            let playback = cx.new(|_| Playback::new());
+            SettingsDialog::new(e, playback, window, cx)
         });
         let editor = editor.borrow().clone().expect("editor");
         let announced = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -708,7 +737,8 @@ mod tests {
         cx.update(preferences::init);
         let (dialog, cx) = cx.add_window_view(|window, cx| {
             let e = cx.new(|cx| Editor::new(window, cx));
-            SettingsDialog::new(e, window, cx)
+            let playback = cx.new(|_| Playback::new());
+            SettingsDialog::new(e, playback, window, cx)
         });
         for page in [Page::Canvas, Page::Time, Page::Color, Page::Appearance] {
             dialog.update(cx, |d, cx| {

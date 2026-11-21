@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{Context, EventEmitter, RenderImage, SharedString, Window};
+use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Window};
 use shader_graph::assets::AssetKind;
 use shader_graph::codegen::ResourceDecl;
+use shader_graph::graph::MAX_CANVAS_SIZE;
 
 use crate::project::AssetFiles;
 use runtime::{
@@ -86,7 +87,13 @@ pub struct Playback {
     renderer: Option<Renderer>,
     program: Option<Program>,
     pub player: Player,
+    /// The canvas size from the project, which frames render at unless following a preview area.
     pub resolution: Size,
+    follow: bool,
+    /// Each preview area's size in device pixels, by its entity.
+    panes: HashMap<EntityId, Size>,
+    /// The preview area frames follow: the one last used, else the first laid out.
+    followed: Option<EntityId>,
     /// The latest frame drawn, as the window shows it.
     shown: Option<Shown>,
     stats: FrameStats,
@@ -120,6 +127,9 @@ impl Playback {
             program: None,
             player,
             resolution: DEFAULT_RESOLUTION,
+            follow: false,
+            panes: HashMap::new(),
+            followed: None,
             shown: None,
             stats: FrameStats::default(),
             code: SharedString::default(),
@@ -261,6 +271,78 @@ impl Playback {
         }
     }
 
+    /// Takes the canvas settings: frames render at the followed preview's size while `follow`.
+    pub fn set_canvas(
+        &mut self,
+        follow: bool,
+        resolution: Size,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if follow == self.follow && resolution == self.resolution {
+            return;
+        }
+        let before = self.render_size();
+        self.follow = follow;
+        self.resolution = resolution;
+        if self.render_size() != before {
+            self.player.invalidate();
+        }
+        self.changed(window, cx);
+    }
+
+    pub fn following(&self) -> bool {
+        self.follow
+    }
+
+    /// The size frames render at: the followed preview area's, while following it.
+    pub fn render_size(&self) -> Size {
+        let pane = self.followed.and_then(|area| self.panes.get(&area).copied());
+        canvas_size(self.follow, pane, self.resolution)
+    }
+
+    /// Reports a preview area's size in device pixels, which frames follow while `follow`.
+    pub fn set_pane(
+        &mut self,
+        area: EntityId,
+        size: Size,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.panes.insert(area, size) == Some(size) {
+            return;
+        }
+        let followed = *self.followed.get_or_insert(area);
+        if self.follow && followed == area {
+            self.player.invalidate();
+            self.changed(window, cx);
+        }
+    }
+
+    /// Makes `area` the one frames follow: the one last used.
+    pub fn follow_pane(&mut self, area: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.followed == Some(area) || !self.panes.contains_key(&area) {
+            return;
+        }
+        self.followed = Some(area);
+        if self.follow {
+            self.player.invalidate();
+            self.changed(window, cx);
+        }
+    }
+
+    /// Forgets a preview area that has gone, moving frames to another area's size.
+    pub fn forget_pane(&mut self, area: EntityId, cx: &mut Context<Self>) {
+        if self.panes.remove(&area).is_none() {
+            return;
+        }
+        if self.followed == Some(area) {
+            self.followed = self.panes.keys().next().copied();
+            self.player.invalidate();
+            cx.notify();
+        }
+    }
+
     pub fn set_timing(&mut self, timing: Timing, window: &mut Window, cx: &mut Context<Self>) {
         self.player.set_timing(timing);
         self.changed(window, cx);
@@ -283,6 +365,8 @@ impl Playback {
 
     /// Renders the current frame at the canvas size, for export.
     pub fn export_frame(&mut self) -> anyhow::Result<Frame> {
+        let size = self.render_size();
+        let inputs = self.player.clock.inputs();
         let (renderer, program) = self
             .renderer
             .as_mut()
@@ -290,9 +374,9 @@ impl Playback {
             .ok_or_else(|| anyhow::anyhow!("there is no program to draw"))?;
         renderer.render(
             program,
-            self.player.clock.inputs(),
+            inputs,
             RenderOptions {
-                size: self.resolution,
+                size,
                 format: PixelFormat::Rgba8,
                 premultiply: false,
             },
@@ -356,18 +440,19 @@ impl Playback {
 
     /// Starts drawing a frame; it is shown once the GPU has finished with it.
     fn submit(&mut self, inputs: runtime::FrameInputs) -> bool {
+        let size = self.render_size();
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else {
             return false;
         };
         let started = Instant::now();
         #[cfg(target_os = "macos")]
-        let submitted = renderer.submit_surface(program, inputs, self.resolution);
+        let submitted = renderer.submit_surface(program, inputs, size);
         #[cfg(not(target_os = "macos"))]
         let submitted = renderer.submit(
             program,
             inputs,
             RenderOptions {
-                size: self.resolution,
+                size,
                 format: PixelFormat::Bgra8,
                 premultiply: true,
             },
@@ -410,6 +495,26 @@ impl Playback {
         }
         self.stats.presented(started.elapsed(), gpu_time);
     }
+}
+
+/// The size frames render at: the followed pane's while following it, else `stored`.
+fn canvas_size(follow: bool, pane: Option<Size>, stored: Size) -> Size {
+    match (follow, pane) {
+        (true, Some(pane)) => pane,
+        _ => stored,
+    }
+}
+
+/// A preview area's logical size as device pixels: whole pixels, within the canvas limit.
+/// Empty areas (hidden or collapsed) have none, so they keep their last size.
+pub fn device_size(width: f32, height: f32, scale: f32) -> Option<Size> {
+    // `min` would return the cap for NaN, so the comparison is written to send NaN to 0.
+    let side = |logical: f32| {
+        let pixels = (logical * scale).round();
+        if pixels > 0.0 { pixels.min(MAX_CANVAS_SIZE as f32) as u32 } else { 0 }
+    };
+    let size = Size::new(side(width), side(height));
+    (size.width > 0 && size.height > 0).then_some(size)
 }
 
 /// The frame as an image GPUI can draw: its BGRA bytes, premultiplied as the renderer drew them.
@@ -466,5 +571,39 @@ impl FrameStats {
             since: Some(now),
             ..Self::default()
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pane_sizes_are_whole_device_pixels() {
+        assert_eq!(device_size(100.4, 50.6, 2.0), Some(Size::new(201, 101)));
+    }
+
+    #[test]
+    fn empty_panes_have_no_size() {
+        assert_eq!(device_size(0.0, 300.0, 2.0), None);
+        assert_eq!(device_size(300.0, -1.0, 1.0), None);
+        assert_eq!(device_size(f32::NAN, 300.0, 1.0), None);
+    }
+
+    #[test]
+    fn pane_sizes_are_capped_at_the_canvas_limit() {
+        assert_eq!(
+            device_size(10_000.0, 10.0, 1.0),
+            Some(Size::new(MAX_CANVAS_SIZE, 10))
+        );
+    }
+
+    #[test]
+    fn the_canvas_follows_the_pane_only_while_following() {
+        let stored = Size::new(1920, 1080);
+        let pane = Some(Size::new(800, 600));
+        assert_eq!(canvas_size(true, pane, stored), Size::new(800, 600));
+        assert_eq!(canvas_size(false, pane, stored), stored);
+        assert_eq!(canvas_size(true, None, stored), stored);
     }
 }

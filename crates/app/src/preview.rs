@@ -8,7 +8,7 @@ use guard::SafeListener as _;
 use runtime::Size;
 use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
 
-use crate::playback::{Playback, Shown};
+use crate::playback::{Playback, Shown, device_size};
 
 pub const MIN_ZOOM: f32 = 0.02;
 pub const MAX_ZOOM: f32 = 32.0;
@@ -41,19 +41,32 @@ pub struct PreviewArea {
     pane: Bounds<Pixels>,
     scale: f32,
     panning: Option<Point<Pixels>>,
+    following: bool,
     _observe: Subscription,
+    /// Forgets this area's size in the playback once it is released.
+    _released: Option<Subscription>,
 }
 
 impl PreviewArea {
     pub fn new(playback: Entity<Playback>, cx: &mut Context<Self>) -> Self {
-        let observe = cx.observe(&playback, |_, _, cx| cx.notify());
+        let observe = cx.observe(&playback, |this, playback, cx| {
+            let following = playback.read(cx).following();
+            // The canvas fills the pane while following, so it starts fitted to it.
+            if following && !this.following {
+                this.manual = None;
+            }
+            this.following = following;
+            cx.notify();
+        });
         Self {
             playback,
             manual: None,
             pane: Bounds::default(),
             scale: 1.0,
             panning: None,
+            following: false,
             _observe: observe,
+            _released: None,
         }
     }
 
@@ -62,7 +75,7 @@ impl PreviewArea {
     }
 
     fn resolution(&self, cx: &App) -> Size {
-        self.playback.read(cx).resolution
+        self.playback.read(cx).render_size()
     }
 
     fn fit_zoom(&self, cx: &App) -> f32 {
@@ -161,6 +174,8 @@ impl Render for PreviewArea {
             let failure = playback.failure.clone();
             let rect = self.rect(cx);
             let view = cx.entity();
+            let id = view.entity_id();
+            let playback = self.playback.clone();
             div()
                 .id("preview-pane")
                 .relative()
@@ -174,7 +189,7 @@ impl Render for PreviewArea {
                 })
                 .child(
                     canvas(
-                        move |bounds, _, cx| {
+                        move |bounds, window, cx| {
                             guard::guard("preview layout", || {
                                 view.update(cx, |this, cx| {
                                     if this.pane != bounds {
@@ -182,6 +197,14 @@ impl Render for PreviewArea {
                                         cx.notify();
                                     }
                                 });
+                                let size = device_size(
+                                    f32::from(bounds.size.width),
+                                    f32::from(bounds.size.height),
+                                    window.scale_factor(),
+                                );
+                                if let Some(size) = size {
+                                    playback.update(cx, |p, cx| p.set_pane(id, size, window, cx));
+                                }
                             });
                         },
                         |_, _, _, _| {},
@@ -220,8 +243,9 @@ impl Render for PreviewArea {
                 )
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.safe_listener(move |this, event: &MouseDownEvent, window, cx| {
                         this.panning = Some(event.position);
+                        this.playback.update(cx, |p, cx| p.follow_pane(id, window, cx));
                         cx.notify();
                     }),
                 )
@@ -359,19 +383,24 @@ impl PreviewToolbar {
         };
         let menu = Menu::new("preview-menu").at(at).on_dismiss(dismiss);
         match kind {
-            Open::Resolution => RESOLUTIONS.iter().fold(menu, |menu, &(width, height)| {
-                let playback = playback.clone();
-                let current = playback.read(cx).resolution == Size::new(width, height);
-                menu.item(
-                    MenuItem::new(format!("{width} × {height}"))
-                        .checked(current)
-                        .on_select(move |window, cx| {
-                            playback.update(cx, |p, cx| {
-                                p.set_resolution(Size::new(width, height), window, cx)
-                            });
-                        }),
-                )
-            }),
+            Open::Resolution => {
+                // While following, the stored size has no effect, so it can't be picked.
+                let following = playback.read(cx).following();
+                RESOLUTIONS.iter().fold(menu, |menu, &(width, height)| {
+                    let playback = playback.clone();
+                    let current = playback.read(cx).resolution == Size::new(width, height);
+                    menu.item(
+                        MenuItem::new(format!("{width} × {height}"))
+                            .checked(current)
+                            .disabled(following)
+                            .on_select(move |window, cx| {
+                                playback.update(cx, |p, cx| {
+                                    p.set_resolution(Size::new(width, height), window, cx)
+                                });
+                            }),
+                    )
+                })
+            }
             Open::Zoom => {
                 let act = |f: fn(&mut PreviewArea, &mut Context<PreviewArea>)| {
                     let area = area.clone();
@@ -442,7 +471,7 @@ fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
 impl Render for PreviewToolbar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         guard::render("PreviewToolbar", || {
-            let resolution = self.playback.read(cx).resolution;
+            let resolution = self.playback.read(cx).render_size();
             let zoom = self.area.read(cx).zoom(cx);
             let this = cx.entity();
             let open = move |kind: Open| {
@@ -503,6 +532,72 @@ pub fn new_area(
     cx: &mut App,
 ) -> (Entity<PreviewArea>, Entity<PreviewToolbar>) {
     let area = cx.new(|cx| PreviewArea::new(playback.clone(), cx));
+    let id = area.entity_id();
+    let forget = {
+        let playback = playback.clone();
+        cx.observe_release(&area, move |_, cx| {
+            playback.update(cx, |p, cx| p.forget_pane(id, cx));
+        })
+    };
+    area.update(cx, |this, _| this._released = Some(forget));
     let toolbar = cx.new(|cx| PreviewToolbar::new(area.clone(), playback.clone(), cx));
     (area, toolbar)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Context, IntoElement, Render, TestAppContext, Window};
+
+    use super::*;
+
+    /// A preview area in a box of the given width, which the test resizes.
+    struct Harness {
+        area: Entity<PreviewArea>,
+        width: f32,
+    }
+
+    impl Render for Harness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(self.width)).h(px(300.0)).child(self.area.clone())
+        }
+    }
+
+    fn redraw(cx: &mut gpui::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn frames_follow_the_preview_area_while_following(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let (harness, cx) = cx.add_window_view(|_, cx| {
+            let playback = cx.new(|_| Playback::new());
+            let area = cx.new(|cx| PreviewArea::new(playback, cx));
+            Harness { area, width: 400.0 }
+        });
+        let playback = harness.read_with(cx, |h, cx| h.area.read(cx).playback.clone());
+        let stored = Size::new(1920, 1080);
+        cx.update(|window, cx| {
+            playback.update(cx, |p, cx| p.set_canvas(true, stored, window, cx));
+        });
+        redraw(cx);
+
+        let scale = cx.update(|window, _| window.scale_factor());
+        let size = |cx: &gpui::VisualTestContext| playback.read_with(cx, |p, _| p.render_size());
+        assert_eq!(size(cx), device_size(400.0, 300.0, scale).expect("a pane"));
+
+        harness.update(cx, |h, cx| {
+            h.width = 500.0;
+            cx.notify();
+        });
+        redraw(cx);
+        assert_eq!(size(cx), device_size(500.0, 300.0, scale).expect("a pane"));
+
+        cx.update(|window, cx| {
+            playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx));
+        });
+        redraw(cx);
+        assert_eq!(size(cx), stored);
+    }
 }
