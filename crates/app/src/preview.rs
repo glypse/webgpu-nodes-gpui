@@ -71,6 +71,11 @@ impl PreviewArea {
         }
     }
 
+    /// Whether the pointer is over the pane now, which is where the zoom keys act.
+    pub fn pointer_over(&self, window: &Window) -> bool {
+        self.pane.contains(&window.mouse_position())
+    }
+
     pub fn zoom(&self, cx: &App) -> f32 {
         self.manual.map_or_else(|| self.fit_zoom(cx), |m| m.zoom)
     }
@@ -127,6 +132,14 @@ impl PreviewArea {
         self.zoom_to(self.zoom(cx) * factor, anchor, cx);
     }
 
+    pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
+        self.zoom_by(ZOOM_STEP, None, cx);
+    }
+
+    pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
+        self.zoom_by(1.0 / ZOOM_STEP, None, cx);
+    }
+
     fn pan_by(&mut self, dx: f32, dy: f32, cx: &mut Context<Self>) {
         let current = self.manual.unwrap_or(Manual {
             zoom: self.zoom(cx),
@@ -179,6 +192,7 @@ impl Render for PreviewArea {
             let playback = self.playback.clone();
             div()
                 .id("preview-pane")
+                .debug_selector(|| "preview-pane".into())
                 .relative()
                 .size_full()
                 .overflow_hidden()
@@ -397,8 +411,8 @@ impl PreviewToolbar {
                     let area = area.clone();
                     move |_: &mut Window, cx: &mut App| area.update(cx, f)
                 };
-                let zoom_in = act(|a, cx| a.zoom_by(ZOOM_STEP, None, cx));
-                let zoom_out = act(|a, cx| a.zoom_by(1.0 / ZOOM_STEP, None, cx));
+                let zoom_in = act(PreviewArea::zoom_in);
+                let zoom_out = act(PreviewArea::zoom_out);
                 let fit = act(PreviewArea::fit);
                 let actual = act(PreviewArea::actual_size);
                 let percentages: Vec<(f32, _)> = PERCENTAGES

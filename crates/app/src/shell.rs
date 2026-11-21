@@ -41,6 +41,10 @@ actions!(
         Undo,
         Redo,
         OpenSettings,
+        ZoomPreviewIn,
+        ZoomPreviewOut,
+        FitPreview,
+        ActualSizePreview,
     ]
 );
 
@@ -58,6 +62,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-s", SaveProject, Some("Shell")),
         KeyBinding::new("cmd-shift-s", SaveProjectAs, Some("Shell")),
         KeyBinding::new("cmd-,", OpenSettings, Some("Shell")),
+        // Both keys of "+": typed with shift on US layouts, where only the typed character matches.
+        KeyBinding::new("+", ZoomPreviewIn, Some(CONTEXT)),
+        KeyBinding::new("=", ZoomPreviewIn, Some(CONTEXT)),
+        KeyBinding::new("-", ZoomPreviewOut, Some(CONTEXT)),
+        KeyBinding::new("0", FitPreview, Some(CONTEXT)),
+        KeyBinding::new("1", ActualSizePreview, Some(CONTEXT)),
     ]);
 }
 
@@ -134,7 +144,6 @@ impl Shell {
     pub fn play(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.playback.update(cx, |playback, cx| playback.toggle(window, cx));
     }
-
 
     /// `zoom` opens the first graph area at that zoom, as `--zoom` asks for at launch.
     pub fn new(requested: Option<PathBuf>, zoom: Option<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -259,6 +268,27 @@ impl Shell {
         let shell = Self { screen, playback, editor, views, path, settings: None };
         shell.refresh_title(window, cx);
         shell
+    }
+
+    /// Applies `f` to the preview areas the pointer is over. Keys reach the shell whatever has focus,
+    /// so the pointer decides which preview they act on.
+    fn over_previews(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+        f: fn(&mut PreviewArea, &mut Context<PreviewArea>),
+    ) {
+        let hovered: Vec<_> = self
+            .views
+            .borrow()
+            .previews
+            .values()
+            .map(|(area, _)| area.clone())
+            .filter(|area| area.read(cx).pointer_over(window))
+            .collect();
+        for area in hovered {
+            area.update(cx, f);
+        }
     }
 
     /// The preview's size and the timeline's timing are project settings too: edits made there are kept.
@@ -528,6 +558,18 @@ impl Render for Shell {
             .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
                 this.open_settings(window, cx);
             }))
+            .on_action(cx.safe_listener(|this, _: &ZoomPreviewIn, window, cx| {
+                this.over_previews(window, cx, PreviewArea::zoom_in);
+            }))
+            .on_action(cx.safe_listener(|this, _: &ZoomPreviewOut, window, cx| {
+                this.over_previews(window, cx, PreviewArea::zoom_out);
+            }))
+            .on_action(cx.safe_listener(|this, _: &FitPreview, window, cx| {
+                this.over_previews(window, cx, PreviewArea::fit);
+            }))
+            .on_action(cx.safe_listener(|this, _: &ActualSizePreview, window, cx| {
+                this.over_previews(window, cx, PreviewArea::actual_size);
+            }))
             .on_action(cx.safe_listener(|this, _: &Undo, window, cx| {
                 this.editor.update(cx, |e, cx| e.undo(cx));
                 this.refresh_title(window, cx);
@@ -540,4 +582,71 @@ impl Render for Shell {
             .children(self.settings.clone())
     })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use gpui::{Modifiers, TestAppContext};
+    
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wgnodes-shell-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    /// A shell that starts without a project file, with the app's keys bound.
+    fn open(cx: &mut TestAppContext) -> (Entity<Shell>, gpui::VisualTestContext) {
+        cx.update(|cx| {
+            theme::init(cx);
+            preferences::init(cx);
+            init(cx);
+        });
+        let missing = PathBuf::from("/nonexistent/untitled.wgnodes");
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(missing), None, window, cx));
+        cx.run_until_parked();
+        (shell, cx.clone())
+    }
+
+    fn preview_area(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) -> Entity<PreviewArea> {
+        shell.read_with(cx, |s, _| {
+            s.views.borrow().previews.values().next().map(|(area, _)| area.clone()).expect("a preview area")
+        })
+    }
+
+    #[gpui::test]
+    fn zoom_keys_act_on_the_preview_under_the_pointer(cx: &mut TestAppContext) {
+        let (shell, mut cx) = open(cx);
+        let cx = &mut cx;
+        let area = preview_area(&shell, cx);
+        let zoom = |cx: &mut gpui::VisualTestContext| area.read_with(cx, |a, cx| a.zoom(cx));
+        let before = zoom(cx);
+
+        cx.simulate_keystrokes("+");
+        assert_eq!(zoom(cx), before, "the keys do nothing while the pointer is elsewhere");
+
+        let pane = cx.debug_bounds("preview-pane").expect("the preview pane is drawn");
+        cx.simulate_mouse_move(pane.center(), None, Modifiers::none());
+        cx.run_until_parked();
+
+        cx.simulate_keystrokes("+");
+        assert!((zoom(cx) - before * 1.2).abs() < 1e-4, "+ zooms in by one step");
+        cx.simulate_keystrokes("=");
+        assert!((zoom(cx) - before * 1.2 * 1.2).abs() < 1e-3, "= zooms in too");
+        cx.simulate_keystrokes("-");
+        assert!((zoom(cx) - before * 1.2).abs() < 1e-3, "- zooms out by one step");
+        cx.simulate_keystrokes("-");
+        assert!((zoom(cx) - before).abs() < 1e-3, "a second - returns to the start");
+        cx.simulate_keystrokes("1");
+        assert!((zoom(cx) - 1.0).abs() < 1e-6, "1 shows the canvas at actual size");
+        cx.simulate_keystrokes("0");
+        assert!((zoom(cx) - before).abs() < 1e-4, "0 fits the canvas again");
+
+        cx.simulate_keystrokes("cmd-+");
+        assert!((zoom(cx) - before).abs() < 1e-4, "keys with modifiers aren't zoom keys");
+    }
+
 }
