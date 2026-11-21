@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use gpui::{Context, EventEmitter, RenderImage, SharedString, Window};
 use runtime::{
-    Frame, PixelFormat, Player, Program, ProgramError, ProgramSource, RefreshRateMeter,
+    Frame, PixelFormat, Player, Program, ProgramError, RefreshRateMeter,
     RenderOptions, Renderer, Size, Timing,
 };
 
@@ -128,16 +128,24 @@ impl Playback {
     /// Takes a newly generated program: shows it once it compiles, keeping the last working one until then.
     pub fn set_source(
         &mut self,
-        generated: Result<ProgramSource, String>,
+        generated: Result<shader_graph::codegen::Program, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match generated {
             Ok(source) => {
-                self.code = source.code.clone().into();
+                self.code = source.program.code.clone().into();
                 if let Some(renderer) = &mut self.renderer {
-                    match renderer.compile(&source) {
+                    match renderer.compile(&source.program) {
                         Ok(program) => {
+                            let values = source
+                                .uniforms
+                                .iter()
+                                .map(|(name, v)| {
+                                    (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect())
+                                })
+                                .collect();
+                            renderer.set_uniforms(&program, &values);
                             self.program = Some(program);
                             self.failure = None;
                             self.player.invalidate();

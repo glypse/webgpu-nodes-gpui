@@ -15,7 +15,7 @@ pub use frame_meter::{FrameMeter, FrameRate};
 pub use player::Player;
 pub use refresh_rate::RefreshRateMeter;
 pub use renderer::{
-    Frame, PixelFormat, Program, ProgramDiagnostic, ProgramError, ProgramSource, RenderOptions,
+    Frame, PixelFormat, Program, ProgramDiagnostic, ProgramError, RenderOptions,
     Renderer, Size,
 };
-pub use uniforms::{Scalar, UniformBlock, UniformField, pack_block};
+pub use uniforms::{UniformBlock, UniformField, UniformScalar, pack_block};

@@ -5,6 +5,8 @@ use anyhow::{Context as _, Result};
 use crate::clock::FrameInputs;
 use crate::gpu_timer::{GpuTimer, TIMING_BYTES};
 use crate::present::{PresentOptions, Presenter};
+use shader_graph::ShaderProgram;
+
 use crate::uniforms::{UniformBlock, pack_block};
 
 /// The format programs draw into: linear, and wide enough for colours outside sRGB.
@@ -22,22 +24,6 @@ impl Size {
     pub const fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
-}
-
-/// A program as codegen hands it over: WGSL, and the layout of the two
-/// uniform blocks it reads.
-///
-/// The frame block holds the fields `time`, `delta`, `frame` and
-/// `resolution`, those the program declares being written each frame.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProgramSource {
-    pub code: String,
-    pub vertex_entry: String,
-    pub fragment_entry: String,
-    pub frame: UniformBlock,
-    pub uniforms: UniformBlock,
-    /// The values of the uniform block's fields.
-    pub uniform_values: BTreeMap<String, Vec<f64>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,11 +47,11 @@ pub struct Program {
     bind_group: wgpu::BindGroup,
     frame_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
-    source: ProgramSource,
+    source: ShaderProgram,
 }
 
 impl Program {
-    pub fn source(&self) -> &ProgramSource {
+    pub fn source(&self) -> &ShaderProgram {
         &self.source
     }
 }
@@ -161,7 +147,8 @@ impl Renderer {
         })
     }
 
-    pub fn compile(&mut self, source: &ProgramSource) -> Result<Program, ProgramError> {
+    /// Compiles a program; its uniform block stays zero until `set_uniforms`.
+    pub fn compile(&mut self, source: &ShaderProgram) -> Result<Program, ProgramError> {
         let fail = |message: String, location| ProgramError {
             diagnostics: vec![ProgramDiagnostic { message, location }],
             code: source.code.clone(),
@@ -281,7 +268,6 @@ impl Renderer {
             uniform_buffer,
             source: source.clone(),
         };
-        self.set_uniforms(&program, &source.uniform_values);
         Ok(program)
     }
 
@@ -471,7 +457,7 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::uniforms::{Scalar, UniformField};
+    use crate::uniforms::{UniformField, UniformScalar};
 
     const CODE: &str = r"
 struct Frame { time: f32, delta: f32, resolution: vec2f, frame: u32 }
@@ -489,13 +475,13 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
 }
 ";
 
-    fn source(code: &str) -> ProgramSource {
+    fn source(code: &str) -> ShaderProgram {
         let field = |offset, components| UniformField {
             offset,
-            scalar: Scalar::F32,
+            scalar: UniformScalar::F32,
             components,
         };
-        ProgramSource {
+        ShaderProgram {
             code: code.into(),
             vertex_entry: "vertex".into(),
             fragment_entry: "fragment".into(),
@@ -510,7 +496,7 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
                         "frame".into(),
                         UniformField {
                             offset: 16,
-                            scalar: Scalar::U32,
+                            scalar: UniformScalar::U32,
                             components: 1,
                         },
                     ),
@@ -521,7 +507,6 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
                 size: 0,
                 fields: BTreeMap::new(),
             },
-            uniform_values: BTreeMap::new(),
         }
     }
 
