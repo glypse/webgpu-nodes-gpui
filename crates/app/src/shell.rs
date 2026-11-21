@@ -130,7 +130,8 @@ impl Shell {
         let editor = cx.new(|cx| Editor::new(window, cx));
         let mut path = None;
         let mut layout = None;
-        if let Some(last) = project::last() {
+        let requested = std::env::args_os().nth(1).map(PathBuf::from);
+        if let Some(last) = requested.or_else(project::last) {
             match project::read(&last) {
                 Ok(loaded) => {
                     layout = layout::load(&loaded);
