@@ -24,3 +24,7 @@ opt-level = 2
 
 [profile.dev]
 debug = "line-tables-only"
+
+# Vendored gpui-fast-apple with BGRA surface support, see vendor/patches.
+[patch.crates-io]
+gpui-fast-apple = { path = "vendor/gpui-fast-apple" }

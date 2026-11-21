@@ -1,0 +1,298 @@
+# gpui-fast-apple 0.1.17: display BGRA surfaces.
+#
+# CoreVideo buffers in kCVPixelFormatType_32BGRA are drawn as one BGRA8Unorm texture
+# through a plain textured-quad fragment (surface_bgra_fragment), sampled like the
+# image sprites, so colours match the readback path. NV12 surfaces are unchanged.
+# Apply from vendor/ with: patch -p1 -d gpui-fast-apple < patches/<this file>
+
+diff -ruN a/gpui-fast-apple/src/fast/rounded_clip_shader.rs b/gpui-fast-apple/src/fast/rounded_clip_shader.rs
+--- a/gpui-fast-apple/src/fast/rounded_clip_shader.rs	2026-11-21 19:06:33
++++ b/gpui-fast-apple/src/fast/rounded_clip_shader.rs	2026-11-21 19:06:33
+@@ -14,6 +14,7 @@
+         "polychrome_sprite_fragment",
+         "path_sprite_fragment",
+         "surface_fragment",
++        "surface_bgra_fragment",
+     ] {
+         let start = source
+             .find(&format!("fragment float4 {name}("))
+diff -ruN a/gpui-fast-apple/src/metal_renderer.rs b/gpui-fast-apple/src/metal_renderer.rs
+--- a/gpui-fast-apple/src/metal_renderer.rs	2026-11-21 19:06:33
++++ b/gpui-fast-apple/src/metal_renderer.rs	2026-11-21 19:06:33
+@@ -14,7 +14,8 @@
+ use objc2_core_video::{
+     CVMetalTexture, CVMetalTextureCache, CVMetalTextureGetTexture, CVPixelBufferGetHeight,
+     CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
+-    CVPixelBufferGetWidthOfPlane, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
++    CVPixelBufferGetWidthOfPlane, kCVPixelFormatType_32BGRA,
++    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
+ };
+ use objc2_foundation::{NSRange, NSString};
+ #[cfg(target_os = "macos")]
+@@ -148,6 +149,7 @@
+     monochrome_sprites_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+     pub(crate) polychrome_sprites_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+     surfaces_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
++    surfaces_bgra_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+     pub(crate) unit_vertices: Retained<ProtocolObject<dyn MTLBuffer>>,
+     pub(crate) instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
+     pub(crate) sprite_atlas: Arc<MetalAtlas>,
+@@ -399,6 +401,14 @@
+             "surface_fragment",
+             MTLPixelFormat::BGRA8Unorm,
+         )?;
++        let surfaces_bgra_pipeline_state = build_pipeline_state(
++            &device,
++            &library,
++            "surfaces_bgra",
++            "surface_vertex",
++            "surface_bgra_fragment",
++            MTLPixelFormat::BGRA8Unorm,
++        )?;
+ 
+         let command_queue = crate::fast::dynamic_textures::command_queue(&device)?;
+         let supports_shared_storage = cfg!(target_os = "ios") || is_apple_gpu;
+@@ -438,6 +448,7 @@
+             monochrome_sprites_pipeline_state,
+             polychrome_sprites_pipeline_state,
+             surfaces_pipeline_state,
++            surfaces_bgra_pipeline_state,
+             unit_vertices,
+             instance_buffer_pool,
+             sprite_atlas,
+@@ -1424,7 +1435,6 @@
+             return Ok(());
+         }
+ 
+-        command_encoder.setRenderPipelineState(&self.surfaces_pipeline_state);
+         // SAFETY: The unit vertices, SurfaceBounds instances, and copied viewport match the shader layouts and slots.
+         // Metal retains the buffers, and writer.finish publishes CPU writes before submission.
+         unsafe {
+@@ -1447,22 +1457,20 @@
+ 
+         for (index, surface) in surfaces.iter().enumerate() {
+             let image_buffer = &surface.image_buffer;
++            let width = CVPixelBufferGetWidth(image_buffer);
++            let height = CVPixelBufferGetHeight(image_buffer);
+             let texture_size = size(
+-                DevicePixels::from(CVPixelBufferGetWidth(image_buffer) as i32),
+-                DevicePixels::from(CVPixelBufferGetHeight(image_buffer) as i32),
++                DevicePixels::from(width as i32),
++                DevicePixels::from(height as i32),
+             );
+ 
+-            let pixel_format = CVPixelBufferGetPixelFormatType(image_buffer);
+-            anyhow::ensure!(
+-                pixel_format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+-                "unsupported surface pixel format: {pixel_format:#x}"
+-            );
+-
+-            let plane_texture = |plane, format| -> Result<CFRetained<CVMetalTexture>> {
+-                let width = CVPixelBufferGetWidthOfPlane(image_buffer, plane);
+-                let height = CVPixelBufferGetHeightOfPlane(image_buffer, plane);
++            let plane_texture = |plane: usize,
++                                 format: MTLPixelFormat,
++                                 width: usize,
++                                 height: usize|
++             -> Result<CFRetained<CVMetalTexture>> {
+                 let mut texture = ptr::null_mut();
+-                // SAFETY: The buffer has two planes matching these formats and dimensions, and the output pointer is writable.
++                // SAFETY: The buffer has the planes these formats and dimensions describe, and the output pointer is writable.
+                 let status = unsafe {
+                     CVMetalTextureCache::create_texture_from_image(
+                         None,
+@@ -1485,14 +1493,8 @@
+                 // SAFETY: The successful create call transfers ownership of this non-null texture.
+                 Ok(unsafe { CFRetained::from_raw(texture) })
+             };
+-            let y_texture = plane_texture(0, MTLPixelFormat::R8Unorm)?;
+-            let cb_cr_texture = plane_texture(1, MTLPixelFormat::RG8Unorm)?;
+-            let y_metal_texture =
+-                CVMetalTextureGetTexture(&y_texture).context("retrieving luma Metal texture")?;
+-            let cb_cr_metal_texture = CVMetalTextureGetTexture(&cb_cr_texture)
+-                .context("retrieving chroma Metal texture")?;
+ 
+-            // SAFETY: The size is copied from a live value, and both planes match their shader texture slots.
++            // SAFETY: The size is copied from a live value, and each fragment reads only the textures bound below.
+             // The frame completion handler retains the CoreVideo wrappers until GPU reads finish.
+             unsafe {
+                 command_encoder.setVertexBytes_length_atIndex(
+@@ -1500,17 +1502,58 @@
+                     mem::size_of_val(&texture_size),
+                     SurfaceInputIndex::TextureSize as usize,
+                 );
+-                command_encoder.setFragmentTexture_atIndex(
+-                    Some(&y_metal_texture),
+-                    SurfaceInputIndex::YTexture as usize,
+-                );
+-                command_encoder.setFragmentTexture_atIndex(
+-                    Some(&cb_cr_metal_texture),
+-                    SurfaceInputIndex::CbCrTexture as usize,
+-                );
+             }
+-            surface_textures.extend([y_texture, cb_cr_texture]);
+ 
++            let pixel_format = CVPixelBufferGetPixelFormatType(image_buffer);
++            let (pipeline, textures) = match pixel_format {
++                kCVPixelFormatType_32BGRA => {
++                    let texture = plane_texture(0, MTLPixelFormat::BGRA8Unorm, width, height)?;
++                    let metal_texture = CVMetalTextureGetTexture(&texture)
++                        .context("retrieving BGRA Metal texture")?;
++                    // SAFETY: The texture is the surface's only plane, in the format it was created with.
++                    unsafe {
++                        command_encoder.setFragmentTexture_atIndex(
++                            Some(&metal_texture),
++                            SurfaceInputIndex::Texture as usize,
++                        );
++                    }
++                    (&self.surfaces_bgra_pipeline_state, vec![texture])
++                }
++                kCVPixelFormatType_420YpCbCr8BiPlanarFullRange => {
++                    let y_texture = plane_texture(
++                        0,
++                        MTLPixelFormat::R8Unorm,
++                        CVPixelBufferGetWidthOfPlane(image_buffer, 0),
++                        CVPixelBufferGetHeightOfPlane(image_buffer, 0),
++                    )?;
++                    let cb_cr_texture = plane_texture(
++                        1,
++                        MTLPixelFormat::RG8Unorm,
++                        CVPixelBufferGetWidthOfPlane(image_buffer, 1),
++                        CVPixelBufferGetHeightOfPlane(image_buffer, 1),
++                    )?;
++                    let y_metal_texture = CVMetalTextureGetTexture(&y_texture)
++                        .context("retrieving luma Metal texture")?;
++                    let cb_cr_metal_texture = CVMetalTextureGetTexture(&cb_cr_texture)
++                        .context("retrieving chroma Metal texture")?;
++                    // SAFETY: Both planes match their shader texture slots.
++                    unsafe {
++                        command_encoder.setFragmentTexture_atIndex(
++                            Some(&y_metal_texture),
++                            SurfaceInputIndex::YTexture as usize,
++                        );
++                        command_encoder.setFragmentTexture_atIndex(
++                            Some(&cb_cr_metal_texture),
++                            SurfaceInputIndex::CbCrTexture as usize,
++                        );
++                    }
++                    (&self.surfaces_pipeline_state, vec![y_texture, cb_cr_texture])
++                }
++                _ => anyhow::bail!("unsupported surface pixel format: {pixel_format:#x}"),
++            };
++            command_encoder.setRenderPipelineState(pipeline);
++            surface_textures.extend(textures);
++
+             // SAFETY: Six unit vertices draw one instance within the uploaded scene's surface range.
+             unsafe {
+                 command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+@@ -1909,6 +1952,7 @@
+     TextureSize = 3,
+     YTexture = 4,
+     CbCrTexture = 5,
++    Texture = 6,
+ }
+ 
+ #[repr(C)]
+@@ -1968,9 +2012,9 @@
+     use super::*;
+     use objc2_core_foundation::{CFDictionary, CFType};
+     use objc2_core_video::{
+-        CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
+-        CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
+-        CVPixelBufferUnlockBaseAddress, kCVPixelBufferIOSurfacePropertiesKey,
++        CVPixelBufferCreate, CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane,
++        CVPixelBufferGetBytesPerRow, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferLockBaseAddress,
++        CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferIOSurfacePropertiesKey,
+     };
+     use objc2_metal::MTLCommandBufferStatus;
+ 
+@@ -2185,5 +2229,72 @@
+         command_buffer.waitUntilCompleted();
+         assert_eq!(command_buffer.status(), MTLCommandBufferStatus::Completed);
+         assert_eq!(read_texture_to_image(&target_texture).unwrap(), image);
++    }
++
++    #[test]
++    fn render_bgra_surface() {
++        let surface_properties_key = unsafe { kCVPixelBufferIOSurfacePropertiesKey };
++        let attributes = CFDictionary::from_slices(
++            &[surface_properties_key],
++            &[&*CFDictionary::<CFType, CFType>::empty()],
++        );
++        let mut image_buffer = ptr::null_mut();
++        assert_eq!(
++            unsafe {
++                CVPixelBufferCreate(
++                    None,
++                    16,
++                    16,
++                    kCVPixelFormatType_32BGRA,
++                    Some(attributes.as_opaque()),
++                    ptr::NonNull::from(&mut image_buffer),
++                )
++            },
++            kCVReturnSuccess
++        );
++        let image_buffer = ptr::NonNull::new(image_buffer).unwrap();
++        let image_buffer = unsafe { CFRetained::from_raw(image_buffer) };
++        let mut expected = RgbaImage::new(16, 16);
++        unsafe {
++            assert_eq!(
++                CVPixelBufferLockBaseAddress(&image_buffer, CVPixelBufferLockFlags::empty()),
++                kCVReturnSuccess
++            );
++            let stride = CVPixelBufferGetBytesPerRow(&image_buffer);
++            let base = CVPixelBufferGetBaseAddress(&image_buffer).cast::<u8>();
++            for y in 0..16 {
++                let row = slice::from_raw_parts_mut(base.add(y * stride), 16 * 4);
++                for x in 0..16 {
++                    let (red, green, blue) = ((x * 15) as u8, (y * 15) as u8, ((x + y) * 7) as u8);
++                    row[x * 4..x * 4 + 4].copy_from_slice(&[blue, green, red, 255]);
++                    expected.put_pixel(x as u32, y as u32, image::Rgba([red, green, blue, 255]));
++                }
++            }
++            assert_eq!(
++                CVPixelBufferUnlockBaseAddress(&image_buffer, CVPixelBufferLockFlags::empty()),
++                kCVReturnSuccess
++            );
++        }
++
++        let bounds = Bounds {
++            origin: Point::default(),
++            size: size(ScaledPixels(16.0), ScaledPixels(16.0)),
++        };
++        let mut scene = Scene::default();
++        scene.insert_primitive(PaintSurface {
++            order: 0,
++            bounds,
++            content_mask: ContentMask { bounds },
++            image_buffer,
++        });
++        scene.finish();
++
++        let mut renderer =
++            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())))
++                .unwrap();
++        let image = renderer
++            .render_scene_to_image(&scene, size(DevicePixels(16), DevicePixels(16)))
++            .unwrap();
++        assert_eq!(image, expected);
+     }
+ }
+diff -ruN a/gpui-fast-apple/src/shaders.metal b/gpui-fast-apple/src/shaders.metal
+--- a/gpui-fast-apple/src/shaders.metal	2026-11-21 19:06:33
++++ b/gpui-fast-apple/src/shaders.metal	2026-11-21 19:06:33
+@@ -900,6 +900,13 @@
+   return ycbcrToRGBTransform * ycbcr;
+ }
+ 
++fragment float4 surface_bgra_fragment(
++    SurfaceFragmentInput input [[stage_in]],
++    texture2d<float> texture [[texture(SurfaceInputIndex_Texture)]]) {
++  constexpr sampler texture_sampler(mag_filter::linear, min_filter::linear);
++  return texture.sample(texture_sampler, input.texture_position);
++}
++
+ float4 hsla_to_rgba(Hsla hsla) {
+   float h = hsla.h * 6.0; // Now, it's an angle but scaled in [0, 6) range
+   float s = hsla.s;
