@@ -240,6 +240,28 @@ fn edge_moves_are_clamped_to_the_minimum_size() {
 }
 
 #[test]
+fn an_area_shrinks_to_exactly_its_header_and_no_further() {
+    const WINDOW_HEIGHT: f64 = 800.0;
+    let s = screen(&[(0.0, 0.0, 1.0, 0.5), (0.0, 0.5, 1.0, 1.0)]);
+    let min = MinSize {
+        width: 96.0 / 1000.0,
+        height: f64::from(HEADER_HEIGHT) / WINDOW_HEIGHT,
+    };
+    let header = f64::from(HEADER_HEIGHT) / WINDOW_HEIGHT;
+    let edge = s.edge_at(0.5, 0.5, THRESHOLD, true).unwrap();
+    assert_eq!(edge.axis, Axis::Y);
+    assert!(approx(s.edge_limits(&edge, min).0, header));
+    for target in [0.0, 0.02] {
+        let moved = s.move_edge(&edge, target, min);
+        moved.validate().unwrap();
+        assert!(approx(moved.area(A).unwrap().rect.bottom, header));
+        assert!(approx(moved.area(B).unwrap().rect.top, header));
+    }
+    let moved = s.move_edge(&edge, 0.1, min);
+    assert!(approx(moved.area(A).unwrap().rect.bottom, 0.1));
+}
+
+#[test]
 fn edge_ignores_the_windows_border() {
     assert!(t_layout().edge_at(0.0, 0.5, THRESHOLD, false).is_none());
 }

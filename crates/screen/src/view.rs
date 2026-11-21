@@ -35,10 +35,11 @@ pub enum ScreenEvent {
     Changed,
 }
 
-/// Smallest area, in pixels: a header and a bit of body.
-const MIN_AREA: (f32, f32) = (96.0, 56.0);
+/// Smallest area width, in pixels.
+const MIN_AREA_WIDTH: f32 = 96.0;
 /// How far from an edge the pointer grabs it.
 const EDGE_GRAB: f32 = 4.0;
+/// An area can be shrunk to its header, so its minimum height is the header's.
 pub const HEADER_HEIGHT: f32 = 36.0;
 const CORNER_SIZE: f32 = 12.0;
 
@@ -179,8 +180,8 @@ impl<E: Editor> ScreenView<E> {
             f64::from(self.bounds.size.height),
         );
         MinSize {
-            width: f64::from(MIN_AREA.0) / width.max(1.0),
-            height: f64::from(MIN_AREA.1) / height.max(1.0),
+            width: f64::from(MIN_AREA_WIDTH) / width.max(1.0),
+            height: f64::from(HEADER_HEIGHT) / height.max(1.0),
         }
     }
 
