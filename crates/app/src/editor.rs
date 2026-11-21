@@ -76,6 +76,8 @@ pub struct Editor {
     add_menu: Option<Entity<AddMenu>>,
     viewports: HashMap<String, Viewport>,
     gesture: bool,
+    /// Duplicates being grabbed with the nodes they came from, which a cancel restores.
+    duplicating: Option<(Vec<String>, Vec<String>)>,
     clipboard: Option<NodeClipboard>,
     pub(crate) sheet: Option<String>,
     pub(crate) sheet_fields: sheet::Fields,
@@ -142,6 +144,7 @@ impl Editor {
             add_menu: None,
             viewports: HashMap::new(),
             gesture: false,
+            duplicating: None,
             clipboard: None,
             sheet: None,
             sheet_fields: sheet::Fields::default(),
@@ -162,6 +165,30 @@ impl Editor {
     /// The program of the project as it is now.
     pub fn shader(&self) -> &Result<Program, String> {
         &self.generated
+    }
+
+    /// Replaces the whole project, or starts over from the demo graph.
+    pub fn load_project(&mut self, project: Option<GraphProject>, cx: &mut Context<Self>) {
+        self.model_mut().set_project(project.unwrap_or_else(demo_project));
+        self.viewports.clear();
+        self.popup = None;
+        self.add_menu = None;
+        self.sheet = None;
+        self.code.clear();
+        self.after_edit(cx);
+        self.flow.update(cx, |flow, cx| flow.fit_view(Default::default(), cx));
+    }
+
+    pub fn project(&self) -> GraphProject {
+        self.model.borrow().project().clone()
+    }
+
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.model.borrow().has_unsaved_changes()
+    }
+
+    pub fn mark_saved(&self) {
+        self.model_mut().mark_saved();
     }
 
     // --- Syncing the model into the flow and the shader ---
@@ -426,7 +453,18 @@ impl Editor {
                 self.model_mut().set_selected_node_ids(nodes.iter().map(|n| n.to_string()).collect());
                 cx.notify();
             }
+            FlowEvent::GrabCancel { .. } => {
+                if let Some((copies, originals)) = self.duplicating.take() {
+                    self.edit(cx, |m| {
+                        m.delete_nodes(&copies, &[]);
+                    });
+                    self.select(originals, cx);
+                } else {
+                    self.sync(cx);
+                }
+            }
             FlowEvent::NodeDragStop { nodes, .. } => {
+                self.duplicating = None;
                 let moved: std::collections::BTreeMap<String, GraphPoint> = self
                     .flow
                     .read(cx)
@@ -679,10 +717,20 @@ impl Editor {
         self.select(ids, cx);
     }
 
+    fn grab(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<Id> = self.selected().into_iter().map(Id::from).collect();
+        self.flow.update(cx, |f, cx| f.begin_grab(&ids, cx));
+    }
+
     fn duplicate(&mut self, cx: &mut Context<Self>) {
-        let ids = self.model_mut().duplicate_nodes(&self.selected());
+        let originals = self.selected();
+        let ids = self.model_mut().duplicate_nodes(&originals);
         self.after_edit(cx);
-        self.select(ids, cx);
+        self.select(ids.clone(), cx);
+        let flow_ids: Vec<Id> = ids.iter().cloned().map(Id::from).collect();
+        if self.flow.update(cx, |f, cx| f.begin_grab(&flow_ids, cx)) {
+            self.duplicating = Some((ids, originals));
+        }
     }
 
     fn group_selection(&mut self, cx: &mut Context<Self>) {
@@ -701,14 +749,14 @@ impl Editor {
         self.select(ids, cx);
     }
 
-    fn undo(&mut self, cx: &mut Context<Self>) {
+    pub fn undo(&mut self, cx: &mut Context<Self>) {
         let before = self.model.borrow().active_definition_ref();
         if self.model_mut().undo() {
             self.enter_document(cx, before);
         }
     }
 
-    fn redo(&mut self, cx: &mut Context<Self>) {
+    pub fn redo(&mut self, cx: &mut Context<Self>) {
         let before = self.model.borrow().active_definition_ref();
         if self.model_mut().redo() {
             self.enter_document(cx, before);
@@ -738,6 +786,7 @@ impl Editor {
                 self.open_add_menu(at, None, None, cx);
             }
             "d" if m.shift && !cmd && !locked => self.duplicate(cx),
+            "g" if !cmd && !m.alt && !m.shift && !locked => self.grab(cx),
             "backspace" | "delete" if !locked => {
                 if cmd {
                     self.dissolve_selection(cx);
