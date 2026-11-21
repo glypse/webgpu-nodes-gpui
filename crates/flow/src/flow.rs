@@ -2001,8 +2001,11 @@ impl Render for Flow {
             let down = |id: Id| {
                 cx.safe_listener(move |this: &mut Flow, e: &MouseDownEvent, w, cx| this.node_down(id.clone(), e, w, cx))
             };
+            // Cards are fractional at zoom; snapping each of their many lengths
+            // before layout makes their height step while the viewport animates.
             let mut wrapper = div()
                 .absolute()
+                .unsnapped_layout()
                 .left(px(at.x))
                 .top(px(at.y))
                 .block_mouse_except_scroll()

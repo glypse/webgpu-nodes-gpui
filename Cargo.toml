@@ -29,6 +29,9 @@ opt-level = 2
 [profile.dev]
 debug = "line-tables-only"
 
-# gpui-fast-apple 0.1.17 plus BGRA surface support (the published crate with one commit on top).
+# Our gpui-fast fork: BGRA surface support for gpui-fast-apple, and an opt-in
+# unsnapped layout (`Div::unsnapped_layout`, `Window::with_layout_snapping`)
+# that keeps fractional sizes exact during zoom animations.
 [patch.crates-io]
-gpui-fast-apple = { git = "https://github.com/glypse/gpui-fast", rev = "5e132f5a6a4e36f7cd0983793621aeaa5e08e84e" }
+gpui-fast = { git = "https://github.com/glypse/gpui-fast", rev = "6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b" }
+gpui-fast-apple = { git = "https://github.com/glypse/gpui-fast", rev = "6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b" }

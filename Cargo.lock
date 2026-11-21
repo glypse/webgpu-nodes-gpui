@@ -2418,8 +2418,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4481f1c7729d23de02a516384278293a4f95a3bdd4b735fc474076675fed9634"
+source = "git+https://github.com/glypse/gpui-fast?rev=6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b#6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2489,7 +2488,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.17"
-source = "git+https://github.com/glypse/gpui-fast?rev=5e132f5a6a4e36f7cd0983793621aeaa5e08e84e#5e132f5a6a4e36f7cd0983793621aeaa5e08e84e"
+source = "git+https://github.com/glypse/gpui-fast?rev=6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b#6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b"
 dependencies = [
  "anyhow",
  "async-task",

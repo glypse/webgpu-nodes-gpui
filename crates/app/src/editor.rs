@@ -1669,6 +1669,53 @@ mod tests {
         }
     }
 
+    /// The Remap node of the voronoi scene is a tall card of text rows and
+    /// number fields. Stepping the zoom finely, its height must follow a
+    /// straight line to within a device pixel: snapping each length and line
+    /// height before layout makes it plateau and jump by several.
+    #[gpui::test]
+    fn a_tall_card_grows_smoothly_through_a_fine_zoom_sweep(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scenes/voronoi.wgnodes");
+        let loaded = crate::project::read(&path).expect("the scene loads");
+        let (editor, cx) = cx.add_window_view(Editor::new);
+        editor.update(cx, |e, cx| e.load_project(Some(loaded.project), None, cx));
+        let remap = editor.read_with(cx, |e, _| {
+            e.model()
+                .active_document()
+                .nodes
+                .iter()
+                .find(|n| n.definition_ref().is_some_and(|r| r.starts_with("std-remap")))
+                .map(|n| n.id.to_string())
+                .expect("the scene has a Remap node")
+        });
+        let selector: &'static str = Box::leak(format!("node-card {remap}").into_boxed_str());
+        for scale in [1.0, 2.0] {
+            cx.simulate_scale_factor_change(scale);
+            let heights: Vec<(f32, f32)> = (0..=500)
+                .map(|step| {
+                    let zoom = 1.0 + step as f32 * 0.0004;
+                    editor.update(cx, |e, cx| {
+                        e.flow.update(cx, |f, cx| f.set_viewport(Viewport { x: 0.0, y: 0.0, zoom }, None, cx));
+                    });
+                    render_frame(cx);
+                    let bounds = cx.debug_bounds(selector).expect("the card is drawn");
+                    (zoom, f32::from(bounds.size.height))
+                })
+                .collect();
+            let n = heights.len() as f32;
+            let mean_zoom = heights.iter().map(|h| h.0).sum::<f32>() / n;
+            let mean_height = heights.iter().map(|h| h.1).sum::<f32>() / n;
+            let slope = heights.iter().map(|h| (h.0 - mean_zoom) * (h.1 - mean_height)).sum::<f32>()
+                / heights.iter().map(|h| (h.0 - mean_zoom).powi(2)).sum::<f32>();
+            for (zoom, height) in &heights {
+                let line = mean_height + slope * (zoom - mean_zoom);
+                let off = (height - line).abs() * scale;
+                assert!(off <= 1.05, "scale {scale}, zoom {zoom}: card is {off} device pixels off a straight line");
+            }
+        }
+    }
+
     fn render_frame(cx: &mut gpui::VisualTestContext) {
         cx.run_until_parked();
         cx.update(|window, _| window.refresh());
