@@ -14,6 +14,7 @@ pub mod lookup;
 pub mod model;
 mod node;
 mod panels;
+mod stroke;
 mod theme;
 
 pub use background::{BackgroundOptions, BackgroundVariant};
@@ -21,11 +22,11 @@ pub use edge_path::{EdgePath, PathParams, Position, Segment, StepOptions};
 pub use flow::{
     ConnectionLineStyle, ConnectionValidator,
     FitViewOptions, Flow, FlowEvent, FlowOptions, Layer, LayerContext, Layers, Portal,
-    PortalRender, SelectionMode,
+    PortalRender, SelectionMode, StrokeKind,
 };
 pub use geometry::{Extent, Rect, Viewport, Xy};
 pub use model::{
-    Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeColor, EdgeKind,
+    Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeColor, EdgeKind, EdgeTag,
     EdgeLabel, EdgeStyle, HandleType, Id, Node, NodeChange, NodeKind, add_edge,
     apply_edge_changes, apply_node_changes, connected_edges, edge_id, incomers, outgoers,
     reconnect_edge,

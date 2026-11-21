@@ -93,6 +93,8 @@ pub struct FlowOptions {
     pub select_nodes_on_drag: bool,
     /// Backspace and Delete emit `FlowEvent::Delete`.
     pub delete_key: bool,
+    /// Right-dragging with Alt or Ctrl/Cmd draws a line, reported as `FlowEvent::Stroke` on release.
+    pub strokes: bool,
     pub fit_view_on_init: bool,
     pub fit_view_options: FitViewOptions,
     pub elevate_nodes_on_select: bool,
@@ -139,6 +141,7 @@ impl Default for FlowOptions {
             node_drag_threshold: 1.0,
             select_nodes_on_drag: true,
             delete_key: true,
+            strokes: false,
             fit_view_on_init: false,
             fit_view_options: FitViewOptions::default(),
             elevate_nodes_on_select: true,
@@ -186,6 +189,8 @@ pub enum FlowEvent {
     GrabCancel { nodes: Vec<Id> },
     /// Delete was pressed with these selected, edges touching the nodes included.
     Delete { nodes: Vec<Id>, edges: Vec<Id> },
+    /// A stroke ended: the links it crossed and where it first crossed each.
+    Stroke { kind: StrokeKind, crossings: Vec<(Id, Xy)> },
     Move(Viewport),
     MoveEnd(Viewport),
     /// Every node has been measured for the first time.
@@ -228,8 +233,18 @@ struct DragItem {
     start: Xy,
 }
 
+/// What a stroke over the links is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrokeKind {
+    /// Alt: routes the links crossed through reroutes.
+    Reroute,
+    /// Ctrl or Cmd: deletes the links crossed.
+    Cut,
+}
+
 enum Drag {
     None,
+    Stroke { kind: StrokeKind, points: Vec<Xy> },
     Pan { last: Xy, moved: bool, press: Xy },
     Select { start: Xy, current: Xy },
     Nodes(NodeDrag),
@@ -781,7 +796,13 @@ impl Flow {
                 continue;
             };
             let path = edge_geometry(edge.kind, &ends);
-            let flat = flatten(&path.segments, 24);
+            let flat = match &edge.tag {
+                Some(tag) => {
+                    let y = ends.target.y + tag.offset;
+                    vec![Xy::new(ends.target.x - TAG_STUB, y), Xy::new(ends.target.x - 4.0, y), ends.target]
+                }
+                None => flatten(&path.segments, 24),
+            };
             geoms.push(EdgeGeom { id: edge.id.clone(), index, ends, path, flat });
         }
         let elevate = self.options.elevate_edges_on_select;
@@ -1100,6 +1121,35 @@ impl Flow {
         }
     }
 
+    /// Starts a stroke on a right press with Alt or Ctrl/Cmd held.
+    fn start_stroke(&mut self, event: &MouseDownEvent, flow: Xy, cx: &mut Context<Self>) -> bool {
+        if !self.options.strokes || event.button != MouseButton::Right {
+            return false;
+        }
+        let m = event.modifiers;
+        let kind = if m.alt {
+            StrokeKind::Reroute
+        } else if m.control || m.platform {
+            StrokeKind::Cut
+        } else {
+            return false;
+        };
+        self.drag = Drag::Stroke { kind, points: vec![flow] };
+        cx.notify();
+        true
+    }
+
+    fn finish_stroke(&mut self, kind: StrokeKind, points: &[Xy], cx: &mut Context<Self>) {
+        let crossings: Vec<(Id, Xy)> = self
+            .edge_geoms
+            .iter()
+            .filter_map(|g| Some((g.id.clone(), crate::stroke::first_crossing(points, &g.flat)?)))
+            .collect();
+        if !crossings.is_empty() {
+            cx.emit(FlowEvent::Stroke { kind, crossings });
+        }
+    }
+
     fn node_down(&mut self, id: Id, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
         if self.grab_press(event.button, cx) {
@@ -1111,6 +1161,9 @@ impl Flow {
             return;
         }
         let flow = self.viewport.to_flow(local);
+        if self.start_stroke(event, flow, cx) {
+            return;
+        }
         let Some(node) = self.nodes.iter().find(|n| n.id == id).cloned() else {
             return;
         };
@@ -1187,6 +1240,9 @@ impl Flow {
         self.cancel_click_connection(cx);
         let local = self.local(event.position);
         let flow = self.viewport.to_flow(local);
+        if self.start_stroke(event, flow, cx) {
+            return;
+        }
         match event.button {
             MouseButton::Right => {
                 if let Some(index) = self.edge_at(flow) {
@@ -1293,6 +1349,7 @@ impl Flow {
                 *current = local;
                 self.update_box_selection(cx);
             }
+            Drag::Stroke { points, .. } => points.push(self.viewport.to_flow(local)),
             Drag::Nodes(d) => {
                 d.pointer = local;
                 d.modifiers = event.modifiers;
@@ -1349,6 +1406,7 @@ impl Flow {
             }
             Drag::Nodes(d) | Drag::Grab(d) => self.finish_node_drag(d, cx),
             Drag::Connect => self.finish_connection(local, cx),
+            Drag::Stroke { kind, points } => self.finish_stroke(kind, &points, cx),
             Drag::MiniMap { .. } => cx.emit(FlowEvent::MoveEnd(self.viewport)),
         }
         cx.notify();
@@ -1580,12 +1638,64 @@ fn edge_geometry(kind: EdgeKind, ends: &EdgeEnds) -> EdgePath {
     }
 }
 
+/// Length of the dashed stubs of a link drawn as a tag, in flow units.
+const TAG_STUB: f32 = 14.0;
+
 struct PaintEdge {
     segments: Vec<crate::edge_path::Segment>,
     style: EdgeStyle,
     selected: bool,
     hovered: bool,
     arrow: Option<(Xy, f32, gpui::Hsla)>,
+}
+
+/// The pieces a tagged link is drawn as.
+fn tag_paint_edges(g: &EdgeGeom, tag: &crate::model::EdgeTag, hovered: bool) -> Vec<PaintEdge> {
+    use crate::edge_path::Segment;
+    let stub = |segments: Vec<Segment>, color: gpui::Hsla, dash: (f32, f32), opacity: f32| PaintEdge {
+        segments,
+        style: EdgeStyle::solid(color).width(1.0).dash(dash.0, dash.1).opacity(opacity, opacity),
+        selected: false,
+        hovered: false,
+        arrow: None,
+    };
+    let (source, target) = (g.ends.source, g.ends.target);
+    let y = target.y + tag.offset;
+    let mut pieces = Vec::new();
+    if tag.revealed || hovered {
+        pieces.push(stub(g.path.segments.clone(), tag.source_color, (4.0, 4.0), 0.5));
+    }
+    pieces.push(stub(vec![Segment::Move(source), Segment::Line(Xy::new(source.x + TAG_STUB, source.y))], tag.source_color, (3.0, 2.0), 1.0));
+    pieces.push(stub(
+        vec![
+            Segment::Move(Xy::new(target.x - TAG_STUB, y)),
+            Segment::Line(Xy::new(target.x - 4.0, y)),
+            Segment::Line(target),
+        ],
+        tag.target_color,
+        (3.0, 2.0),
+        1.0,
+    ));
+    pieces
+}
+
+/// Text ending at `at` (flow units), vertically centred on it.
+fn paint_tag(window: &mut Window, cx: &mut App, origin: Point<Pixels>, vp: &Viewport, at: Xy, text: &str, color: gpui::Hsla) {
+    let size = px(11.0 * vp.zoom);
+    let style = window.text_style();
+    let run = gpui::TextRun {
+        len: text.len(),
+        font: style.font(),
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window.text_system().shape_line(text.to_owned().into(), size, &[run], None);
+    let s = vp.to_screen(at);
+    let height = size * 1.3;
+    let position = point(origin.x + px(s.x) - line.width, origin.y + px(s.y) - height / 2.0);
+    line.paint(position, height, window, cx).ok();
 }
 
 fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &PaintEdge, hover: gpui::Hsla) {
@@ -1700,8 +1810,11 @@ impl Render for Flow {
             .edge_geoms
             .iter()
             .filter(|g| reconnecting.as_ref() != Some(&g.id))
-            .map(|g| {
+            .flat_map(|g| {
                 let e = &self.edges[g.index];
+                if let Some(tag) = &e.tag {
+                    return tag_paint_edges(g, tag, e.selected || self.hovered_edge.as_ref() == Some(&e.id));
+                }
                 let style = e
                     .style
                     .or(default_style)
@@ -1720,13 +1833,21 @@ impl Render for Flow {
                     };
                     (g.path.label, angle, color)
                 });
-                PaintEdge {
+                vec![PaintEdge {
                     segments: g.path.segments.clone(),
                     style,
                     selected: e.selected,
                     hovered: self.hovered_edge.as_ref() == Some(&e.id),
                     arrow,
-                }
+                }]
+            })
+            .collect();
+        let tags: Vec<(Xy, String, gpui::Hsla)> = self
+            .edge_geoms
+            .iter()
+            .filter_map(|g| {
+                let tag = self.edges[g.index].tag.as_ref()?;
+                Some((Xy::new(g.ends.target.x - TAG_STUB - 3.0, g.ends.target.y + tag.offset), tag.text.clone(), theme.edge_selected))
             })
             .collect();
         let bounds_cell = self.bounds.clone();
@@ -1748,6 +1869,9 @@ impl Render for Flow {
                     }
                     for e in &paint_edges {
                         paint_edge(window, b.origin, &vp, e, theme.edge_hover);
+                    }
+                    for (at, text, color) in &tags {
+                        paint_tag(window, cx, b.origin, &vp, *at, text, *color);
                     }
                 });
             }); },
@@ -1945,6 +2069,10 @@ impl Render for Flow {
             Drag::Select { start, current } => Some(Rect::from_corners(*start, *current)),
             _ => None,
         };
+        let stroke = match &self.drag {
+            Drag::Stroke { kind, points } => Some((*kind, points.clone())),
+            _ => None,
+        };
         let selected_bounds = {
             let rects: Vec<Rect> = self
                 .nodes
@@ -1984,6 +2112,21 @@ impl Render for Flow {
                     }
                     if let Some(c) = &connection_line {
                         paint_edge(window, b.origin, &vp, c, theme.edge_hover);
+                    }
+                    if let Some((kind, points)) = &stroke {
+                        let mut path = gpui::PathBuilder::stroke(px(2.0));
+                        if *kind == StrokeKind::Cut {
+                            path = path.dash_array(&[px(6.0), px(4.0)]);
+                        }
+                        for (i, p) in points.iter().enumerate() {
+                            let s = vp.to_screen(*p);
+                            let at = point(b.origin.x + px(s.x), b.origin.y + px(s.y));
+                            if i == 0 { path.move_to(at) } else { path.line_to(at) }
+                        }
+                        if let Ok(path) = path.build() {
+                            let color = if *kind == StrokeKind::Cut { theme.connection_invalid } else { theme.connection_line };
+                            window.paint_path(path, color);
+                        }
                     }
                     if let Some(r) = marquee {
                         let o = point(b.origin.x + px(r.x), b.origin.y + px(r.y));

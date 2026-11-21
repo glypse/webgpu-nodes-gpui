@@ -218,6 +218,21 @@ pub struct Edge {
     pub arrow: Option<Hsla>,
     /// Width of the invisible band that takes clicks.
     pub interaction_width: f32,
+    /// Drawn as dashed stubs at both ends, the target's carrying a name.
+    pub tag: Option<EdgeTag>,
+}
+
+/// How a link with its middle left out is drawn: a stub out of the source,
+/// and one into the target with `text` at its start.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeTag {
+    pub text: String,
+    pub source_color: Hsla,
+    pub target_color: Hsla,
+    /// Moves the target stub vertically, to fan out the stubs of links into one handle.
+    pub offset: f32,
+    /// The whole link is drawn too, faintly.
+    pub revealed: bool,
 }
 
 impl Edge {
@@ -245,6 +260,7 @@ impl Edge {
             label: None,
             arrow: None,
             interaction_width: 20.0,
+            tag: None,
         }
     }
 
