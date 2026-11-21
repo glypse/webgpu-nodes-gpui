@@ -256,6 +256,13 @@ impl CurveEditor {
         self
     }
 
+    pub fn set_side(&mut self, side: Pixels, cx: &mut Context<Self>) {
+        if self.side != side {
+            self.side = side;
+            cx.notify();
+        }
+    }
+
     pub fn points(&self) -> &[CurvePoint] {
         &self.points
     }

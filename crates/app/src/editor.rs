@@ -2,7 +2,7 @@ use guard::SafeListener as _;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
@@ -32,10 +32,14 @@ use crate::graph::fields::Edit;
 use crate::graph::type_picker::{self, TypePicker};
 use crate::graph::frames::{self, Drag, FrameLook, SharedDrag, Snapshot, SnapshotItem, ZoneBox};
 use crate::graph::node::{node_width, render_node, view_of};
+use crate::graph::popovers::{self, ColorPopup, SocketsPopup};
+use crate::graph::widgets::{self, Widgets};
 use crate::graph::sheet;
 use crate::graph::socket::socket_color;
 use crate::graph::zones::{self, Bubble};
 use crate::layout::GraphView;
+
+mod widget_edits;
 
 /// What the shell needs from the editor.
 #[derive(Clone, Debug)]
@@ -134,7 +138,25 @@ pub struct Editor {
     placed: HashMap<String, GraphPoint>,
     frame_settle: Option<gpui::Task<()>>,
     settings: ProjectSettings,
+    widgets: Widgets,
+    /// The widget edit last made, to fold a drag's steps into one undo step.
+    widget_gesture: Option<(String, Instant)>,
+    code_serial: u64,
+    code_task: Option<gpui::Task<()>>,
+    pub(crate) sockets: Option<SocketsPopup>,
+    pub(crate) color_popup: Option<ColorPopup>,
 }
+
+/// Vertical distance between the tags of hidden links reaching one input.
+const TAG_STEP: f32 = 12.0;
+
+/// A reroute's side, in flow units.
+const REROUTE_SIZE: f32 = 18.0;
+
+/// Steps of a widget edit closer than this belong to one gesture.
+const GESTURE_GAP: Duration = Duration::from_millis(400);
+/// Typing in a code editor compiles the shader only once it pauses.
+const CODE_COMMIT_DELAY: Duration = Duration::from_millis(400);
 
 impl EventEmitter<EditorEvent> for Editor {}
 
@@ -215,6 +237,12 @@ impl Editor {
             placed: HashMap::new(),
             frame_settle: None,
             settings: ProjectSettings::default(),
+            widgets: Widgets::default(),
+            widget_gesture: None,
+            code_serial: 0,
+            code_task: None,
+            sockets: None,
+            color_popup: None,
         };
         editor.sync(cx);
         editor.regenerate(cx);
@@ -318,30 +346,39 @@ impl Editor {
         let theme = cx.theme().clone();
         let doc = model.active_document();
         let selected = model.selected_node_ids();
-        let nodes: Vec<Node> = doc
-            .nodes
-            .iter()
-            .map(|n| {
-                let view = Rc::new(view_of(&model, n));
-                let ed = editor.clone();
-                let mut node = Node::new(n.id.clone(), flow_point(n.position))
-                    .width(node_width(&n.node_type))
-                    .render(move |props, window, cx| render_node(&view, props, &ed, window, cx));
-                node.width = None;
-                node.selected = selected.contains(&n.id);
-                node.deletable = Some(n.deletable());
-                node
-            })
-            .collect();
+        let strokes = !model.is_locked();
+        let gamut = widgets::gamut_of(model.settings().color_space);
+        self.widgets.retain(&doc.nodes.iter().map(|n| n.id.clone()).collect());
+        let mut nodes: Vec<Node> = Vec::new();
+        for n in &doc.nodes {
+            let mut view = view_of(&model, n);
+            view.attach_widgets(&mut self.widgets, &model, n, gamut, cx);
+            let view = Rc::new(view);
+            let ed = editor.clone();
+            let mut node = Node::new(n.id.clone(), flow_point(n.position))
+                .width(node_width(&n.node_type))
+                .render(move |props, window, cx| render_node(&view, props, &ed, window, cx));
+            node.width = None;
+            node.selected = selected.contains(&n.id);
+            node.deletable = Some(n.deletable());
+            nodes.push(node);
+        }
 
         let zones = model.active_zones();
         let unavailable = model.unavailable_links(&model.active_definition_ref());
+        let analysis = model.pass_analysis();
+        let path = model.path().to_vec();
+        let reveals = |id: &str| selected.iter().any(|s| s == id);
+        let hides_links = |id: &str| {
+            doc.node(id).is_some_and(|n| n.is(REROUTE) && n.data.hide_links == Some(true) && n.data.label.is_some())
+        };
         let edges: Vec<Edge> = doc
             .edges
             .iter()
             .map(|e| {
-                let source = socket_color(model.resolve_output_handle_type(&e.source, &e.source_handle), &theme);
-                let target = socket_color(model.resolve_input_type(&e.target, &e.target_handle), &theme);
+                let source_ty = model.resolve_output_handle_type(&e.source, &e.source_handle);
+                let target_ty = model.resolve_input_type(&e.target, &e.target_handle);
+                let (source, target) = (socket_color(source_ty, &theme), socket_color(target_ty, &theme));
                 let mut edge = Edge::new(
                     e.id.clone(),
                     e.source.clone(),
@@ -350,11 +387,40 @@ impl Editor {
                     Some(e.target_handle.clone().into()),
                 );
                 edge.hidden = unavailable.contains(&e.id);
-                edge.style = Some(if zones.invalid_edges.contains(&e.id) {
+                let link = analysis.link(&path, e);
+                let invalid = zones.invalid_edges.contains(&e.id)
+                    || matches!(link, Some(shader_graph::passes::TextureLink::Invalid { .. }));
+                let texture = source_ty.is_texture()
+                    || matches!(link, Some(shader_graph::passes::TextureLink::Render { .. }));
+                if hides_links(&e.source) {
+                    let siblings: Vec<&shader_graph::graph::GraphEdge> = doc
+                        .edges_into(&e.target)
+                        .filter(|o| o.target_handle == e.target_handle && hides_links(&o.source))
+                        .collect();
+                    let index = siblings.iter().position(|o| o.id == e.id).unwrap_or(0);
+                    edge.tag = Some(gpui_flow::EdgeTag {
+                        text: model.node_label(&e.source),
+                        source_color: source,
+                        target_color: if invalid { theme.colors.destructive } else { target },
+                        offset: (index as f32 - (siblings.len() as f32 - 1.0) / 2.0) * TAG_STEP,
+                        revealed: reveals(&e.source) || reveals(&e.target),
+                    });
+                    return edge;
+                }
+                edge.style = Some(if invalid {
                     EdgeStyle::solid(theme.colors.destructive).width(1.5).dash(6.0, 4.0).opacity(0.8, 1.0)
                 } else {
-                    EdgeStyle::gradient(source, target).opacity(0.6, 1.0)
+                    EdgeStyle::gradient(source, target).width(if texture { 2.5 } else { 1.0 }).opacity(0.6, 1.0)
                 });
+                match link {
+                    Some(shader_graph::passes::TextureLink::Sample) if !invalid => {
+                        edge.label = Some(conversion_label("sample", &theme));
+                    }
+                    Some(shader_graph::passes::TextureLink::Render { .. }) if !invalid => {
+                        edge.label = Some(conversion_label("pass", &theme));
+                    }
+                    _ => {}
+                }
                 edge
             })
             .collect();
@@ -419,6 +485,7 @@ impl Editor {
             portals: Vec::new(),
         };
         self.flow.update(cx, |flow, cx| {
+            flow.options.strokes = strokes;
             flow.set_nodes(nodes, cx);
             flow.set_edges(edges, cx);
             flow.set_layers(layers, cx);
@@ -833,6 +900,24 @@ impl Editor {
             FlowEvent::Move(vp) => {
                 let key = self.model.borrow().active_definition_ref();
                 self.viewports.insert(key, vp);
+            }
+            FlowEvent::Stroke { kind, crossings } => {
+                let ids: Vec<String> = crossings.iter().map(|(id, _)| id.to_string()).collect();
+                match kind {
+                    gpui_flow::StrokeKind::Cut => self.edit(cx, |m| {
+                        m.delete_edges(&ids);
+                    }),
+                    gpui_flow::StrokeKind::Reroute => {
+                        // Reroutes are placed by their top left corner.
+                        let cuts: Vec<(String, GraphPoint)> = crossings
+                            .iter()
+                            .map(|(id, at)| (id.to_string(), GraphPoint::new(at.x - REROUTE_SIZE / 2.0, at.y - REROUTE_SIZE / 2.0)))
+                            .collect();
+                        self.edit(cx, |m| {
+                            m.reroute_edges(&cuts);
+                        });
+                    }
+                }
             }
             FlowEvent::NodeDoubleClick { id } => {
                 let is_group = self.model.borrow().node(&id).is_some_and(|n| n.definition_ref().is_some());
@@ -1335,6 +1420,15 @@ impl Editor {
     }
 }
 
+fn conversion_label(text: &'static str, theme: &theme::Theme) -> gpui_flow::EdgeLabel {
+    gpui_flow::EdgeLabel {
+        text: text.into(),
+        color: theme.colors.muted_foreground,
+        background: theme.colors.card,
+        border: Some(socket_color(WgslType::Texture, theme)),
+    }
+}
+
 fn to_model(c: &FlowConnection) -> Connection {
     Connection::new(
         c.source.to_string(),
@@ -1368,6 +1462,8 @@ impl Render for Editor {
             .children(sheet)
             .children(self.add_menu.clone())
             .children(self.render_popup(cx))
+            .children(popovers::render_color(self, cx))
+            .children(popovers::render_sockets(self, window, cx))
     })
     }
 }
@@ -1531,6 +1627,79 @@ mod tests {
         scene.editor.update(cx, |e, cx| e.paste(Some(Xy::new(50.0, 50.0)), cx));
         let count = scene.editor.read_with(cx, |e, _| e.model().root().nodes.iter().filter(|n| n.is("sin")).count());
         assert_eq!(count, 2);
+    }
+
+    fn add_node(scene: &Scene, cx: &mut gpui::VisualTestContext, node_type: &str, y: f32) -> String {
+        let id = scene.editor.update(cx, |e, cx| {
+            let id = e.model_mut().add_node(node_type, GraphPoint::new(400.0, y)).expect("adds");
+            e.after_edit(cx);
+            id
+        });
+        render_frame(cx);
+        id
+    }
+
+    #[gpui::test]
+    fn widgets_draw_on_their_nodes(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        for (i, ty) in ["curve", "color-ramp", "render-texture", "index-switch", "custom-wgsl"].into_iter().enumerate() {
+            add_node(&scene, cx, ty, 300.0 * i as f32);
+        }
+        render_frame(cx);
+    }
+
+    #[gpui::test]
+    fn a_curve_drag_is_one_undo_step(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let id = add_node(&scene, cx, "curve", 300.0);
+        let linear = shader_graph::curve::linear_curve();
+        scene.editor.update(cx, |e, cx| {
+            for y in [0.2, 0.4, 0.6] {
+                let points = shader_graph::curve::move_curve_point(&linear, 1, 1.0, y);
+                e.set_curve(&id, points, cx);
+            }
+        });
+        let moved = |cx: &mut gpui::VisualTestContext| {
+            scene.editor.read_with(cx, |e, _| e.model().node(&id).and_then(|n| n.data.curve.clone()))
+        };
+        assert_eq!(moved(cx).map(|c| c[1].y), Some(0.6));
+        scene.editor.update(cx, |e, cx| e.undo(cx));
+        assert_ne!(moved(cx).map(|c| c[1].y), Some(0.2));
+        assert_ne!(moved(cx).map(|c| c[1].y), Some(0.4));
+    }
+
+    #[gpui::test]
+    fn cases_and_items_edit_their_nodes(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let switch = add_node(&scene, cx, "index-switch", 300.0);
+        let render = add_node(&scene, cx, "render-texture", 600.0);
+        let before = scene.editor.read_with(cx, |e, _| {
+            let model = e.model();
+            (shader_graph::nodes::index_switch_cases(&model.node(&switch).expect("node").data), model.render_items_of(&render).len())
+        });
+        scene.editor.update(cx, |e, cx| {
+            e.set_cases(&switch, i64::from(before.0) + 1, cx);
+            e.add_render_item(&render, cx);
+        });
+        let after = scene.editor.read_with(cx, |e, _| {
+            let model = e.model();
+            (shader_graph::nodes::index_switch_cases(&model.node(&switch).expect("node").data), model.render_items_of(&render).len())
+        });
+        assert_eq!((after.0, after.1), (before.0 + 1, before.1 + 1));
+        render_frame(cx);
+    }
+
+    #[gpui::test]
+    fn a_cut_stroke_deletes_the_links_it_crosses(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let edge = scene.editor.read_with(cx, |e, _| e.model().root().edges.first().map(|x| x.id.clone())).expect("the demo has a link");
+        scene.editor.update(cx, |e, cx| {
+            e.on_flow_event(
+                FlowEvent::Stroke { kind: gpui_flow::StrokeKind::Cut, crossings: vec![(edge.into(), Xy::new(0.0, 0.0))] },
+                cx,
+            )
+        });
+        assert!(scene.editor.read_with(cx, |e, _| e.model().root().edges.is_empty()));
     }
 
     #[gpui::test]

@@ -154,6 +154,13 @@ impl ColorWheels {
         self
     }
 
+    pub fn set_size(&mut self, size: Pixels, cx: &mut Context<Self>) {
+        if self.size != size {
+            self.size = size;
+            cx.notify();
+        }
+    }
+
     pub fn gamut(mut self, gamut: ColorSpace) -> Self {
         self.gamut = gamut;
         self

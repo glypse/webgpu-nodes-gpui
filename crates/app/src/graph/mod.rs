@@ -1,9 +1,12 @@
 pub mod add_menu;
 pub mod fields;
 pub mod frames;
+pub mod item_widgets;
 pub mod node;
+pub mod popovers;
 pub mod sheet;
 pub mod socket;
 pub mod type_picker;
 pub mod type_set_picker;
+pub mod widgets;
 pub mod zones;

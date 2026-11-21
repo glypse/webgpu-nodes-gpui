@@ -32,10 +32,10 @@ pub struct Fields {
 }
 
 type NumberCommit = Rc<dyn Fn(&mut Editor, f64, &mut Context<Editor>)>;
-type Commit = Rc<dyn Fn(&mut Editor, String, &mut Context<Editor>)>;
+pub(super) type Commit = Rc<dyn Fn(&mut Editor, String, &mut Context<Editor>)>;
 
 /// A text field kept across frames under `key`, showing `value` unless it's being edited.
-fn field(
+pub(super) fn field(
     editor: &mut Editor,
     key: String,
     value: &str,
@@ -157,17 +157,17 @@ fn outline_button(
         .child(label.into())
 }
 
-fn heading(text: &str, cx: &Context<Editor>) -> gpui::Div {
+pub(super) fn heading(text: &str, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
     div().text_size(theme.text.sm).font_weight(gpui::FontWeight::MEDIUM).child(text.to_owned())
 }
 
-fn hint(text: &str, cx: &Context<Editor>) -> gpui::Div {
+pub(super) fn hint(text: &str, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
     div().text_size(theme.text.xs).text_color(theme.colors.muted_foreground).child(text.to_owned())
 }
 
-fn boxed(input: Entity<TextInput>, cx: &Context<Editor>) -> gpui::Div {
+pub(super) fn boxed(input: Entity<TextInput>, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
     div().px_1().border_1().border_color(theme.colors.input).rounded(theme.radius.md).child(input)
 }

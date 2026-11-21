@@ -364,41 +364,6 @@ impl RenderOnce for Scrub {
     }
 }
 
-/// An on/off box.
-pub fn check(
-    id: impl Into<ElementId>,
-    on: bool,
-    zoom: f32,
-    readonly: bool,
-    cx: &App,
-    on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
-    let colors = &cx.theme().colors;
-    let (fg, primary) = (colors.foreground, colors.primary);
-    div()
-        .id(id.into())
-        .flex_1()
-        .h(px(22.0 * zoom))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.0 * zoom))
-        .text_size(px(12.0 * zoom))
-        .bg(if on { primary } else { fg.opacity(0.05) })
-        .text_color(if on { colors.primary_foreground } else { fg })
-        .when(!readonly, |d| {
-            d.cursor_pointer().hover(move |s| s.opacity(0.85))
-        })
-        .when(readonly, |d| d.opacity(0.5))
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            cx.stop_propagation();
-            if !readonly {
-                on_toggle(!on, window, cx);
-            }
-        })
-        .child(if on { "true" } else { "false" })
-}
-
 /// A flat button that opens a list: a type picker, an enum.
 pub fn picker(
     id: impl Into<ElementId>,

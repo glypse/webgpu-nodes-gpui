@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
+    AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
     prelude::FluentBuilder as _, px,
 };
@@ -17,12 +17,14 @@ use shader_graph::types::{
     input_control,
 };
 use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
-use theme::ActiveTheme as _;
+use shader_graph::color::{ColorSpace as DisplayGamut, Rgb};
+use theme::{ActiveTheme as _, ColorWheels, linear_to_hsla};
 
-use super::fields::{Edit, Scrub, check, picker};
+use super::fields::{Edit, Scrub, picker};
 use super::frames::{self, FrameView};
 use super::socket::{SocketSpec, socket};
 use super::type_picker::TypePicker;
+use super::widgets::{self, WidgetView, Widgets};
 use crate::editor::{Editor, ListItem};
 
 #[derive(Clone)]
@@ -80,6 +82,35 @@ pub struct NodeView {
     pub elsewhere: HashSet<String>,
     /// A zone node whose partner is gone.
     pub zone_missing: bool,
+    pub widget: Option<WidgetView>,
+    /// The wheels of the colour inputs drawn as wheels, by input id.
+    pub wheels: HashMap<String, Entity<ColorWheels>>,
+    pub gamut: DisplayGamut,
+}
+
+impl NodeView {
+    /// Adds what needs entities kept between renders: the node's widget and its wheels.
+    pub fn attach_widgets(
+        &mut self,
+        widgets: &mut Widgets,
+        model: &GraphModel,
+        node: &GraphNode,
+        gamut: DisplayGamut,
+        cx: &mut Context<Editor>,
+    ) {
+        self.gamut = gamut;
+        self.widget = widgets.view(model, node, self.locked, gamut, cx);
+        let linked: HashSet<String> =
+            model.active_document().edges_into(&node.id).map(|e| e.target_handle.clone()).collect();
+        for input in &self.inputs {
+            if matches!(input.control, Some(InputControl::Wheel)) && !input.variadic && !linked.contains(&input.id) {
+                let component = |i| input.value.as_ref().map_or(0.0, |v| v.component(i));
+                let rgb = [component(0), component(1), component(2)];
+                let wheel = widgets.input_wheel(&self.id, &input.id, rgb, self.locked, gamut, cx);
+                self.wheels.insert(input.id.clone(), wheel);
+            }
+        }
+    }
 }
 
 pub fn node_width(node_type: &str) -> f32 {
@@ -182,6 +213,9 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         },
         zone_missing: is_zone_node_type(&node.node_type)
             && !model.active_zones().zone_of_boundary.contains_key(id),
+        widget: None,
+        wheels: HashMap::new(),
+        gamut: DisplayGamut::Srgb,
         frame: node.is(LAYOUT_FRAME).then(|| FrameView {
             label: model.node_label(id),
             note: frame_note(&node.data).map(str::to_owned),
@@ -275,35 +309,39 @@ fn value_control(
             let n = ty.components();
             div()
                 .flex()
-                .gap(px(4.0 * z))
+                .items_center()
+                .gap(px(8.0 * z))
                 .children((0..n).map(|i| {
                     let on = input.value.as_ref().is_some_and(|v| v.component(i) != 0.0);
                     let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
-                    check(
-                        SharedString::from(format!("t-{node}-{handle}-{i}")),
-                        on,
-                        z,
-                        readonly,
-                        cx,
-                        move |value, _, cx| {
-                            ed.update(cx, |e, cx| {
-                                e.set_component(&node, &handle, ty, i, f64::from(u8::from(value)), Edit::Commit, cx);
-                            })
-                            .ok();
-                        },
-                    )
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0 * z))
+                        .child(
+                            theme::Checkbox::new(SharedString::from(format!("t-{node}-{handle}-{i}")))
+                                .checked(on)
+                                .disabled(readonly)
+                                .on_change(move |value, _, cx| {
+                                    ed.update(cx, |e, cx| {
+                                        e.set_component(&node, &handle, ty, i, f64::from(u8::from(value)), Edit::Commit, cx);
+                                    })
+                                    .ok();
+                                }),
+                        )
+                        .children((n > 1).then(|| label_text(["x", "y", "z", "w"][i].to_owned(), z, cx)))
                 }))
                 .into_any_element()
         }
         InputControl::Number { min, max, .. } => {
             let n = ty.components();
-            let integer = ty.kind() != ScalarKind::F32;
-            let (min, max) = (*min, *max);
-            let color = matches!(input.control, Some(InputControl::Color | InputControl::Wheel));
-            let _ = color;
+            let kind = ty.kind();
+            let integer = kind != ScalarKind::F32;
+            let min = if kind == ScalarKind::U32 { Some(min.unwrap_or(0.0).max(0.0)) } else { *min };
+            let max = *max;
             div()
                 .flex()
-                .gap(px(4.0 * z))
+                .flex_col()
                 .children((0..n).map(|i| {
                     let value = input.value.as_ref().map_or(0.0, |v| v.component(i));
                     let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
@@ -317,30 +355,52 @@ fn value_control(
                 }))
                 .into_any_element()
         }
-        InputControl::Color | InputControl::Wheel => {
-            let n = ty.components();
-            let channel = |i: usize| input.value.as_ref().map_or(0.0, |v| v.component(i)).clamp(0.0, 1.0) as f32;
-            let swatch = gpui::rgba(
-                (u32::from((channel(0) * 255.0) as u8) << 24)
-                    | (u32::from((channel(1) * 255.0) as u8) << 16)
-                    | (u32::from((channel(2) * 255.0) as u8) << 8)
-                    | 0xff,
-            );
+        InputControl::Color => {
+            let alpha = ty == WgslType::Vec4f;
+            let channel = |i: usize| input.value.as_ref().map_or(0.0, |v| v.component(i));
+            let solid = Rgb::new(channel(0), channel(1), channel(2));
+            let opaque = linear_to_hsla(solid, view.gamut);
+            let translucent = opaque.opacity(if alpha { channel(3) as f32 } else { 1.0 });
+            let ed = ed.clone();
+            div()
+                .id(SharedString::from(format!("color-{node}-{handle}")))
+                .flex()
+                .h(px(24.0 * z))
+                .w_full()
+                .overflow_hidden()
+                .rounded(px(4.0 * z))
+                .border(px(1.0))
+                .border_color(cx.theme().colors.border)
+                .when(readonly, |d| d.opacity(0.5))
+                .when(!readonly, |d| d.cursor_pointer())
+                .on_mouse_down(MouseButton::Left, move |e, _, cx| {
+                    cx.stop_propagation();
+                    if !readonly {
+                        let (node, handle, at) = (node.clone(), handle.clone(), e.position);
+                        ed.update(cx, |ed, cx| ed.open_color_picker(at, &node, &handle, ty, cx)).ok();
+                    }
+                })
+                .child(div().flex_1().bg(opaque))
+                .when(alpha, |d| d.child(div().flex_1().bg(gpui::hsla(0.0, 0.0, 0.5, 1.0)).child(div().size_full().bg(translucent))))
+                .into_any_element()
+        }
+        InputControl::Wheel => {
+            let alpha = ty == WgslType::Vec4f;
+            let a = input.value.as_ref().map_or(1.0, |v| v.component(3));
             div()
                 .flex()
                 .flex_col()
                 .gap(px(4.0 * z))
-                .child(div().h(px(14.0 * z)).rounded(px(3.0 * z)).bg(swatch).border(px(1.0)).border_color(cx.theme().colors.border))
-                .child(div().flex().gap(px(4.0 * z)).children((0..n).map(|i| {
-                    let value = input.value.as_ref().map_or(0.0, |v| v.component(i));
+                .children(view.wheels.get(&input.id).cloned())
+                .children(alpha.then(|| {
                     let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
-                    Scrub::new(SharedString::from(format!("c-{node}-{handle}-{i}")), value, z)
-                        .range(Some(0.0), Some(1.0))
+                    Scrub::new(SharedString::from(format!("a-{node}-{handle}")), a, z)
+                        .range(Some(0.0), None)
                         .readonly(readonly)
                         .on_change(move |v, edit, _, cx| {
-                            ed.update(cx, |e, cx| e.set_component(&node, &handle, ty, i, v, edit, cx)).ok();
+                            ed.update(cx, |e, cx| e.set_component(&node, &handle, ty, 3, v, edit, cx)).ok();
                         })
-                })))
+                }))
                 .into_any_element()
         }
     }
@@ -387,9 +447,13 @@ pub fn render_node(
         return frames::header(frame, props, ed, cx);
     }
     let z = props.zoom;
+    for wheel in view.wheels.values() {
+        wheel.update(cx, |w, cx| w.set_size(px(112.0 * z), cx));
+    }
     let theme = cx.theme().clone();
     let c = &theme.colors;
     let s = |v: f32| px(v * z);
+    let widget = view.widget.as_ref().map(|w| widgets::render(w, &view.id, z, view.locked, ed, cx));
     let linked_in = props.connected_handles(HandleType::Target);
     let linked_out = props.connected_handles(HandleType::Source);
     let is_linked = |set: &HashSet<Option<gpui_flow::Id>>, id: &str| set.contains(&Some(id.to_owned().into()));
@@ -714,6 +778,7 @@ pub fn render_node(
                 .gap(s(4.0))
                 .p(s(PAD))
                 .children(outputs)
+                .children(widget)
                 .children(add_top.map(|b| div().flex().child(b)))
                 .when(view.zone && add_zone && !view.outputs.is_empty(), |d| d.child(virtual_row(HandleType::Source)))
                 .children(hidden_handles)

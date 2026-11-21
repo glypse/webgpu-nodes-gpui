@@ -8,6 +8,9 @@ use theme::Theme;
 
 /// Colour follows the component count, as the original's `--color-*`.
 pub fn socket_color(ty: WgslType, theme: &Theme) -> Hsla {
+    if ty.is_texture() {
+        return hsla(199.0 / 360.0, 0.89, 0.48, 1.0);
+    }
     match ty.components() {
         2 => hsla(142.0 / 360.0, 0.71, 0.45, 1.0),
         3 => hsla(258.0 / 360.0, 0.90, 0.66, 1.0),
@@ -18,6 +21,9 @@ pub fn socket_color(ty: WgslType, theme: &Theme) -> Hsla {
 
 /// Size in flow units: diamonds and triangles need room to read.
 pub fn socket_size(ty: WgslType) -> f32 {
+    if ty.is_texture() {
+        return 11.0;
+    }
     match ty.kind() {
         ScalarKind::F32 | ScalarKind::I32 => 8.0,
         ScalarKind::U32 => 11.0,
@@ -39,6 +45,7 @@ pub fn paint_socket(
     window: &mut Window,
     bounds: Bounds<Pixels>,
     kind: ScalarKind,
+    texture: bool,
     fill: Hsla,
     outline: Hsla,
     unit: f32,
@@ -47,6 +54,17 @@ pub fn paint_socket(
     let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
     let at = |px_x: f32, px_y: f32| point(px(x + px_x), px(y + px_y));
     let layer = |window: &mut Window, inset: f32, color: Hsla| match kind {
+        _ if texture => {
+            let radius = if inset == 0.0 { 3.0 } else { 2.0 };
+            window.paint_quad(gpui::quad(
+                Bounds::new(at(inset, inset), gpui::size(px(w - 2.0 * inset), px(h - 2.0 * inset))),
+                px(radius),
+                color,
+                px(0.0),
+                gpui::transparent_black(),
+                gpui::BorderStyle::Solid,
+            ));
+        }
         ScalarKind::F32 | ScalarKind::I32 => {
             let radius = if kind == ScalarKind::F32 { (w / 2.0 - inset).max(0.0) } else { (1.5 * unit - inset * 0.5).max(0.0) };
             window.paint_quad(gpui::quad(
@@ -94,6 +112,7 @@ pub fn socket(props: &NodeProps, spec: &SocketSpec, theme: &Theme) -> Handle {
     let state = props.handle_state(spec.kind, spec.id.as_ref().map(|s| s.clone().into()).as_ref());
     let active = state.connecting_to && state.valid;
     let kind = spec.ty.kind();
+    let texture = spec.ty.is_texture();
     let offset = px(-(spec.inset + size / 2.0) * z);
     let half = px(-size / 2.0 * z);
     let handle = props
@@ -113,7 +132,7 @@ pub fn socket(props: &NodeProps, spec: &SocketSpec, theme: &Theme) -> Handle {
             |_, _, _| {},
             move |bounds, _, window, _| { guard::guard("socket canvas", || {
                 let color = if active { hover } else { fill };
-                paint_socket(window, bounds, kind, color, outline, z);
+                paint_socket(window, bounds, kind, texture, color, outline, z);
             }); },
         )
         .absolute()
