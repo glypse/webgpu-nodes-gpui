@@ -1,5 +1,8 @@
 use super::builders::{model_for, node, with_data};
-use crate::catalog::{AddMenuEntry, EntryKind, NAMED_REROUTES, Pending, add_entry, add_entry_connected, add_menu_entries, connectable_entries};
+use crate::catalog::{
+    AddMenuEntry, EntryKind, NAMED_REROUTES, Pending, add_entry, add_entry_connected, add_menu_entries, connectable_entries,
+    search_entries,
+};
 use crate::graph::{GraphModel, Point};
 use crate::types::NodeData;
 
@@ -25,6 +28,16 @@ fn named_reroutes_are_listed_in_the_add_menu_by_name_other_reroutes_arent() {
     let labels: Vec<&str> = links.iter().map(|e| e.label.as_str()).collect();
     assert_eq!(labels, ["Scale"]);
     assert_eq!(links[0].section, [NAMED_REROUTES]);
+}
+
+#[test]
+fn named_reroutes_are_found_by_search_under_their_aliases() {
+    let entries = add_menu_entries(&graph());
+    for query in ["scale", "get", "named reroute"] {
+        let results = search_entries(&entries, query, &|_| true);
+        let found: Vec<&str> = results.iter().map(|r| r.entry.label.as_str()).collect();
+        assert!(found.contains(&"Scale"), "{query:?} finds the named reroute, got {found:?}");
+    }
 }
 
 #[test]
