@@ -26,6 +26,7 @@ use super::socket::{SocketSpec, socket};
 use super::type_picker::TypePicker;
 use super::widgets::{self, WidgetView, Widgets};
 use crate::editor::{Editor, ListItem};
+use crate::project::AssetFiles;
 
 #[derive(Clone)]
 pub struct InputView {
@@ -85,6 +86,8 @@ pub struct NodeView {
     /// On a group node using an older standard-library version: the label of
     /// the group, whose latest version is used instead.
     pub outdated: Option<String>,
+    /// The node reads an asset whose file the project doesn't have.
+    pub missing_file: bool,
     pub widget: Option<WidgetView>,
     /// The wheels of the colour inputs drawn as wheels, by input id.
     pub wheels: HashMap<String, Entity<ColorWheels>>,
@@ -99,10 +102,12 @@ impl NodeView {
         model: &GraphModel,
         node: &GraphNode,
         gamut: DisplayGamut,
+        files: &AssetFiles,
         cx: &mut Context<Editor>,
     ) {
         self.gamut = gamut;
-        self.widget = widgets.view(model, node, self.locked, gamut, cx);
+        self.missing_file = model.missing_asset(&node.id, |a| files.contains_key(a));
+        self.widget = widgets.view(model, node, self.locked, gamut, files, cx);
         let linked: HashSet<String> =
             model.active_document().edges_into(&node.id).map(|e| e.target_handle.clone()).collect();
         for input in &self.inputs {
@@ -215,6 +220,7 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
             HashSet::new()
         },
         outdated: model.outdated_library_label(id),
+        missing_file: false,
         zone_missing: is_zone_node_type(&node.node_type)
             && !model.active_zones().zone_of_boundary.contains_key(id),
         widget: None,
@@ -228,8 +234,8 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
     }
 }
 
-/// Amber-500, the colour the original gives its outdated-version warning.
-const OUTDATED_AMBER: gpui::Hsla = gpui::Hsla { h: 38.0 / 360.0, s: 0.92, l: 0.50, a: 1.0 };
+/// Amber-500, the colour the original gives its warnings.
+const WARNING_AMBER: gpui::Hsla = gpui::Hsla { h: 38.0 / 360.0, s: 0.92, l: 0.50, a: 1.0 };
 
 const PAD: f32 = 12.0;
 
@@ -495,8 +501,23 @@ pub fn render_node(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(Icon::new(IconName::Warning).size(s(16.0)).color(OUTDATED_AMBER))
+                        .child(Icon::new(IconName::Warning).size(s(16.0)).color(WARNING_AMBER))
                         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(message.clone()).build(window, cx))
+                }))
+                .children(view.missing_file.then(|| {
+                    div()
+                        .id("missing-file")
+                        .debug_selector(|| "missing-file".into())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(Icon::new(IconName::Warning).size(s(16.0)).color(WARNING_AMBER))
+                        .tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(
+                                "Its file is missing: it reads a transparent image. Pick another one, or replace the asset's file in the Assets area.",
+                            )
+                            .build(window, cx)
+                        })
                 }))
                 .children(view.only_linked.then(|| {
                     let (ed, id, locked) = (ed.clone(), view.id.clone(), view.locked);

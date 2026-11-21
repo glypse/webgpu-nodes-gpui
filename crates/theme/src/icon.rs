@@ -53,6 +53,8 @@ icons! {
     FilmStrip => regular::FILM_STRIP, "film-strip",
     FlipHorizontal => regular::FLIP_HORIZONTAL, "flip-horizontal",
     FlipVertical => regular::FLIP_VERTICAL, "flip-vertical",
+    Image => regular::IMAGE, "image",
+    ImageBroken => regular::IMAGE_BROKEN, "image-broken",
     LockSimple => regular::LOCK_SIMPLE, "lock-simple",
     Minus => regular::MINUS, "minus",
     Moon => regular::MOON, "moon",

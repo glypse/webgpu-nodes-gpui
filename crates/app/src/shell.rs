@@ -159,6 +159,7 @@ impl Shell {
     pub fn new(requested: Option<PathBuf>, zoom: Option<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let playback = cx.new(|_| Playback::new());
         let editor = cx.new(|cx| Editor::new(window, cx));
+        editor.update(cx, |e, cx| e.attach_playback(&playback, cx));
         let mut path = None;
         let mut layout = None;
         if let Some(last) = requested.or_else(project::last) {

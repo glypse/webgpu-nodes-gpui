@@ -2,6 +2,7 @@ use guard::SafeListener as _;
 use std::cell::Ref;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use handle::{ModelHandle, ModelMut};
@@ -23,7 +24,7 @@ use shader_graph::catalog::{
 use shader_graph::codegen::Program;
 use shader_graph::graph::{
     Connection, FRAG_OUTPUT, GraphModel, GraphNode, GraphProject, LAYOUT_FRAME, NodeClipboard,
-    Point as GraphPoint, ProjectSettings, REROUTE, frame_note, frame_tint,
+    PlaybackChange, Point as GraphPoint, ProjectSettings, REROUTE, frame_note, frame_tint,
 };
 use shader_graph::layout::{LayoutError, LayoutOptions, NodeGeometry};
 use shader_graph::types::{HandleType, InputValue, WgslType};
@@ -31,6 +32,7 @@ use shader_graph::UniformValue;
 use gpui_component::menu::PopupMenu;
 use theme::{ActiveTheme as _, popup};
 
+use crate::assets::AssetDrag;
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
 use crate::graph::type_picker::{self, TypePicker};
@@ -42,6 +44,8 @@ use crate::graph::sheet;
 use crate::graph::socket::socket_color;
 use crate::graph::zones::{self, Bubble};
 use crate::layout::GraphView;
+use crate::playback::Playback;
+use crate::project::AssetFiles;
 
 mod handle;
 mod widget_edits;
@@ -53,6 +57,7 @@ pub struct Share {
     model: ModelHandle,
     viewports: HashMap<String, Viewport>,
     settings: ProjectSettings,
+    playback: Option<Entity<Playback>>,
 }
 
 /// A breadcrumb of the group path: its depth, its label, and the group's node id when that group is locked.
@@ -166,6 +171,10 @@ pub struct Editor {
     frame_settle: Option<gpui::Task<()>>,
     settings: ProjectSettings,
     widgets: Widgets,
+    /// The playback whose asset files the nodes show, once attached.
+    playback: Option<Entity<Playback>>,
+    /// The asset files the cards were last drawn with.
+    files: AssetFiles,
     /// The widget edit last made, to fold a drag's steps into one undo step.
     widget_gesture: Option<(String, Instant)>,
     code_serial: u64,
@@ -179,6 +188,11 @@ const TAG_STEP: f32 = 12.0;
 
 /// A reroute's side, in flow units.
 const REROUTE_SIZE: f32 = 18.0;
+
+/// Whether two sets of asset files hold the same files: the same ids, each the same bytes.
+fn same_files(a: &AssetFiles, b: &AssetFiles) -> bool {
+    a.len() == b.len() && b.iter().all(|(id, bytes)| a.get(id).is_some_and(|known| Arc::ptr_eq(known, bytes)))
+}
 
 /// Steps of a widget edit closer than this belong to one gesture.
 const GESTURE_GAP: Duration = Duration::from_millis(400);
@@ -226,7 +240,12 @@ impl Editor {
 
     /// What another area needs to edit the project this one edits.
     pub fn share(&self) -> Share {
-        Share { model: self.model.another_view(), viewports: self.viewports.clone(), settings: self.settings }
+        Share {
+            model: self.model.another_view(),
+            viewports: self.viewports.clone(),
+            settings: self.settings,
+            playback: self.playback.clone(),
+        }
     }
 
     /// An editor of another area, entered at the root.
@@ -234,6 +253,9 @@ impl Editor {
         let mut editor = Self::build(share.model, false, window, cx);
         editor.viewports = share.viewports;
         editor.settings = share.settings;
+        if let Some(playback) = &share.playback {
+            editor.attach_playback(playback, cx);
+        }
         editor.sync_view(cx);
         editor
     }
@@ -287,6 +309,8 @@ impl Editor {
             frame_settle: None,
             settings: ProjectSettings::default(),
             widgets: Widgets::default(),
+            playback: None,
+            files: AssetFiles::new(),
             widget_gesture: None,
             code_serial: 0,
             code_task: None,
@@ -448,7 +472,25 @@ impl Editor {
         }
     }
 
+    /// Shows the playback's asset files on the cards: a node whose file is gone warns, and
+    /// an Image or Video node shows what it reads.
+    pub(crate) fn attach_playback(&mut self, playback: &Entity<Playback>, cx: &mut Context<Self>) {
+        self.playback = Some(playback.clone());
+        cx.observe(playback, |this, playback, cx| {
+            guard::guard("asset files", || {
+                if !same_files(&this.files, playback.read(cx).asset_files()) {
+                    this.sync(cx);
+                }
+            });
+        })
+        .detach();
+        self.sync(cx);
+    }
+
     fn sync_view(&mut self, cx: &mut Context<Self>) {
+        if let Some(playback) = &self.playback {
+            self.files = playback.read(cx).asset_files().clone();
+        }
         let editor = cx.entity().downgrade();
         let flow_entity = self.flow.downgrade();
         let model = self.model.borrow();
@@ -461,7 +503,7 @@ impl Editor {
         let mut nodes: Vec<Node> = Vec::new();
         for n in &doc.nodes {
             let mut view = view_of(&model, n);
-            view.attach_widgets(&mut self.widgets, &model, n, gamut, cx);
+            view.attach_widgets(&mut self.widgets, &model, n, gamut, &self.files, cx);
             let view = Rc::new(view);
             let ed = editor.clone();
             let mut node = Node::new(n.id.clone(), flow_point(n.position))
@@ -807,6 +849,47 @@ impl Editor {
     }
 
     // --- Edits the node cards make ---
+
+    pub(crate) fn set_node_asset(&mut self, node: &str, asset: Option<&str>, cx: &mut Context<Self>) {
+        self.edit(cx, |m| m.set_node_asset(node, asset));
+    }
+
+    pub(crate) fn set_video_playback(&mut self, node: &str, change: PlaybackChange, edit: Edit, cx: &mut Context<Self>) {
+        let first = !self.gesture;
+        self.model_mut().set_video_playback_step(node, change, first);
+        self.gesture = edit == Edit::Preview;
+        self.sync(cx);
+        self.regenerate(cx);
+    }
+
+    /// Assets dragged from the Assets area are dropped at `at` (window coordinates): onto
+    /// the Image or Video node under the pointer, or as nodes of their own where they land.
+    pub(crate) fn drop_assets(&mut self, asset_ids: &[String], at: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.model.borrow().is_locked() {
+            return;
+        }
+        let (flow_at, onto) = {
+            let flow = self.flow.read(cx);
+            let at = flow.screen_to_flow(at);
+            let model = self.model.borrow();
+            let onto = model
+                .active_document()
+                .nodes
+                .iter()
+                .find(|n| {
+                    flow.node_rect(&Id::from(n.id.clone())).is_some_and(|r| {
+                        at.x >= r.x && at.x <= r.x + r.width && at.y >= r.y && at.y <= r.y + r.height
+                    })
+                })
+                .map(|n| n.id.clone());
+            (at, onto)
+        };
+        let mut changed = Vec::new();
+        self.edit(cx, |m| changed = m.drop_assets(asset_ids, GraphPoint::new(flow_at.x, flow_at.y), onto.as_deref()));
+        if !changed.is_empty() {
+            self.select(changed, cx);
+        }
+    }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn set_component(
@@ -1687,7 +1770,15 @@ impl Render for Editor {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(div().flex_1().relative().child(self.flow.clone())),
+                    .child(
+                        div()
+                            .flex_1()
+                            .relative()
+                            .on_drop(cx.safe_listener(|this, dragged: &AssetDrag, window, cx| {
+                                this.drop_assets(std::slice::from_ref(&dragged.id), window.mouse_position(), cx);
+                            }))
+                            .child(self.flow.clone()),
+                    ),
             )
             .children(sheet)
             .children(self.add_menu.clone())
@@ -1722,6 +1813,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use gpui::{TestAppContext, point};
+    use shader_graph::nodes::IMAGE;
 
     use super::*;
 
@@ -2129,5 +2221,87 @@ mod tests {
             let labels: Vec<String> = e.popup.as_ref().map(|p| p.items.iter().map(|i| i.label.to_string()).collect()).unwrap_or_default();
             assert_eq!(labels, ["Float", "Integer", "Unsigned integer", "Boolean", "texture"]);
         });
+    }
+
+    fn png_of_width(width: u32) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(width, 1, image::Rgba([9, 9, 9, 255]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+        out.into_inner()
+    }
+
+    /// An editor attached to a playback, with one imported image in the project and no files loaded.
+    fn media_scene(cx: &mut TestAppContext) -> (Entity<Editor>, Entity<Playback>, String, &mut gpui::VisualTestContext) {
+        cx.update(theme::init);
+        let (editor, vcx) = cx.add_window_view(Editor::new);
+        let playback = vcx.new(|_| Playback::new());
+        editor.update(vcx, |e, cx| e.attach_playback(&playback, cx));
+        let mut asset = String::new();
+        let bytes = png_of_width(2);
+        editor.update(vcx, |e, cx| {
+            e.edit_model(cx, |m| {
+                let file = shader_graph::assets::ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
+                asset = m.import_file(file).expect("imports").asset.id().to_owned();
+            })
+        });
+        vcx.run_until_parked();
+        (editor, playback, asset, vcx)
+    }
+
+    fn set_files(playback: &Entity<Playback>, files: AssetFiles, vcx: &mut gpui::VisualTestContext) {
+        vcx.update(|window, cx| playback.update(cx, |p, cx| p.set_asset_files(files, window, cx)));
+        vcx.run_until_parked();
+    }
+
+    fn node_asset(editor: &Entity<Editor>, node: &str, vcx: &mut gpui::VisualTestContext) -> Option<String> {
+        editor.read_with(vcx, |e, _| e.model().node(node).and_then(|n| n.data.asset.clone()))
+    }
+
+    #[gpui::test]
+    fn picking_an_asset_sets_the_node_and_is_one_undo_step(cx: &mut TestAppContext) {
+        let (editor, _playback, asset, vcx) = media_scene(cx);
+        let node = editor.update(vcx, |e, cx| {
+            let id = e.model_mut().add_node(IMAGE, GraphPoint::new(0.0, 0.0)).expect("adds");
+            e.after_edit(cx);
+            id
+        });
+        editor.update(vcx, |e, cx| e.set_node_asset(&node, Some(&asset), cx));
+        assert_eq!(node_asset(&editor, &node, vcx), Some(asset.clone()));
+
+        editor.update(vcx, |e, cx| e.undo(cx));
+        assert_eq!(node_asset(&editor, &node, vcx), None);
+    }
+
+    #[gpui::test]
+    fn dropping_an_asset_adds_a_node_reading_it_where_it_lands(cx: &mut TestAppContext) {
+        let (editor, _playback, asset, vcx) = media_scene(cx);
+        let at = gpui::point(px(300.0), px(200.0));
+        let expected = editor.read_with(vcx, |e, cx| e.flow.read(cx).screen_to_flow(at));
+        editor.update(vcx, |e, cx| e.drop_assets(std::slice::from_ref(&asset), at, cx));
+
+        let added = editor.read_with(vcx, |e, _| {
+            let model = e.model();
+            let doc = model.active_document();
+            doc.nodes.iter().find(|n| n.data.asset.as_deref() == Some(asset.as_str())).map(|n| (n.node_type.clone(), n.position))
+        });
+        let (node_type, position) = added.expect("a node reads the dropped asset");
+        assert_eq!(node_type, IMAGE);
+        assert_eq!((position.x, position.y), (expected.x, expected.y));
+    }
+
+    #[gpui::test]
+    fn a_node_whose_asset_file_is_missing_shows_the_warning(cx: &mut TestAppContext) {
+        let (editor, playback, asset, vcx) = media_scene(cx);
+        editor.update(vcx, |e, cx| {
+            let id = e.model_mut().add_node(IMAGE, GraphPoint::new(0.0, 0.0)).expect("adds");
+            e.set_node_asset(&id, Some(&asset), cx);
+        });
+        vcx.run_until_parked();
+        assert!(vcx.debug_bounds("missing-file").is_some(), "no file, so the node warns");
+
+        let mut files = AssetFiles::new();
+        files.insert(asset.clone(), Arc::new(png_of_width(2)));
+        set_files(&playback, files, vcx);
+        assert!(vcx.debug_bounds("missing-file").is_none(), "the file arrived, so the warning is gone");
     }
 }

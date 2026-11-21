@@ -1,14 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Subscription, WeakEntity, Window,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, SharedString,
-    Styled as _, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Entity, Image, ImageSource, ObjectFit, Subscription,
+    WeakEntity, Window, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
+    SharedString, StyledImage as _, Styled as _, div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
 use shader_graph::color::{ColorMode, ColorSpace as DisplayGamut, Rgba};
 use shader_graph::curve::{CurvePoint, linear_curve};
-use shader_graph::graph::{ColorSpace, GraphModel, GraphNode, GraphProject, GroupWidget};
+use shader_graph::assets::{Asset, AssetKind, DEFAULT_PLAYBACK, VideoEnd, VideoPlayback};
+use shader_graph::graph::{ColorSpace, GraphModel, GraphNode, GraphProject, GroupWidget, PlaybackChange};
 use shader_graph::nodes::{
     RAMP_HUE, RAMP_INTERPOLATION, RAMP_SPACE, color_ramp_stops, index_switch_cases,
 };
@@ -23,9 +26,12 @@ use theme::{
     RampEditor, RampEditorEvent,
 };
 
+use super::fields::{Edit, Scrub, Stack, picker};
 use super::item_widgets;
 use super::sheet::new_text_area;
-use crate::editor::Editor;
+use crate::assets::image_format;
+use crate::editor::{Editor, ListItem, OnSelect};
+use crate::project::AssetFiles;
 
 /// What a linked ramp stop is drawn as: its colour is only known in the shader.
 const UNKNOWN_STOP: Rgba = Rgba { r: 0.214, g: 0.214, b: 0.214, a: 1.0 };
@@ -47,6 +53,21 @@ pub enum WidgetView {
     Cases(u32),
     Items { rows: Vec<ItemRow>, can_remove: bool },
     Code { signature: String, text: String },
+    Asset(AssetView),
+}
+
+/// An Image or Video node's asset: what it reads, its thumbnail and the choices its picker offers.
+#[derive(Clone)]
+pub struct AssetView {
+    pub kind: AssetKind,
+    /// The asset read, by id and name; `None` when it reads none (or one the project lacks).
+    pub current: Option<(String, String)>,
+    /// The asset is read but its file isn't in the project.
+    pub missing: bool,
+    pub thumbnail: Option<Arc<Image>>,
+    /// The project's assets of this kind, by id and name.
+    pub choices: Vec<(String, String)>,
+    pub playback: VideoPlayback,
 }
 
 /// The name field of a Render Texture item. Kept across renders by the item's key, since
@@ -150,6 +171,8 @@ pub struct Widgets {
     curves: HashMap<String, Entity<CurveEditor>>,
     ramps: HashMap<String, (DisplayGamut, bool, Entity<RampEditor>)>,
     wheels: HashMap<String, Entity<ColorWheels>>,
+    /// Decoded thumbnails by asset id, with the file bytes they were decoded from.
+    thumbnails: HashMap<String, (Arc<Vec<u8>>, Arc<Image>)>,
 }
 
 pub fn gamut_of(space: ColorSpace) -> DisplayGamut {
@@ -274,12 +297,26 @@ impl Widgets {
         entity
     }
 
+    /// The thumbnail of an image asset, decoded once per file.
+    fn thumbnail(&mut self, asset: &Asset, bytes: &Arc<Vec<u8>>) -> Option<Arc<Image>> {
+        if let Some((known, image)) = self.thumbnails.get(asset.id())
+            && Arc::ptr_eq(known, bytes)
+        {
+            return Some(image.clone());
+        }
+        let format = image_format(&asset.file_info().mime)?;
+        let image = Arc::new(Image::from_bytes(format, bytes.to_vec()));
+        self.thumbnails.insert(asset.id().to_owned(), (bytes.clone(), image.clone()));
+        Some(image)
+    }
+
     pub fn view(
         &mut self,
         model: &GraphModel,
         node: &GraphNode,
         locked: bool,
         gamut: DisplayGamut,
+        files: &AssetFiles,
         cx: &mut Context<Editor>,
     ) -> Option<WidgetView> {
         let descriptor = model.resolve_descriptor(node);
@@ -400,7 +437,28 @@ impl Widgets {
                     .collect();
                 Some(WidgetView::Items { rows, can_remove })
             }
-            NodeWidget::Asset(_) => None,
+            NodeWidget::Asset(kind) => {
+                let kind = *kind;
+                let asset = node.data.asset.as_deref().and_then(|a| model.asset(a));
+                let current = asset.map(|a| (a.id().to_owned(), a.name().to_owned()));
+                let thumbnail = match (asset, node.data.asset.as_deref().and_then(|a| files.get(a))) {
+                    (Some(asset), Some(bytes)) => self.thumbnail(asset, bytes),
+                    _ => None,
+                };
+                Some(WidgetView::Asset(AssetView {
+                    kind,
+                    current,
+                    missing: model.missing_asset(id, |a| files.contains_key(a)),
+                    thumbnail,
+                    choices: model
+                        .assets()
+                        .iter()
+                        .filter(|a| a.kind() == kind)
+                        .map(|a| (a.id().to_owned(), a.name().to_owned()))
+                        .collect(),
+                    playback: node.data.playback.unwrap_or(DEFAULT_PLAYBACK),
+                }))
+            }
             NodeWidget::Code => {
                 let sockets = shader_graph::nodes::custom_sockets(&node.data);
                 let labels = |list: &[shader_graph::types::HandleDef]| {
@@ -486,6 +544,7 @@ pub fn render(
             }
             list.child(item_widgets::add(node, locked, z, ed, cx)).into_any_element()
         }
+        WidgetView::Asset(asset) => asset_body(asset, node, locked, z, ed, cx),
         WidgetView::Code { signature, text } => {
             let field = window.use_keyed_state(
                 SharedString::from(format!("code-{node}")),
@@ -524,4 +583,166 @@ pub fn render(
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(body)
         .into_any_element()
+}
+
+fn end_label(end: VideoEnd) -> &'static str {
+    match end {
+        VideoEnd::Loop => "Loop",
+        VideoEnd::Hold => "Hold last frame",
+        VideoEnd::Transparent => "Transparent",
+    }
+}
+
+const VIDEO_ENDS: [VideoEnd; 3] = [VideoEnd::Loop, VideoEnd::Hold, VideoEnd::Transparent];
+
+/// A labelled row of a Video node's fields.
+fn field_row(label: &'static str, child: impl IntoElement, z: f32, muted: gpui::Hsla) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.0 * z))
+        .child(div().w(px(44.0 * z)).text_size(px(12.0 * z)).text_color(muted).child(label))
+        .child(div().flex_1().min_w_0().child(child))
+}
+
+/// The body of an Image or Video node: the preview of its asset, the asset picker and,
+/// for a video, its playback fields.
+fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) -> AnyElement {
+    let c = &cx.theme().colors;
+    let (muted, muted_fg) = (c.muted, c.muted_foreground);
+    let icon = match view.kind {
+        AssetKind::Image => IconName::Image,
+        AssetKind::Video => IconName::FilmStrip,
+    };
+    let preview: AnyElement = match (&view.current, &view.thumbnail, view.missing) {
+        (Some(_), _, true) => div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(2.0 * z))
+            .text_size(px(12.0 * z))
+            .child(Icon::new(IconName::ImageBroken).size(px(24.0 * z)))
+            .child("File missing")
+            .into_any_element(),
+        (_, Some(image), false) => img(ImageSource::Image(image.clone()))
+            .size_full()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+        (None, _, _) => Icon::new(IconName::Image).size(px(24.0 * z)).into_any_element(),
+        (Some(_), None, false) => Icon::new(icon).size(px(24.0 * z)).into_any_element(),
+    };
+    let preview = div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .w_full()
+        .aspect_ratio(16.0 / 9.0)
+        .overflow_hidden()
+        .rounded(px(4.0 * z))
+        .bg(muted)
+        .text_color(muted_fg)
+        .child(preview);
+
+    let current_id = view.current.as_ref().map(|(id, _)| id.clone());
+    let label = view.current.as_ref().map_or_else(|| "None".to_owned(), |(_, name)| name.clone());
+    let mut choices = vec![ListItem::new(
+        "None",
+        Some(current_id.is_none()),
+        asset_choice(ed, node, None),
+    )];
+    choices.extend(view.choices.iter().map(|(id, name)| {
+        ListItem::new(
+            name.clone(),
+            Some(current_id.as_deref() == Some(id.as_str())),
+            asset_choice(ed, node, Some(id.clone())),
+        )
+    }));
+    let asset_picker = picker(
+        SharedString::from(format!("asset-{node}")),
+        label,
+        z,
+        locked,
+        cx,
+        {
+            let ed = ed.clone();
+            move |at, _, cx| {
+                let items = choices.clone();
+                ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+            }
+        },
+    );
+
+    let mut body = div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0 * z))
+        .child(preview)
+        .child(asset_picker.into_any_element());
+    if view.kind == AssetKind::Video {
+        let playback = view.playback;
+        let video_field = |field: &'static str, value: f64, change: fn(f64) -> PlaybackChange| {
+            let (ed, node) = (ed.clone(), node.to_owned());
+            Scrub::new(SharedString::from(format!("video-{field}-{node}")), value, z)
+                .stack(Stack::Single)
+                .readonly(locked)
+                .on_change(move |v, edit, _, cx| {
+                    ed.update(cx, |e, cx| e.set_video_playback(&node, change(v), edit, cx)).ok();
+                })
+        };
+        let end_items: Vec<ListItem> = VIDEO_ENDS
+            .iter()
+            .map(|&end| {
+                let (ed, node) = (ed.clone(), node.to_owned());
+                ListItem::new(
+                    end_label(end),
+                    Some(end == playback.end),
+                    Rc::new(move |_, cx| {
+                        ed.update(cx, |e, cx| {
+                            e.set_video_playback(&node, PlaybackChange { end: Some(end), ..Default::default() }, Edit::Commit, cx)
+                        })
+                        .ok();
+                    }),
+                )
+            })
+            .collect();
+        let end_ed = ed.clone();
+        let end_picker = picker(
+            SharedString::from(format!("video-end-{node}")),
+            end_label(playback.end),
+            z,
+            locked,
+            cx,
+            move |at, _, cx| {
+                let items = end_items.clone();
+                end_ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+            },
+        );
+        body = body
+            .child(field_row(
+                "Start",
+                video_field("start", playback.start, |v| PlaybackChange { start: Some(v), ..Default::default() }),
+                z,
+                muted_fg,
+            ))
+            .child(field_row(
+                "Speed",
+                video_field("speed", playback.speed, |v| PlaybackChange { speed: Some(v), ..Default::default() }),
+                z,
+                muted_fg,
+            ))
+            .child(field_row("After end", end_picker.into_any_element(), z, muted_fg));
+    }
+    div()
+        .px(px(12.0 * z))
+        .py(px(4.0 * z))
+        .child(body)
+        .into_any_element()
+}
+
+/// The handler of an asset picker entry: `None` reads no asset.
+fn asset_choice(ed: &WeakEntity<Editor>, node: &str, asset: Option<String>) -> OnSelect {
+    let (ed, node) = (ed.clone(), node.to_owned());
+    Rc::new(move |_, cx| {
+        ed.update(cx, |e, cx| e.set_node_asset(&node, asset.as_deref(), cx)).ok();
+    })
 }

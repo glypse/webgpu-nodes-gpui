@@ -127,7 +127,7 @@ pub fn report_problems(window: &mut Window, problems: &[String], cx: &mut App) {
 }
 
 /// The media type of an image file's bytes, for showing them.
-fn image_format(mime: &str) -> Option<ImageFormat> {
+pub(crate) fn image_format(mime: &str) -> Option<ImageFormat> {
     match mime {
         "image/png" => Some(ImageFormat::Png),
         "image/jpeg" => Some(ImageFormat::Jpeg),
@@ -135,6 +135,33 @@ fn image_format(mime: &str) -> Option<ImageFormat> {
         "image/webp" => Some(ImageFormat::Webp),
         "image/bmp" => Some(ImageFormat::Bmp),
         _ => None,
+    }
+}
+
+/// What an Assets tile carries while it is dragged onto a graph: the asset a node is added for.
+#[derive(Clone)]
+pub struct AssetDrag {
+    pub id: String,
+    pub name: String,
+}
+
+/// The chip that follows the pointer while an asset is dragged.
+struct AssetDragPreview {
+    name: SharedString,
+}
+
+impl Render for AssetDragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("asset drag", || {
+            let theme = cx.theme().clone();
+            div()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(theme.colors.popover)
+                .text_size(px(12.0))
+                .child(self.name.clone())
+        })
     }
 }
 
@@ -253,6 +280,7 @@ impl Render for Tile {
             let tile_weak = cx.entity().downgrade();
             let click_tile = tile_weak.clone();
             let tile_id = format!("asset-{id}");
+            let drag = AssetDrag { id: id.clone(), name: self.asset.name().to_owned() };
             div()
                 .id(SharedString::from(tile_id))
                 .debug_selector(|| "asset-tile".into())
@@ -263,6 +291,9 @@ impl Render for Tile {
                 .min_w_0()
                 .rounded_md()
                 .hover(|s| s.bg(theme.colors.accent.opacity(0.5)))
+                .on_drag(drag, |drag, _, _, cx| {
+                    cx.new(|_| AssetDragPreview { name: SharedString::from(drag.name.clone()) })
+                })
                 .on_click(move |event, window, cx| {
                     if event.click_count() != 2 {
                         return;
