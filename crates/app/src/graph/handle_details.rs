@@ -16,7 +16,7 @@ use shader_graph::types::{
 };
 use gpui_component::Disableable as _;
 use gpui_component::checkbox::Checkbox;
-use theme::ActiveTheme as _;
+use theme::{ActiveTheme as _, Icon, IconName};
 
 use super::fields::{Edit, Scrub};
 use super::sheet::{Commit, button, field, hint, outline_button};
@@ -154,8 +154,8 @@ pub fn details(
                 cx,
                 commit,
             );
-            let action = |glyph: &'static str, id: String, enabled: bool, f: Action, cx: &Context<Editor>| {
-                div().when(!enabled, |d| d.opacity(0.4)).child(button(SharedString::from(id), glyph, cx, move |e, cx| {
+            let action = |glyph: IconName, id: String, enabled: bool, f: Action, cx: &Context<Editor>| {
+                div().when(!enabled, |d| d.opacity(0.4)).child(button(SharedString::from(id), Icon::new(glyph).size(px(14.0)), cx, move |e, cx| {
                     if enabled {
                         f(e, cx);
                     }
@@ -171,17 +171,17 @@ pub fn details(
                     .gap_1()
                     .child(div().flex_1().min_w_0().child(super::sheet::boxed(input, cx)))
                     .when(!locked, |d| {
-                        d.child(action("↑", format!("vup-{}-{i}", handle.id), i > 0, Rc::new(move |e, cx| {
+                        d.child(action(IconName::ArrowUp, format!("vup-{}-{i}", handle.id), i > 0, Rc::new(move |e, cx| {
                             let mut next = up_opts.clone();
                             next.swap(i, i - 1);
                             w1(e, next, cx);
                         }), cx))
-                        .child(action("↓", format!("vdown-{}-{i}", handle.id), i + 1 < count, Rc::new(move |e, cx| {
+                        .child(action(IconName::ArrowDown, format!("vdown-{}-{i}", handle.id), i + 1 < count, Rc::new(move |e, cx| {
                             let mut next = down_opts.clone();
                             next.swap(i, i + 1);
                             w2(e, next, cx);
                         }), cx))
-                        .child(action("×", format!("vdel-{}-{i}", handle.id), count > 1, Rc::new(move |e, cx| {
+                        .child(action(IconName::Trash, format!("vdel-{}-{i}", handle.id), count > 1, Rc::new(move |e, cx| {
                             let mut next = remove_opts.clone();
                             next.remove(i);
                             w3(e, next, cx);
@@ -275,7 +275,7 @@ pub fn details(
                         .when(!locked, |d| {
                             d.child(button(
                                 SharedString::from(format!("range-clear-{name}-{}", handle.id)),
-                                "×",
+                                Icon::new(IconName::X).size(px(14.0)),
                                 cx,
                                 move |e, cx| clear(e, None, cx),
                             ))

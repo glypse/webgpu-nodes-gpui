@@ -7,7 +7,7 @@ use gpui::{
 
 macro_rules! icons {
     ($($variant:ident => $file:literal,)*) => {
-        /// Phosphor's regular icons, as the original uses.
+        /// Phosphor icons, in the weight the original uses at each place.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum IconName { $($variant,)* }
 
@@ -17,22 +17,20 @@ macro_rules! icons {
             }
         }
 
-        fn icon_bytes(path: &str) -> Option<&'static [u8]> {
-            match path {
-                $(concat!("icons/", $file) => Some(include_bytes!(concat!("../assets/icons/", $file))),)*
-                _ => None,
-            }
-        }
-
-        const ICON_PATHS: &[&str] = &[$(concat!("icons/", $file),)*];
+        const ICON_FILES: &[(&str, &[u8])] = &[
+            $((concat!("icons/", $file), include_bytes!(concat!("../assets/icons/", $file))),)*
+        ];
     };
 }
 
 icons! {
+    ArrowCounterClockwise => "arrow-counter-clockwise.svg",
+    ArrowDown => "arrow-down.svg",
     ArrowLineDown => "arrow-line-down.svg",
     ArrowLineLeft => "arrow-line-left.svg",
     ArrowLineRight => "arrow-line-right.svg",
     ArrowLineUp => "arrow-line-up.svg",
+    ArrowUp => "arrow-up.svg",
     ArrowsDownUp => "arrows-down-up.svg",
     ArrowsIn => "arrows-in.svg",
     ArrowsLeftRight => "arrows-left-right.svg",
@@ -40,23 +38,55 @@ icons! {
     ArrowsOut => "arrows-out.svg",
     CaretDown => "caret-down.svg",
     CaretLeft => "caret-left.svg",
+    CaretLeftBold => "caret-left-bold.svg",
     CaretRight => "caret-right.svg",
+    CaretRightBold => "caret-right-bold.svg",
     CaretUpDown => "caret-up-down.svg",
     Check => "check.svg",
     Code => "code.svg",
+    Desktop => "desktop.svg",
     DownloadSimple => "download-simple.svg",
+    EyeSlash => "eye-slash.svg",
+    Faders => "faders.svg",
+    FilmStrip => "film-strip.svg",
     FlipHorizontal => "flip-horizontal.svg",
     FlipVertical => "flip-vertical.svg",
+    LockSimple => "lock-simple.svg",
     Minus => "minus.svg",
+    Moon => "moon.svg",
     MonitorPlay => "monitor-play.svg",
-    Pause => "pause.svg",
-    Play => "play.svg",
+    PaintBrush => "paint-brush.svg",
+    Palette => "palette.svg",
+    PauseFill => "pause-fill.svg",
+    PlayFill => "play-fill.svg",
+    Plugs => "plugs.svg",
     Plus => "plus.svg",
-    SkipBack => "skip-back.svg",
+    SkipBackFill => "skip-back-fill.svg",
     SquareSplitHorizontal => "square-split-horizontal.svg",
     SquareSplitVertical => "square-split-vertical.svg",
+    Sun => "sun.svg",
+    Timer => "timer.svg",
+    Trash => "trash.svg",
     TreeStructure => "tree-structure.svg",
+    TreeView => "tree-view.svg",
     X => "x.svg",
+}
+
+/// gpui-component names its built-in icons after Lucide; these paths resolve to the Phosphor
+/// icon the original uses for the same job.
+const COMPONENT_ICON_ALIASES: &[(&str, &str)] = &[
+    ("icons/chevron-down.svg", "icons/caret-down.svg"),
+    ("icons/chevron-left.svg", "icons/caret-left.svg"),
+    ("icons/chevron-right.svg", "icons/caret-right.svg"),
+    ("icons/close.svg", "icons/x.svg"),
+];
+
+fn icon_bytes(path: &str) -> Option<&'static [u8]> {
+    let path = COMPONENT_ICON_ALIASES
+        .iter()
+        .find(|(from, _)| *from == path)
+        .map_or(path, |(_, to)| to);
+    ICON_FILES.iter().find(|(p, _)| *p == path).map(|(_, bytes)| *bytes)
 }
 
 /// The theme's embedded assets; pass to `Application::with_assets`.
@@ -72,10 +102,10 @@ impl AssetSource for Assets {
     }
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
-        let mut listed: Vec<SharedString> = ICON_PATHS
+        let mut listed: Vec<SharedString> = ICON_FILES
             .iter()
-            .filter(|p| p.starts_with(path))
-            .map(|p| SharedString::from(*p))
+            .filter(|(p, _)| p.starts_with(path))
+            .map(|(p, _)| SharedString::from(*p))
             .collect();
         listed.extend(gpui_kit_assets::Assets.list(path)?);
         Ok(listed)

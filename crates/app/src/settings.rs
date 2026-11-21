@@ -12,7 +12,7 @@ use runtime::Size;
 use shader_graph::graph::{ColorSpace, MAX_CANVAS_SIZE, MAX_FPS, ProjectSettings};
 use gpui_component::{Disableable as _, Selectable as _, Sizable as _, button::{Button, ButtonGroup, ButtonVariants as _}};
 use gpui_component::input::{Input, InputEvent, InputState};
-use theme::{ActiveTheme as _, NumberEvent, NumberField};
+use theme::{ActiveTheme as _, Icon, IconName, NumberEvent, NumberField};
 
 use crate::editor::Editor;
 use crate::playback::Playback;
@@ -28,6 +28,7 @@ pub enum Page {
 
 struct PageInfo {
     page: Page,
+    icon: IconName,
     label: &'static str,
     description: &'static str,
 }
@@ -46,16 +47,19 @@ const GROUPS: &[Group] = &[
         pages: &[
             PageInfo {
                 page: Page::Canvas,
+                icon: IconName::ArrowsOut,
                 label: "Canvas",
                 description: "The resolution frames render and export at.",
             },
             PageInfo {
                 page: Page::Time,
+                icon: IconName::Timer,
                 label: "Time",
                 description: "How time advances while playing and exporting.",
             },
             PageInfo {
                 page: Page::Color,
+                icon: IconName::Palette,
                 label: "Colour",
                 description: "The colour space frames are shown and exported in.",
             },
@@ -66,6 +70,7 @@ const GROUPS: &[Group] = &[
         hint: "Saved on this computer",
         pages: &[PageInfo {
             page: Page::Appearance,
+            icon: IconName::PaintBrush,
             label: "Appearance",
             description: "How the editor looks.",
         }],
@@ -292,7 +297,7 @@ impl SettingsDialog {
             Button::new("swap-size")
                 .ghost()
                 .small()
-                .label("⇄")
+                .icon(IconName::ArrowsLeftRight)
                 .tooltip("Swap width and height")
                 .on_click(cx.safe_listener(move |this, _, _, cx| {
                     this.update(cx, |s| {
@@ -434,7 +439,7 @@ impl SettingsDialog {
         let theme = self.field(
             "Theme",
             None,
-            segmented("theme", ["Light", "Dark", "System"], selected, move |index, window, cx| {
+            segmented_with_icons("theme", [(IconName::Sun, "Light"), (IconName::Moon, "Dark"), (IconName::Desktop, "System")], selected, move |index, window, cx| {
                 if let Some(&choice) = themes.get(index) {
                     guard::guard("theme", || preferences::update(window, cx, |p| p.theme = choice));
                 }
@@ -517,6 +522,9 @@ impl SettingsDialog {
                             .px_2()
                             .py(px(6.0))
                             .rounded(theme.radius.md)
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .text_size(theme.text.sm)
                             .cursor_pointer()
                             .when(current, |d| d.bg(c.muted).font_weight(gpui::FontWeight::MEDIUM))
@@ -525,6 +533,7 @@ impl SettingsDialog {
                                 this.page = page;
                                 cx.notify();
                             }))
+                            .child(Icon::new(info.icon).size(px(16.0)))
                             .child(info.label)
                     }))
                     .child(
@@ -550,6 +559,26 @@ fn segmented(
     let buttons = labels.into_iter().enumerate().map(|(index, label)| {
         Button::new((id, index)).label(label).selected(index == selected)
     });
+    segmented_buttons(id, buttons, on_change)
+}
+
+fn segmented_with_icons(
+    id: &'static str,
+    items: impl IntoIterator<Item = (IconName, &'static str)>,
+    selected: usize,
+    on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
+) -> ButtonGroup {
+    let buttons = items.into_iter().enumerate().map(|(index, (icon, label))| {
+        Button::new((id, index)).icon(icon).label(label).selected(index == selected)
+    });
+    segmented_buttons(id, buttons, on_change)
+}
+
+fn segmented_buttons(
+    id: &'static str,
+    buttons: impl IntoIterator<Item = Button>,
+    on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
+) -> ButtonGroup {
     ButtonGroup::new(id).children(buttons).on_click(move |indices: &Vec<usize>, window, cx| {
         if let Some(&index) = indices.first() {
             on_change(index, window, cx);

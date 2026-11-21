@@ -21,7 +21,7 @@ use shader_graph::zones::{DEFAULT_MAX_ITERATIONS, MAX_ITERATIONS, is_zone_node_t
 use gpui_component::Disableable as _;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use theme::{ActiveTheme as _, NumberEvent, NumberField};
+use theme::{ActiveTheme as _, Icon, IconName, NumberEvent, NumberField};
 
 use super::frames::tint_color;
 use super::type_picker::{TypePicker, on_editor};
@@ -140,7 +140,7 @@ fn type_label(ty: &HandleType, variables: &[TypeVariable]) -> String {
 
 pub(super) fn button(
     id: impl Into<gpui::ElementId>,
-    label: &'static str,
+    label: impl IntoElement,
     cx: &Context<Editor>,
     on_click: impl Fn(&mut Editor, &mut Context<Editor>) + 'static,
 ) -> impl IntoElement {
@@ -355,7 +355,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                 this.sheet_fields.inputs.remove(&format!("label-{id}"));
                 this.edit_model(cx, move |m| m.set_node_label(&id, None));
             }))
-            .child("↺")
+            .child(Icon::new(IconName::ArrowCounterClockwise).size(px(14.0)))
     };
     body = body.child(
         div()
@@ -474,7 +474,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                             .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(subject.shown_label.clone()))
                             .children((subject.label.is_some()).then(|| hint(&subject.default_label, cx))),
                     )
-                    .child(button("close-sheet", "×", cx, |this, cx| this.close_sheet(cx))),
+                    .child(button("close-sheet", Icon::new(IconName::X).size(px(14.0)), cx, |this, cx| this.close_sheet(cx))),
             )
             .child(body)
             .into_any_element(),
@@ -567,7 +567,7 @@ fn group_settings(
                             .child(format!("{sockets} {}", if sockets == 1 { "socket" } else { "sockets" })),
                     )
                     .when(!locked, |d| {
-                        d.child(button(SharedString::from(format!("rm-{}", variable.id)), "×", cx, move |this, cx| {
+                        d.child(button(SharedString::from(format!("rm-{}", variable.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
                             let (r, vid) = (r.clone(), vid.clone());
                             this.edit_model(cx, move |m| m.remove_type_variable(&r, &vid));
                         }))
@@ -673,7 +673,7 @@ fn group_settings(
                     .child(div().flex_1().min_w_0().child(boxed(input, cx)))
                     .child(div().w(px(96.0)).flex_none().flex().child(type_button))
                     .when(detailed, |d| {
-                        d.child(button(SharedString::from(format!("expand-{}", handle.id)), if open { "▾" } else { "▸" }, cx, move |this, cx| {
+                        d.child(button(SharedString::from(format!("expand-{}", handle.id)), if open { Icon::new(IconName::CaretDown).size(px(14.0)).into_any_element() } else { Icon::new(IconName::CaretRight).size(px(14.0)).into_any_element() }, cx, move |this, cx| {
                             if !this.sheet_fields.expanded.remove(&toggle_id) {
                                 this.sheet_fields.expanded.insert(toggle_id.clone());
                             }
@@ -681,15 +681,15 @@ fn group_settings(
                         }))
                     })
                     .when(!locked, |d| {
-                        d.child(button(SharedString::from(format!("up-{}", handle.id)), "↑", cx, move |this, cx| {
+                        d.child(button(SharedString::from(format!("up-{}", handle.id)), Icon::new(IconName::ArrowUp).size(px(14.0)), cx, move |this, cx| {
                             let (r, h) = (r1.clone(), h1.clone());
                             this.edit_model(cx, move |m| m.move_handle(&r, side, &h, -1));
                         }))
-                        .child(button(SharedString::from(format!("down-{}", handle.id)), "↓", cx, move |this, cx| {
+                        .child(button(SharedString::from(format!("down-{}", handle.id)), Icon::new(IconName::ArrowDown).size(px(14.0)), cx, move |this, cx| {
                             let (r, h) = (r2.clone(), h2.clone());
                             this.edit_model(cx, move |m| m.move_handle(&r, side, &h, 1));
                         }))
-                        .child(button(SharedString::from(format!("del-{}", handle.id)), "×", cx, move |this, cx| {
+                        .child(button(SharedString::from(format!("del-{}", handle.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
                             let (r, h) = (r3.clone(), h3.clone());
                             this.edit_model(cx, move |m| m.remove_handle(&r, side, &h));
                         }))
@@ -965,15 +965,15 @@ fn zone_settings(
         let (z2, i2) = (zone.to_owned(), item.id.clone());
         let (z3, i3) = (zone.to_owned(), item.id.clone());
         section = section.child(row.when(!locked, |d| {
-            d.child(button(SharedString::from(format!("iup-{}", item.id)), "↑", cx, move |this, cx| {
+            d.child(button(SharedString::from(format!("iup-{}", item.id)), Icon::new(IconName::ArrowUp).size(px(14.0)), cx, move |this, cx| {
                 let (z, i) = (z1.clone(), i1.clone());
                 this.edit_model(cx, move |m| m.move_zone_item(&z, &i, -1));
             }))
-            .child(button(SharedString::from(format!("idown-{}", item.id)), "↓", cx, move |this, cx| {
+            .child(button(SharedString::from(format!("idown-{}", item.id)), Icon::new(IconName::ArrowDown).size(px(14.0)), cx, move |this, cx| {
                 let (z, i) = (z2.clone(), i2.clone());
                 this.edit_model(cx, move |m| m.move_zone_item(&z, &i, 1));
             }))
-            .child(button(SharedString::from(format!("idel-{}", item.id)), "×", cx, move |this, cx| {
+            .child(button(SharedString::from(format!("idel-{}", item.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
                 let (z, i) = (z3.clone(), i3.clone());
                 this.edit_model(cx, move |m| m.remove_zone_item(&z, &i));
             }))

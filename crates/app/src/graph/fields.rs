@@ -285,7 +285,7 @@ impl RenderOnce for Scrub {
                 .opacity(0.0)
                 .group_hover(group.clone(), |s| s.opacity(0.5))
                 .hover(move |s| s.opacity(1.0).bg(fg.opacity(0.1)))
-                .child(if right { "›" } else { "‹" })
+                .child(Icon::new(if right { IconName::CaretRight } else { IconName::CaretLeft }).size(px(10.0 * z)))
                 .on_mouse_down(MouseButton::Left, move |e, window, cx| {
                     cx.stop_propagation();
                     let by = step(integer, e.modifiers.shift);

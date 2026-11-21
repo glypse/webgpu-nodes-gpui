@@ -6,7 +6,7 @@ use gpui::{
 };
 use gpui_component::input::Input;
 use shader_graph::passes::TextureFormat;
-use theme::ActiveTheme as _;
+use theme::{ActiveTheme as _, Icon, IconName};
 
 use super::fields::picker;
 use super::widgets::{ItemNameField, ItemRow};
@@ -14,7 +14,7 @@ use crate::editor::{Editor, ListItem};
 
 fn icon_button(
     id: SharedString,
-    label: &'static str,
+    label: impl IntoElement,
     enabled: bool,
     z: f32,
     cx: &App,
@@ -29,7 +29,6 @@ fn icon_button(
         .justify_center()
         .size(px(20.0 * z))
         .rounded(px(4.0 * z))
-        .text_size(px(13.0 * z))
         .when(!enabled, |d| d.opacity(0.4))
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(muted)))
         .on_mouse_down(MouseButton::Left, move |e, _, cx| {
@@ -102,7 +101,7 @@ pub fn row(
         )))
         .child(icon_button(
             SharedString::from(format!("remove-{node}-{}", row.id)),
-            "×",
+            Icon::new(IconName::Trash).size(px(12.0 * z)),
             can_remove,
             z,
             cx,
@@ -128,7 +127,7 @@ pub fn add(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) 
 
 pub fn sockets_button(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) -> impl IntoElement {
     let (ed, node_id) = (ed.clone(), node.to_owned());
-    icon_button(SharedString::from(format!("sockets-{node}")), "⌁", !locked, z, cx, move |at, cx| {
+    icon_button(SharedString::from(format!("sockets-{node}")), Icon::new(IconName::Plugs).size(px(14.0 * z)), !locked, z, cx, move |at, cx| {
         ed.update(cx, |e, cx| e.open_sockets(&node_id, at, cx)).ok();
     })
 }

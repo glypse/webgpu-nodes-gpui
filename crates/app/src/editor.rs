@@ -28,7 +28,7 @@ use shader_graph::graph::{
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
 use gpui_component::menu::PopupMenu;
-use theme::{ActiveTheme as _, popup};
+use theme::{ActiveTheme as _, Icon, IconName, popup};
 
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
@@ -1486,7 +1486,7 @@ impl Editor {
                     .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| this.jump_to(depth, cx)))
                     .child(label)
                     .into_any_element();
-                let sep: Vec<AnyElement> = if i > 0 { vec![div().text_color(c.muted_foreground).child("›").into_any_element()] } else { Vec::new() };
+                let sep: Vec<AnyElement> = if i > 0 { vec![div().text_color(c.muted_foreground).child(Icon::new(IconName::CaretRight).size(px(12.0))).into_any_element()] } else { Vec::new() };
                 sep.into_iter().chain([crumb])
             }))
             .when(locked, |d| d.child(div().ml_2().text_size(theme.text.xs).text_color(c.muted_foreground).child("locked")))

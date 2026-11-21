@@ -87,7 +87,7 @@ impl screen::Editor for Panel {
         match self {
             Self::Graph => IconName::TreeStructure,
             Self::Preview => IconName::MonitorPlay,
-            Self::Timeline => IconName::Play,
+            Self::Timeline => IconName::FilmStrip,
             Self::Code => IconName::Code,
         }
     }

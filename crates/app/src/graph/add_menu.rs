@@ -7,7 +7,7 @@ use gpui::{
 };
 use gpui_component::input::{Escape, Input, InputEvent, InputState};
 use shader_graph::catalog::{AddMenuEntry, SearchResult, group_by_heading, search_entries};
-use theme::{ActiveTheme as _, popup};
+use theme::{ActiveTheme as _, Icon, IconName, popup};
 
 pub enum AddMenuEvent {
     Picked(Box<AddMenuEntry>),
@@ -252,7 +252,7 @@ impl Render for AddMenu {
                         }
                     }))
                     .child(heading.clone())
-                    .child("›")
+                    .child(Icon::new(IconName::CaretRight).size(px(12.0)))
             }).collect::<Vec<_>>();
             let entries: Vec<_> = groups
                 .iter()

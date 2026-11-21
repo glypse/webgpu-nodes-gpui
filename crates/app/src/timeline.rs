@@ -175,7 +175,7 @@ impl Render for TimelineBar {
                 Button::new("to-start")
                     .ghost()
                     .small()
-                    .icon(IconName::SkipBack)
+                    .icon(IconName::SkipBackFill)
                     .tooltip("Back to the start (Home)")
                     .on_click(act(|p, w, cx| p.seek(0.0, w, cx))),
             )
@@ -183,7 +183,7 @@ impl Render for TimelineBar {
                 Button::new("previous")
                     .ghost()
                     .small()
-                    .icon(IconName::CaretLeft)
+                    .icon(IconName::CaretLeftBold)
                     .tooltip("Previous frame (,)")
                     .on_click(act(|p, w, cx| p.step(-1, w, cx))),
             )
@@ -192,9 +192,9 @@ impl Render for TimelineBar {
                     .ghost()
                     .small()
                     .icon(if playing {
-                        IconName::Pause
+                        IconName::PauseFill
                     } else {
-                        IconName::Play
+                        IconName::PlayFill
                     })
                     .tooltip(if playing {
                         "Pause (Space)"
@@ -207,7 +207,7 @@ impl Render for TimelineBar {
                 Button::new("next")
                     .ghost()
                     .small()
-                    .icon(IconName::CaretRight)
+                    .icon(IconName::CaretRightBold)
                     .tooltip("Next frame (.)")
                     .on_click(act(|p, w, cx| p.step(1, w, cx))),
             )

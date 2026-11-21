@@ -10,7 +10,7 @@ use gpui::{
 };
 use shader_graph::nodes::custom_sockets;
 use shader_graph::types::{HandleDef, WgslType};
-use theme::{ActiveTheme as _, ColorPicker, popup};
+use theme::{ActiveTheme as _, ColorPicker, Icon, IconName, popup};
 
 use super::sheet::{Commit, boxed, field, heading, hint};
 use super::type_picker::TypePicker;
@@ -51,7 +51,7 @@ pub fn render_color(editor: &Editor, cx: &mut Context<Editor>) -> Option<AnyElem
 
 fn small_button(
     id: SharedString,
-    label: &'static str,
+    label: impl IntoElement,
     enabled: bool,
     cx: &Context<Editor>,
     on_click: impl Fn(&mut Editor, &mut Context<Editor>) + 'static,
@@ -103,7 +103,7 @@ pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context
                 .child(div().flex().flex_col().child(heading(label, cx)).child(hint(hint_text, cx)))
                 .child(small_button(
                     SharedString::from(format!("add-socket-{label}")),
-                    "+",
+                    Icon::new(IconName::Plus).size(px(12.0)),
                     !locked,
                     cx,
                     move |e, cx| e.add_custom_socket(&add_node, is_input, cx),
@@ -218,17 +218,17 @@ fn socket_row(
         .gap_1()
         .child(div().flex_1().when(rejected, |d| d.border_1().border_color(theme.colors.destructive)).child(boxed(input, cx)))
         .child(type_button)
-        .child(small_button(SharedString::from(format!("up-{}", socket.id)), "↑", !locked && index > 0, cx, move |e, cx| {
+        .child(small_button(SharedString::from(format!("up-{}", socket.id)), Icon::new(IconName::ArrowUp).size(px(12.0)), !locked && index > 0, cx, move |e, cx| {
             e.move_custom_socket(&up.0, is_input, &up.1, -1, cx)
         }))
         .child(small_button(
             SharedString::from(format!("down-{}", socket.id)),
-            "↓",
+            Icon::new(IconName::ArrowDown).size(px(12.0)),
             !locked && index + 1 < count,
             cx,
             move |e, cx| e.move_custom_socket(&down.0, is_input, &down.1, 1, cx),
         ))
-        .child(small_button(SharedString::from(format!("remove-{}", socket.id)), "×", !locked, cx, move |e, cx| {
+        .child(small_button(SharedString::from(format!("remove-{}", socket.id)), Icon::new(IconName::Trash).size(px(12.0)), !locked, cx, move |e, cx| {
             e.remove_custom_socket(&remove.0, is_input, &remove.1, cx)
         }))
 }

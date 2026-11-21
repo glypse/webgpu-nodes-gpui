@@ -19,8 +19,8 @@ use shader_graph::types::{
     InputValue, NodeData, NodeWidget, ScalarValue, VectorValue, WgslType, enum_value,
 };
 use theme::{
-    ActiveTheme as _, ColorWheels, ColorWheelsEvent, CurveEditor, CurveEditorEvent, RampEditor,
-    RampEditorEvent,
+    ActiveTheme as _, ColorWheels, ColorWheelsEvent, CurveEditor, CurveEditorEvent, Icon, IconName,
+    RampEditor, RampEditorEvent,
 };
 
 use super::item_widgets;
@@ -445,7 +445,7 @@ pub fn render(
         }
         WidgetView::Cases(count) => {
             let count = *count;
-            let button = |id: &'static str, label: &'static str, enabled: bool, next: i64, node: String, ed: WeakEntity<Editor>| {
+            let button = |id: &'static str, label: IconName, enabled: bool, next: i64, node: String, ed: WeakEntity<Editor>| {
                 div()
                     .id(id)
                     .flex()
@@ -462,7 +462,7 @@ pub fn render(
                             ed.update(cx, |e, cx| e.set_cases(&node, next, cx)).ok();
                         }
                     })
-                    .child(label)
+                    .child(Icon::new(label).size(px(12.0 * z)))
             };
             div()
                 .flex()
@@ -475,8 +475,8 @@ pub fn render(
                         .text_color(c.muted_foreground)
                         .child(format!("{count} {}", if count == 1 { "case" } else { "cases" })),
                 )
-                .child(button("fewer-cases", "−", !locked && count > 1, i64::from(count) - 1, node.to_owned(), ed.clone()))
-                .child(button("more-cases", "+", !locked, i64::from(count) + 1, node.to_owned(), ed.clone()))
+                .child(button("fewer-cases", IconName::Minus, !locked && count > 1, i64::from(count) - 1, node.to_owned(), ed.clone()))
+                .child(button("more-cases", IconName::Plus, !locked, i64::from(count) + 1, node.to_owned(), ed.clone()))
                 .into_any_element()
         }
         WidgetView::Items { rows, can_remove } => {

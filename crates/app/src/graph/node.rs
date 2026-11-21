@@ -18,7 +18,7 @@ use shader_graph::types::{
 };
 use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
 use shader_graph::color::{ColorSpace as DisplayGamut, Rgb};
-use theme::{ActiveTheme as _, ColorWheels, linear_to_hsla};
+use theme::{ActiveTheme as _, ColorWheels, Icon, IconName, linear_to_hsla};
 
 use super::fields::{Edit, Scrub, Stack, checkbox, picker};
 use super::frames::{self, FrameView};
@@ -499,7 +499,7 @@ pub fn render_node(
                                 ed.update(cx, |e, cx| e.toggle_unlinked_sockets(&id, cx)).ok();
                             }
                         })
-                        .child("◌")
+                        .child(Icon::new(IconName::EyeSlash).size(s(14.0)))
                 }))
                 .child(
                     div()
@@ -518,14 +518,14 @@ pub fn render_node(
                             cx.stop_propagation();
                             settings_ed.update(cx, |e, cx| e.open_sheet(&settings_id, cx)).ok();
                         })
-                        .child("≡"),
+                        .child(Icon::new(IconName::Faders).size(s(14.0))),
                 ),
         )
         .when(view.zone_missing, |d| {
             d.child(div().text_size(s(12.0)).text_color(c.destructive).child("Missing its paired node"))
         })
         .when(view.node_type == NODE_GROUP, |d| {
-            let button = |id: &'static str, label: &'static str, on_click: Rc<dyn Fn(&mut App)>| {
+            let button = |id: &'static str, icon: IconName, tooltip: &'static str, on_click: Rc<dyn Fn(&mut App)>| {
                 div()
                     .id(id)
                     .flex_1()
@@ -535,14 +535,14 @@ pub fn render_node(
                     .justify_center()
                     .rounded(s(6.0))
                     .bg(c.secondary)
-                    .text_size(s(12.0))
                     .cursor_pointer()
                     .hover(|st| st.opacity(0.85))
+                    .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tooltip).build(window, cx))
                     .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                         cx.stop_propagation();
                         on_click(cx);
                     })
-                    .child(label)
+                    .child(Icon::new(icon).size(s(16.0)))
             };
             let (enter, clone) = (ed.clone(), ed.clone());
             let (enter_id, clone_id) = (view.id.clone(), view.id.clone());
@@ -552,7 +552,8 @@ pub fn render_node(
                     .gap(s(4.0))
                     .child(button(
                         "enter",
-                        if view.group_locked { "Enter (locked)" } else { "Enter group" },
+                        IconName::TreeView,
+                        "Enter node group",
                         Rc::new(move |cx| {
                             enter.update(cx, |e, cx| e.enter_group(&enter_id, cx)).ok();
                         }),
@@ -560,7 +561,8 @@ pub fn render_node(
                     .when(view.group_locked && !view.locked, |d| {
                         d.child(button(
                             "clone-group",
-                            "Clone & edit",
+                            IconName::LockSimple,
+                            "Locked group - clone & edit",
                             Rc::new(move |cx| {
                                 clone.update(cx, |e, cx| e.clone_group(&clone_id, cx)).ok();
                             }),
