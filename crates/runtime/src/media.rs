@@ -9,6 +9,10 @@ use thiserror::Error;
 
 use crate::Size;
 
+mod library;
+
+pub use library::{MediaLibrary, MediaSource, MediaStatus};
+
 #[derive(Debug, Error)]
 pub enum MediaError {
     #[error("the image can't be decoded: {0}")]

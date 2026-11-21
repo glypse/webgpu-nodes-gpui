@@ -13,6 +13,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 pollster.workspace = true
 half = "2"
+rayon = "1.12"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 
 [dev-dependencies]

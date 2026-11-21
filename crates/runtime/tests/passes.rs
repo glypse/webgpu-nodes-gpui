@@ -1,8 +1,13 @@
 //! Multi-pass programs drawn on the real device: textures rendered by passes
 //! and simulations kept between frames. Frames are read back sRGB-encoded.
 
-use runtime::{FrameInputs, PixelFormat, Program, RenderOptions, Renderer, Size};
-use shader_graph::assets::{Asset, AssetFile, AssetKind};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::time::Duration;
+
+use runtime::{FrameInputs, MediaSource, MediaStatus, PixelFormat, Program, RenderOptions, Renderer, Size};
+use shader_graph::assets::{Asset, AssetFile, AssetKind, asset_hash};
 use shader_graph::graph::{Connection, FRAG_OUTPUT, GraphModel, Point};
 use shader_graph::types::{InputValue, WgslType};
 use shader_graph::zones::ZoneKind;
@@ -559,13 +564,13 @@ fn an_image_asset_is_decoded_and_sampled() {
     let out = scene.output();
     scene.link((&sample, "color"), (&out, "color"));
     let program = scene.compile();
-    let size = scene.renderer.set_media("pair", AssetKind::Image, &file).expect("decodes");
+    let size = decode_media(&mut scene.renderer, "pair", AssetKind::Image, &file);
     assert_eq!(size, Size::new(2, 1));
     let pixels = scene.draw(&program, Size::new(4, 2), 0);
     assert_eq!(pixel(&pixels, 4, 0, 0), [255, 0, 0, 255]);
     assert_eq!(pixel(&pixels, 4, 3, 1), [0, 0, 255, 255]);
     // Without its file an image reads nothing.
-    scene.renderer.remove_media("pair");
+    scene.renderer.sync_media(&BTreeMap::new());
     let pixels = scene.draw(&program, Size::new(4, 2), 0);
     assert_eq!(pixel(&pixels, 4, 0, 0)[3], 0);
 }
@@ -573,6 +578,28 @@ fn an_image_asset_is_decoded_and_sampled() {
 #[test]
 fn a_video_asset_cant_be_given_yet() {
     let mut scene = Scene::new();
-    let error = scene.renderer.set_media("clip", AssetKind::Video, b"bytes").expect_err("unsupported");
-    assert!(error.to_string().contains("video"));
+    let sources = BTreeMap::from([("clip".to_owned(), source(AssetKind::Video, b"bytes"))]);
+    scene.renderer.sync_media(&sources);
+    assert!(matches!(scene.renderer.media_status("clip"), MediaStatus::Failed(m) if m.contains("video")));
+}
+
+fn source(kind: AssetKind, bytes: &[u8]) -> MediaSource {
+    MediaSource { kind, hash: asset_hash(bytes), bytes: Arc::new(bytes.to_vec()) }
+}
+
+/// Gives the renderer an asset's file and waits for its image to decode, returning its size.
+fn decode_media(renderer: &mut Renderer, asset: &str, kind: AssetKind, file: &[u8]) -> Size {
+    let (wake, woken) = mpsc::channel();
+    renderer.set_media_waker(move || {
+        let _ = wake.send(());
+    });
+    renderer.sync_media(&BTreeMap::from([(asset.to_owned(), source(kind, file))]));
+    loop {
+        renderer.poll_media();
+        match renderer.media_status(asset) {
+            MediaStatus::Ready(size) => return size,
+            MediaStatus::Loading => woken.recv_timeout(Duration::from_secs(20)).expect("the image decodes"),
+            other => panic!("the image should decode: {other:?}"),
+        }
+    }
 }

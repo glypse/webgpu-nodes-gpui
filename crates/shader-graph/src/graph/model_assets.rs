@@ -3,9 +3,17 @@
 use std::collections::HashMap;
 
 use super::model::GraphModel;
-use crate::assets::{Asset, DEFAULT_PLAYBACK, VideoEnd, VideoPlayback, MAX_ASSETS};
+use crate::assets::{Asset, DEFAULT_PLAYBACK, ImportError, ImportFile, VideoEnd, VideoPlayback, MAX_ASSETS, describe_asset};
 use crate::library::is_library_ref;
 use crate::nodes::{MEDIA_NODE_TYPES, VIDEO, media_node_of};
+
+/// The asset an imported file is. `reused` when the project already had one
+/// with the file's hash: its file is then the project's already.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Imported {
+    pub asset: Asset,
+    pub reused: bool,
+}
 
 /// What of a Video node's playback is changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -38,6 +46,19 @@ impl GraphModel {
         self.project.assets.push(asset);
         self.changed();
         true
+    }
+
+    /// Adds a file as an asset with a new id, or finds the asset that has its
+    /// hash, so importing the same file twice keeps one asset.
+    pub fn import_file(&mut self, file: ImportFile) -> Result<Imported, ImportError> {
+        let asset = describe_asset(&uuid::Uuid::new_v4().to_string(), file)?;
+        if let Some(existing) = self.asset_by_hash(asset.hash()) {
+            return Ok(Imported { asset: existing.clone(), reused: true });
+        }
+        if !self.add_asset(asset.clone()) {
+            return Err(ImportError::TooManyAssets);
+        }
+        Ok(Imported { asset, reused: false })
     }
 
     pub fn rename_asset(&mut self, id: &str, name: &str) {
@@ -118,5 +139,39 @@ impl GraphModel {
             return false;
         };
         self.asset(asset).is_none() || !has_file(asset)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assets::{ImportError, ImportFile};
+
+    fn png() -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 0, 255]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+        out.into_inner()
+    }
+
+    #[test]
+    fn importing_the_same_bytes_again_reuses_the_asset() {
+        let mut model = GraphModel::default();
+        let bytes = png();
+        let file = ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
+        let first = model.import_file(file).expect("imports");
+        assert!(!first.reused);
+        let second = model.import_file(file).expect("imports");
+        assert!(second.reused);
+        assert_eq!(second.asset.id(), first.asset.id());
+        assert_eq!(model.assets().len(), 1);
+    }
+
+    #[test]
+    fn a_file_that_cant_be_read_adds_no_asset() {
+        let mut model = GraphModel::default();
+        let file = ImportFile { name: "notes.txt", mime: "text/plain", bytes: b"hello" };
+        assert_eq!(model.import_file(file), Err(ImportError::Unreadable));
+        assert!(model.assets().is_empty());
     }
 }

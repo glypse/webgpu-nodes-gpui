@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Window};
-use shader_graph::assets::AssetKind;
+use shader_graph::assets::{AssetKind, asset_hash};
 use shader_graph::codegen::ResourceDecl;
 use shader_graph::graph::MAX_CANVAS_SIZE;
 
 use crate::project::AssetFiles;
 use runtime::{
-    Frame, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
+    Frame, MediaSource, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
     RenderOptions, Renderer, Size, Timing,
 };
 
@@ -106,8 +106,9 @@ pub struct Playback {
     scheduled: bool,
     /// The files of the project's assets, which programs reading them are given.
     files: AssetFiles,
-    /// The files already given to the renderer, to give each once.
-    given: HashMap<String, Arc<Vec<u8>>>,
+    /// The hash of each file given, by asset id, computed once per file.
+    hashes: HashMap<String, (Arc<Vec<u8>>, String)>,
+    media_watching: bool,
 }
 
 impl EventEmitter<PlaybackEvent> for Playback {}
@@ -139,7 +140,8 @@ impl Playback {
             epoch: Instant::now(),
             scheduled: false,
             files: AssetFiles::new(),
-            given: HashMap::new(),
+            hashes: HashMap::new(),
+            media_watching: false,
         }
     }
 
@@ -150,41 +152,62 @@ impl Playback {
     /// Takes the files of the project's assets, for the programs reading them.
     pub fn set_asset_files(&mut self, files: AssetFiles, window: &mut Window, cx: &mut Context<Self>) {
         self.files = files;
+        self.hashes.clear();
+        self.watch_media(window, cx);
         self.sync_media();
         self.player.invalidate();
         self.changed(window, cx);
     }
 
-    /// Gives the renderer the files the program reads that it doesn't have yet,
-    /// and forgets those no longer there. A file that can't be used is logged
-    /// and read as a transparent image.
+    /// Gives the renderer the assets' files that the program reads, and drops
+    /// the images no program reads any more. Decoding happens off the main
+    /// thread: `media_ready` shows each one as it arrives.
     fn sync_media(&mut self) {
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else { return };
-        let wanted: HashMap<&str, AssetKind> = program
-            .plan()
-            .resources
-            .iter()
-            .filter_map(|r| match r {
-                ResourceDecl::Media { asset, video, .. } => {
-                    Some((asset.as_str(), if video.is_some() { AssetKind::Video } else { AssetKind::Image }))
+        let mut sources = BTreeMap::new();
+        for resource in &program.plan().resources {
+            let ResourceDecl::Media { asset, video, .. } = resource else { continue };
+            let Some(bytes) = self.files.get(asset) else { continue };
+            let kind = if video.is_some() { AssetKind::Video } else { AssetKind::Image };
+            let hash = match self.hashes.get(asset) {
+                Some((known, hash)) if Arc::ptr_eq(known, bytes) => hash.clone(),
+                _ => {
+                    let hash = asset_hash(bytes);
+                    self.hashes.insert(asset.clone(), (bytes.clone(), hash.clone()));
+                    hash
                 }
-                _ => None,
-            })
-            .collect();
-        for (asset, kind) in wanted {
-            match self.files.get(asset) {
-                Some(file) if self.given.get(asset).is_some_and(|g| Arc::ptr_eq(g, file)) => {}
-                Some(file) => {
-                    self.given.insert(asset.to_owned(), file.clone());
-                    if let Err(error) = renderer.set_media(asset, kind, file) {
-                        log::error!("the asset {asset} can't be shown: {error}");
-                    }
-                }
-                None => {
-                    self.given.remove(asset);
-                    renderer.remove_media(asset);
+            };
+            sources.insert(asset.clone(), MediaSource { kind, hash, bytes: bytes.clone() });
+        }
+        renderer.sync_media(&sources);
+    }
+
+    /// Starts polling the renderer for decoded images, once, when the renderer
+    /// first has a reason to read them.
+    fn watch_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.media_watching {
+            return;
+        }
+        let Some(renderer) = &mut self.renderer else { return };
+        self.media_watching = true;
+        let (wake, woken) = async_channel::bounded::<()>(1);
+        renderer.set_media_waker(move || {
+            let _ = wake.try_send(());
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            while woken.recv().await.is_ok() {
+                if this.update_in(cx, |p, window, cx| p.media_ready(window, cx)).is_err() {
+                    break;
                 }
             }
+        })
+        .detach();
+    }
+
+    fn media_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.renderer.as_mut().is_some_and(|r| r.poll_media()) {
+            self.player.invalidate();
+            self.changed(window, cx);
         }
     }
 

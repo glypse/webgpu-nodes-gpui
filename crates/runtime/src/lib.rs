@@ -18,7 +18,7 @@ mod uniforms;
 
 pub use clock::{Clock, FrameInputs, Timing};
 pub use frame_meter::{FrameMeter, FrameRate};
-pub use media::MediaError;
+pub use media::{MediaError, MediaLibrary, MediaSource, MediaStatus};
 pub use player::Player;
 pub use refresh_rate::RefreshRateMeter;
 pub use renderer::{

@@ -4,7 +4,6 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use anyhow::{Context as _, Result};
 use shader_graph::ShaderProgram;
-use shader_graph::assets::AssetKind;
 use shader_graph::codegen::{
     PLAN_TARGET, PassDecl, RenderPlan, ResourceDecl, SimulationStage, UniformValue,
 };
@@ -15,7 +14,7 @@ use shader_graph::types::{SamplerAddress, SamplerFilter};
 use crate::clock::FrameInputs;
 use crate::formats::{wgpu_format, wgpu_sample_type};
 use crate::gpu_timer::{GpuTimer, TIMING_BYTES};
-use crate::media::{DecodedImage, MediaError, decode_image, texels_of_srgb8};
+use crate::media::{MediaLibrary, MediaSource, MediaStatus};
 use crate::mips::MipGenerator;
 use crate::present::{PresentOptions, Presenter};
 use crate::simulation::{SimulationState, Step, StepKind};
@@ -319,8 +318,7 @@ pub struct Renderer {
     samplers: HashMap<(SamplerFilter, SamplerAddress), wgpu::Sampler>,
     /// The textures passes draw for others to read, by resource id.
     transients: HashMap<String, wgpu::Texture>,
-    /// The images project assets give, by asset id.
-    media: HashMap<String, wgpu::Texture>,
+    media: MediaLibrary,
     simulation: SimulationState,
     linear: Option<wgpu::Texture>,
     output: Option<wgpu::Texture>,
@@ -377,6 +375,7 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
+        let media = MediaLibrary::new(&device, &queue);
         Ok(Self {
             presenter: Presenter::new(&device),
             mips: MipGenerator::new(&device),
@@ -386,7 +385,7 @@ impl Renderer {
             empty,
             samplers: HashMap::new(),
             transients: HashMap::new(),
-            media: HashMap::new(),
+            media,
             simulation: SimulationState::default(),
             linear: None,
             output: None,
@@ -557,54 +556,24 @@ impl Renderer {
         }
     }
 
-    /// Gives a project asset's file to the programs reading it, decoded: images
-    /// only, as no video decoder is built in. Returns the image's size.
-    pub fn set_media(&mut self, asset: &str, kind: AssetKind, file: &[u8]) -> Result<Size, MediaError> {
-        if kind == AssetKind::Video {
-            return Err(MediaError::VideoUnsupported);
-        }
-        let decoded = decode_image(file, self.device.limits().max_texture_dimension_2d)?;
-        Ok(self.upload_media(asset, &decoded))
+    /// Makes the images the programs read the project's assets' images, see
+    /// `MediaLibrary::sync`.
+    pub fn sync_media(&mut self, sources: &BTreeMap<String, MediaSource>) {
+        self.media.sync(sources);
     }
 
-    /// Gives a project asset's image to the programs reading it, from
-    /// sRGB-encoded straight-alpha RGBA of 8 bits per channel.
-    pub fn set_media_pixels(&mut self, asset: &str, size: Size, rgba: &[u8]) -> Result<(), MediaError> {
-        let decoded = texels_of_srgb8(size, rgba)?;
-        self.upload_media(asset, &decoded);
-        Ok(())
+    /// Uploads the images decoded since the last call. Returns whether any changed.
+    pub fn poll_media(&mut self) -> bool {
+        self.media.poll()
     }
 
-    fn upload_media(&mut self, asset: &str, image: &DecodedImage) -> Size {
-        let size = image.size;
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("media"),
-            size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: LINEAR_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        self.queue.write_texture(
-            texture.as_image_copy(),
-            &image.texels,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size.width * 8), rows_per_image: None },
-            texture.size(),
-        );
-        self.media.insert(asset.to_owned(), texture);
-        size
+    /// Called from the decoding threads when an image finishes, so the owner polls.
+    pub fn set_media_waker(&mut self, waker: impl Fn() + Send + Sync + 'static) {
+        self.media.set_waker(waker);
     }
 
-    /// Forgets a project asset's image: programs read nothing where it was.
-    pub fn remove_media(&mut self, asset: &str) {
-        self.media.remove(asset);
-    }
-
-    /// Whether a project asset's image is given.
-    pub fn has_media(&self, asset: &str) -> bool {
-        self.media.contains_key(asset)
+    pub fn media_status(&self, asset: &str) -> MediaStatus {
+        self.media.status(asset)
     }
 
     /// Forgets every simulation's state: they all start over on the next frame.
@@ -677,7 +646,7 @@ impl Renderer {
                 ResourceDecl::State { texture, read, .. } => {
                     self.simulation.texture(texture, *read).unwrap_or(&self.empty).clone()
                 }
-                ResourceDecl::Media { asset, .. } => self.media.get(asset).unwrap_or(&self.empty).clone(),
+                ResourceDecl::Media { asset, .. } => self.media.texture(asset).unwrap_or(&self.empty).clone(),
                 ResourceDecl::Empty { .. } => self.empty.clone(),
             };
             textures.insert(resource.id().to_owned(), texture);
@@ -702,7 +671,7 @@ impl Renderer {
             .iter()
             .filter_map(|r| match r {
                 ResourceDecl::Media { id, asset, .. } => {
-                    let texture = self.media.get(asset)?;
+                    let texture = self.media.texture(asset)?;
                     Some((id.clone(), Size::new(texture.width(), texture.height())))
                 }
                 _ => None,
