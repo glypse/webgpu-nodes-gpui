@@ -4,4 +4,6 @@ pub mod frames;
 pub mod node;
 pub mod sheet;
 pub mod socket;
+pub mod type_picker;
+pub mod type_set_picker;
 pub mod zones;

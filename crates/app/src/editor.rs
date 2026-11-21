@@ -29,6 +29,7 @@ use theme::{ActiveTheme as _, Menu, MenuItem};
 
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
+use crate::graph::type_picker::{self, TypePicker};
 use crate::graph::frames::{self, Drag, FrameLook, SharedDrag, Snapshot, SnapshotItem, ZoneBox};
 use crate::graph::node::{node_width, render_node, view_of};
 use crate::graph::sheet;
@@ -706,24 +707,69 @@ impl Editor {
         cx.notify();
     }
 
-    /// A list of the types a new socket or item can have.
+    /// The types a new socket or item can have, picked from the type menu.
     pub(crate) fn open_type_list(&mut self, at: Point<Pixels>, node: String, boundary: bool, cx: &mut Context<Self>) {
+        let (kind, extra) = {
+            let model = self.model.borrow();
+            (model.node(&node).and_then(|n| shader_graph::zones::zone_kind_of(&n.node_type)), !boundary)
+        };
+        // A simulation keeps textures too; a repeat zone's items are values.
+        let types: Vec<WgslType> = if kind == Some(shader_graph::zones::ZoneKind::Repeat) {
+            WgslType::ALL.to_vec()
+        } else {
+            shader_graph::types::SOCKET_TYPES.to_vec()
+        };
         let weak = cx.entity().downgrade();
-        let items = WgslType::ALL
-            .iter()
-            .map(|ty| {
-                let (weak, node) = (weak.clone(), node.clone());
-                let ty = *ty;
-                ListItem::new(
-                    ty.id(),
-                    None,
-                    Rc::new(move |_, cx| {
-                        weak.update(cx, |e, cx| e.add_socket(&node, boundary, ty, cx)).ok();
-                    }),
-                )
-            })
-            .collect();
+        let inferred = extra.then(|| {
+            let (w, node) = (weak.clone(), node.clone());
+            ListItem::new(
+                "Inferred",
+                None,
+                type_picker::on_editor(&w, move |e, cx| e.add_inferred_item(&node, cx)),
+            )
+            .detail("Initial value")
+        });
+        self.open_type_picker(
+            at,
+            TypePicker {
+                types,
+                value: None,
+                inferred: None,
+                on_pick: Rc::new(move |ty, e, cx| e.add_socket(&node, boundary, ty, cx)),
+                on_reset: None,
+                extra: inferred.into_iter().collect(),
+            },
+            cx,
+        );
+    }
+
+    pub(crate) fn open_type_picker(&mut self, at: Point<Pixels>, picker: TypePicker, cx: &mut Context<Self>) {
+        let items = type_picker::items(&cx.entity().downgrade(), at, Rc::new(picker));
         self.open_list(at, items, cx);
+    }
+
+    fn add_inferred_item(&mut self, node: &str, cx: &mut Context<Self>) {
+        self.edit(cx, |m| {
+            if let Some(zone) = m.active_zones().zone_of_boundary.get(node).cloned() {
+                m.add_zone_item(&zone, HandleType::inferred(), None);
+            }
+        });
+    }
+
+    /// Makes an editable copy of a locked group for the node.
+    pub(crate) fn clone_group(&mut self, node: &str, cx: &mut Context<Self>) {
+        self.edit(cx, |m| {
+            m.make_group_unique(node);
+        });
+    }
+
+    pub(crate) fn toggle_unlinked_sockets(&mut self, node: &str, cx: &mut Context<Self>) {
+        let ids = vec![node.to_owned()];
+        self.edit(cx, |m| m.toggle_unlinked_sockets(&ids));
+    }
+
+    pub(crate) fn set_variable_type(&mut self, node: &str, variable: &str, ty: Option<WgslType>, cx: &mut Context<Self>) {
+        self.edit(cx, |m| m.set_variable_type(node, variable, ty));
     }
 
     fn add_socket(&mut self, node: &str, boundary: bool, ty: WgslType, cx: &mut Context<Self>) {
@@ -1343,7 +1389,7 @@ impl Editor {
 
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, point};
 
     use super::*;
 
@@ -1418,5 +1464,81 @@ mod tests {
         scene.editor.update(cx, |e, cx| e.undo(cx));
         let member = node(&scene, cx, &scene.member);
         assert_eq!((member.position.x, member.position.y), (100.0, 100.0));
+    }
+
+    fn render_frame(cx: &mut gpui::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn the_sheet_opens_on_every_kind_of_node(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let (group, zone_input, reroute) = scene.editor.update(cx, |e, cx| {
+            let mut model = e.model_mut();
+            let member = model.add_node("sin", GraphPoint::new(300.0, 300.0)).expect("adds");
+            let group = model.group_selection(&[member]).expect("groups");
+            let reference = model.node(&group).and_then(|n| n.definition_ref().map(str::to_owned)).expect("ref");
+            model.add_type_variable(&reference, &[WgslType::F32, WgslType::Vec2f]);
+            let zone = model.create_zone(shader_graph::zones::ZoneKind::Repeat, GraphPoint::new(0.0, 500.0)).expect("zone");
+            let reroute = model.add_node("reroute", GraphPoint::new(0.0, 900.0)).expect("adds");
+            drop(model);
+            e.after_edit(cx);
+            (group, zone, reroute)
+        });
+        for id in [scene.frame.clone(), group, zone_input, reroute] {
+            scene.editor.update(cx, |e, cx| {
+                e.sheet = Some(id);
+                cx.notify();
+            });
+            render_frame(cx);
+            assert!(scene.editor.read_with(cx, |e, _| e.sheet.is_some()));
+        }
+    }
+
+    #[gpui::test]
+    fn the_context_menu_lists_what_applies(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let labels = |cx: &mut gpui::VisualTestContext, on_node: bool| {
+            scene.editor.update(cx, |e, cx| {
+                e.open_context_menu(point(px(10.0), px(10.0)), Xy::new(0.0, 0.0), on_node, cx);
+                e.popup.as_ref().map(|p| p.items.iter().map(|i| i.label.to_string()).collect::<Vec<_>>()).unwrap_or_default()
+            })
+        };
+        scene.editor.update(cx, |e, cx| e.select(Vec::new(), cx));
+        let canvas = labels(cx, false);
+        assert!(canvas.contains(&"Add…".to_owned()) && canvas.contains(&"Paste".to_owned()));
+        assert!(!canvas.contains(&"Cut".to_owned()), "{canvas:?}");
+        scene.editor.update(cx, |e, cx| e.select(vec![scene.member.clone()], cx));
+        let on_member = labels(cx, true);
+        for wanted in ["Cut", "Copy", "Move", "Duplicate", "Delete", "Dissolve", "Frame selected", "Remove from frame"] {
+            assert!(on_member.contains(&wanted.to_owned()), "{wanted} in {on_member:?}");
+        }
+        assert!(!on_member.contains(&"Group selected".to_owned()));
+        render_frame(cx);
+    }
+
+    #[gpui::test]
+    fn cutting_and_pasting_moves_nodes(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        scene.editor.update(cx, |e, cx| {
+            e.select(vec![scene.loose.clone()], cx);
+            e.cut(cx);
+        });
+        assert!(scene.editor.read_with(cx, |e, _| e.model().node(&scene.loose).is_none()));
+        scene.editor.update(cx, |e, cx| e.paste(Some(Xy::new(50.0, 50.0)), cx));
+        let count = scene.editor.read_with(cx, |e, _| e.model().root().nodes.iter().filter(|n| n.is("sin")).count());
+        assert_eq!(count, 2);
+    }
+
+    #[gpui::test]
+    fn type_menus_group_types_by_kind(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        scene.editor.update(cx, |e, cx| {
+            e.open_type_list(point(px(10.0), px(10.0)), "none".to_owned(), true, cx);
+            let labels: Vec<String> = e.popup.as_ref().map(|p| p.items.iter().map(|i| i.label.to_string()).collect()).unwrap_or_default();
+            assert_eq!(labels, ["Float", "Integer", "Unsigned integer", "Boolean", "texture"]);
+        });
     }
 }

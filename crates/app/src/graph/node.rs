@@ -3,12 +3,13 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
-    SharedString, Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_flow::{HandleType, NodeProps, Position};
 use shader_graph::graph::{
-    GraphModel, GraphNode, GroupSide, LAYOUT_FRAME, NODE_GROUP, REROUTE, TypeChoice, frame_note,
-    frame_tint,
+    GROUP_OUTPUT, GraphModel, GraphNode, GroupSide, LAYOUT_FRAME, NODE_GROUP, REROUTE, TypeChoice,
+    VariableChoice, frame_note, frame_tint,
 };
 use shader_graph::nodes::CUSTOM_WGSL;
 use shader_graph::types::{
@@ -21,6 +22,7 @@ use theme::ActiveTheme as _;
 use super::fields::{Edit, Scrub, check, picker};
 use super::frames::{self, FrameView};
 use super::socket::{SocketSpec, socket};
+use super::type_picker::TypePicker;
 use crate::editor::{Editor, ListItem};
 
 #[derive(Clone)]
@@ -72,6 +74,12 @@ pub struct NodeView {
     pub zone: bool,
     pub reroute_type: Option<WgslType>,
     pub frame: Option<FrameView>,
+    /// On a group node: its type variables with more than one type to pick from.
+    pub variables: Vec<VariableChoice>,
+    /// On a Group Output: the inputs linked on another Group Output node.
+    pub elsewhere: HashSet<String>,
+    /// A zone node whose partner is gone.
+    pub zone_missing: bool,
 }
 
 pub fn node_width(node_type: &str) -> f32 {
@@ -158,6 +166,22 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         boundary: node.side(),
         zone: is_zone_node_type(&node.node_type),
         reroute_type: node.is(REROUTE).then(|| model.resolve_input_type(id, "in")),
+        variables: if node.is(NODE_GROUP) {
+            model.variable_choices(id).into_iter().filter(|c| c.variable.types.len() > 1).collect()
+        } else {
+            Vec::new()
+        },
+        elsewhere: if node.is(GROUP_OUTPUT) {
+            doc.nodes
+                .iter()
+                .filter(|n| n.is(GROUP_OUTPUT) && n.id != node.id)
+                .flat_map(|n| doc.edges_into(&n.id).map(|e| e.target_handle.clone()))
+                .collect()
+        } else {
+            HashSet::new()
+        },
+        zone_missing: is_zone_node_type(&node.node_type)
+            && !model.active_zones().zone_of_boundary.contains_key(id),
         frame: node.is(LAYOUT_FRAME).then(|| FrameView {
             label: model.node_label(id),
             note: frame_note(&node.data).map(str::to_owned),
@@ -170,34 +194,34 @@ const PAD: f32 = 12.0;
 
 type PointAction = Rc<dyn Fn(gpui::Point<gpui::Pixels>, &mut App)>;
 
-fn type_items(
-    ed: &WeakEntity<Editor>,
-    view: &NodeView,
-    choice: &TypeChoice,
-) -> Vec<ListItem> {
-    let current = choice.forced;
-    let mut items = Vec::new();
-    if choice.inferable {
-        let (ed, id) = (ed.clone(), view.id.clone());
-        items.push(ListItem::new(
-            format!("Inferred ({})", choice.inferred.id()),
-            Some(current.is_none()),
-            Rc::new(move |_, cx| {
-                ed.update(cx, |e, cx| e.set_node_type(&id, None, cx)).ok();
-            }),
-        ));
+/// The menu a node's type picker opens.
+fn node_type_picker(id: &str, choice: &TypeChoice) -> TypePicker {
+    let (pick_id, reset_id) = (id.to_owned(), id.to_owned());
+    TypePicker {
+        types: choice.types.clone(),
+        value: if choice.inferable { choice.forced } else { choice.forced.or(Some(choice.inferred)) },
+        inferred: choice.inferable.then_some(choice.inferred),
+        on_pick: Rc::new(move |ty, e, cx| e.set_node_type(&pick_id, Some(ty), cx)),
+        on_reset: Some(Rc::new(move |e, cx| e.set_node_type(&reset_id, None, cx))),
+        extra: Vec::new(),
     }
-    for ty in &choice.types {
-        let (ed, id, ty) = (ed.clone(), view.id.clone(), *ty);
-        items.push(ListItem::new(
-            ty.id(),
-            Some(current == Some(ty) || (!choice.inferable && current.is_none() && ty == choice.inferred)),
-            Rc::new(move |_, cx| {
-                ed.update(cx, |e, cx| e.set_node_type(&id, Some(ty), cx)).ok();
-            }),
-        ));
+}
+
+fn variable_type_picker(id: &str, choice: &VariableChoice) -> TypePicker {
+    let (pick_id, reset_id) = (id.to_owned(), id.to_owned());
+    let (pick_var, reset_var) = (choice.variable.id.clone(), choice.variable.id.clone());
+    TypePicker {
+        types: choice.variable.types.clone(),
+        value: if choice.inferable { choice.forced } else { choice.forced.or(Some(choice.ty)) },
+        inferred: choice.inferable.then_some(choice.inferred),
+        on_pick: Rc::new(move |ty, e, cx| {
+            if !ty.is_texture() {
+                e.set_variable_type(&pick_id, &pick_var, Some(ty), cx);
+            }
+        }),
+        on_reset: Some(Rc::new(move |e, cx| e.set_variable_type(&reset_id, &reset_var, None, cx))),
+        extra: Vec::new(),
     }
-    items
 }
 
 fn value_control(
@@ -388,6 +412,28 @@ pub fn render_node(
                 .justify_between()
                 .gap(s(8.0))
                 .child(div().min_w_0().truncate().text_size(s(14.0)).font_weight(gpui::FontWeight::MEDIUM).child(view.label.clone()))
+                .children(view.only_linked.then(|| {
+                    let (ed, id, locked) = (ed.clone(), view.id.clone(), view.locked);
+                    div()
+                        .id("show-sockets")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(s(20.0))
+                        .rounded(s(4.0))
+                        .text_size(s(13.0))
+                        .text_color(c.muted_foreground)
+                        .when(locked, |d| d.opacity(0.5))
+                        .when(!locked, |d| d.cursor_pointer().hover(|st| st.bg(c.muted).text_color(c.foreground)))
+                        .tooltip(theme::Tooltip::text("Unlinked sockets hidden: show them (Ctrl+H)"))
+                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            cx.stop_propagation();
+                            if !locked {
+                                ed.update(cx, |e, cx| e.toggle_unlinked_sockets(&id, cx)).ok();
+                            }
+                        })
+                        .child("◌")
+                }))
                 .child(
                     div()
                         .id("settings")
@@ -407,11 +453,14 @@ pub fn render_node(
                         .child("≡"),
                 ),
         )
+        .when(view.zone_missing, |d| {
+            d.child(div().text_size(s(12.0)).text_color(c.destructive).child("Missing its paired node"))
+        })
         .when(view.node_type == NODE_GROUP, |d| {
-            let (ed, id) = (ed.clone(), view.id.clone());
-            d.child(
+            let button = |id: &'static str, label: &'static str, on_click: Rc<dyn Fn(&mut App)>| {
                 div()
-                    .id("enter")
+                    .id(id)
+                    .flex_1()
                     .h(s(26.0))
                     .flex()
                     .items_center()
@@ -423,9 +472,32 @@ pub fn render_node(
                     .hover(|st| st.opacity(0.85))
                     .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                         cx.stop_propagation();
-                        ed.update(cx, |e, cx| e.enter_group(&id, cx)).ok();
+                        on_click(cx);
                     })
-                    .child(if view.group_locked { "Enter (locked)" } else { "Enter group" }),
+                    .child(label)
+            };
+            let (enter, clone) = (ed.clone(), ed.clone());
+            let (enter_id, clone_id) = (view.id.clone(), view.id.clone());
+            d.child(
+                div()
+                    .flex()
+                    .gap(s(4.0))
+                    .child(button(
+                        "enter",
+                        if view.group_locked { "Enter (locked)" } else { "Enter group" },
+                        Rc::new(move |cx| {
+                            enter.update(cx, |e, cx| e.enter_group(&enter_id, cx)).ok();
+                        }),
+                    ))
+                    .when(view.group_locked && !view.locked, |d| {
+                        d.child(button(
+                            "clone-group",
+                            "Clone & edit",
+                            Rc::new(move |cx| {
+                                clone.update(cx, |e, cx| e.clone_group(&clone_id, cx)).ok();
+                            }),
+                        ))
+                    }),
             )
         })
         .children(view.type_choice.clone().map(|choice| {
@@ -434,8 +506,7 @@ pub fn render_node(
                 (None, true) => format!("{} (inferred)", choice.inferred.id()),
                 (None, false) => choice.inferred.id().to_owned(),
             };
-            let items = type_items(ed, view, &choice);
-            let ed = ed.clone();
+            let (ed, id) = (ed.clone(), view.id.clone());
             div().flex().child(picker(
                 SharedString::from(format!("type-{}", view.id)),
                 label,
@@ -443,10 +514,41 @@ pub fn render_node(
                 view.locked,
                 cx,
                 move |at, _, cx| {
-                    let items = items.clone();
-                    ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                    let pick = node_type_picker(&id, &choice);
+                    ed.update(cx, |e, cx| e.open_type_picker(at, pick, cx)).ok();
                 },
             ))
+        }))
+        .children(view.variables.iter().map(|choice| {
+            let label = match (choice.forced, choice.inferable) {
+                (Some(t), _) => t.id().to_owned(),
+                (None, true) => format!("{} (inferred)", choice.inferred.id()),
+                (None, false) => choice.ty.id().to_owned(),
+            };
+            let (ed, id, choice) = (ed.clone(), view.id.clone(), choice.clone());
+            div()
+                .flex()
+                .items_center()
+                .gap(s(4.0))
+                .child(
+                    div()
+                        .w(s(20.0))
+                        .flex_none()
+                        .text_size(s(12.0))
+                        .text_color(c.muted_foreground)
+                        .child(choice.variable.name.clone()),
+                )
+                .child(picker(
+                    SharedString::from(format!("var-{}-{}", view.id, choice.variable.id)),
+                    label,
+                    z,
+                    view.locked,
+                    cx,
+                    move |at, _, cx| {
+                        let pick = variable_type_picker(&id, &choice);
+                        ed.update(cx, |e, cx| e.open_type_picker(at, pick, cx)).ok();
+                    },
+                ))
         }))
         .children(view.settings.iter().map(|setting| {
             let label = setting
@@ -508,7 +610,11 @@ pub fn render_node(
         let linked = is_linked(&linked_in, &i.id);
         let spec = SocketSpec { id: Some(i.id.clone()), kind: HandleType::Target, position: Position::Left, ty: i.ty, inset: PAD };
         let shared = i.shared.as_ref().map(|n| format!(" ({n})")).unwrap_or_default();
-        let body: AnyElement = if i.variadic || linked {
+        let body: AnyElement = if i.variadic {
+            label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
+        } else if view.elsewhere.contains(&i.id) {
+            label_text(format!("{}: {} (elsewhere)", i.label, i.ty.id()), z, cx).opacity(0.6).into_any_element()
+        } else if linked {
             label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
         } else if i.fallback {
             label_text(format!("{}: {} (default)", i.label, i.ty.id()), z, cx).into_any_element()
