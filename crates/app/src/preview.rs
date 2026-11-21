@@ -279,21 +279,11 @@ impl Render for PreviewArea {
                         this.zoom_by(factor, Some(anchor), cx);
                     }
                 }))
-                .child(
-                    div().absolute().left_2().bottom_2().child(
-                        Button::new("fit-view")
-                            .outline()
-                            
-                            .icon(IconName::ArrowsIn)
-                            .tooltip("Fit view (0)")
-                            .on_click(cx.safe_listener(|this, _, _, cx| this.fit(cx))),
-                    ),
-                )
                 .children(failure.map(|failure| {
                     let c = &theme.colors;
                     div()
                         .absolute()
-                        .left(px(56.0))
+                        .left_2()
                         .right_2()
                         .bottom_2()
                         .p_3()
