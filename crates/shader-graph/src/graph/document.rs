@@ -32,6 +32,23 @@ pub struct Viewport {
     pub zoom: f32,
 }
 
+/// How a color widget edits one color mode: the space it works in and the
+/// group inputs that hold its components.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColorWidgetMode {
+    pub space: String,
+    pub components: [String; 3],
+}
+
+/// A widget drawn on the nodes of a library group, driven by the group's
+/// inputs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum GroupWidget {
+    /// A color picker: `mode` is the input choosing among `modes`.
+    Color { mode: String, modes: BTreeMap<String, ColorWidgetMode> },
+}
+
 /// Which side of a group's interface: its inputs, or its outputs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GroupSide {
@@ -180,6 +197,9 @@ pub struct GraphDocument {
     /// What a group's inputs hold on group nodes until edited, by input id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub defaults: BTreeMap<String, InputValue>,
+    /// Set on library groups only; never saved.
+    #[serde(skip)]
+    pub widget: Option<GroupWidget>,
 }
 
 impl GraphDocument {
@@ -235,11 +255,23 @@ impl GraphDocument {
     }
 }
 
+fn serialize_user_definitions<S: serde::Serializer>(
+    definitions: &BTreeMap<String, GraphDocument>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(
+        definitions.iter().filter(|(key, _)| key.as_str() == ROOT_ID || !crate::library::is_library_ref(key)),
+    )
+}
+
 /// The whole project: the root in `definitions[ROOT_ID]`, groups beside it.
 /// Besides `definitions`, the original's `settings`, `layout` and `assets`
 /// are kept as saved.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GraphProject {
+    /// Library groups are registered here too but never serialised: the app
+    /// ships its own.
+    #[serde(serialize_with = "serialize_user_definitions")]
     pub definitions: BTreeMap<String, GraphDocument>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,

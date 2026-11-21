@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use crate::graph::{
     FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphModel, GraphNode, NODE_GROUP, Point, ROOT_ID,
 };
+use crate::library;
 use crate::nodes::{default_data_for_type, registered, registered_nodes, resolve_descriptor};
 use crate::types::{
     EnumVariant, InputValue, NodeCategory, NodeData, NodeDescriptor, WgslType, enum_value,
@@ -36,6 +37,10 @@ pub struct AddMenuEntry {
     pub label: String,
     pub aliases: Vec<String>,
     pub heading: String,
+    /// Nested sections under the heading it is listed in, outermost first.
+    pub section: Vec<String>,
+    /// The section of search results it is listed in, independent of `section`.
+    pub search_section: Option<String>,
     pub kind: EntryKind,
     pub data: Option<NodeData>,
     /// Choices made when creating it (a type, an enum): search picks the
@@ -49,6 +54,16 @@ pub struct AddMenuEntry {
 
 pub const GROUPS_HEADING: &str = "Groups";
 
+fn category_from_id(id: &str) -> Option<NodeCategory> {
+    NodeCategory::ALL.into_iter().find(|c| c.id() == id)
+}
+
+/// The heading a library category is listed under: a node category's
+/// label, or the category itself when it names a heading of its own.
+fn heading_of(category: &str) -> String {
+    category_from_id(category).map_or_else(|| category.to_owned(), |c| category_label(c).to_owned())
+}
+
 pub fn category_label(category: NodeCategory) -> &'static str {
     match category {
         NodeCategory::Input => "Input",
@@ -59,6 +74,7 @@ pub fn category_label(category: NodeCategory) -> &'static str {
         NodeCategory::Converter => "Converter",
         NodeCategory::Zone => "Zones",
         NodeCategory::Color => "Color",
+        NodeCategory::Texture => "Texture",
         NodeCategory::Misc => "Miscellaneous",
         NodeCategory::Layout => "Layout",
     }
@@ -209,6 +225,8 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
         label: label.to_owned(),
         aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
         heading: category_label(NodeCategory::Zone).to_owned(),
+        section: Vec::new(),
+        search_section: None,
         kind: EntryKind::Zone(kind),
         data: None,
         choices: Vec::new(),
@@ -236,6 +254,8 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
             label: descriptor.label.clone(),
             aliases: descriptor.aliases.clone(),
             heading: category_label(descriptor.category).to_owned(),
+            section: Vec::new(),
+            search_section: None,
             kind: EntryKind::Node { node_type: descriptor.type_id.clone() },
             data: None,
             choices: node_choices(descriptor),
@@ -253,6 +273,8 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
                 label: label.to_owned(),
                 aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
                 heading: category_label(category).to_owned(),
+                section: Vec::new(),
+                search_section: None,
                 kind: EntryKind::Node { node_type: ty.to_owned() },
                 data: None,
                 choices: Vec::new(),
@@ -261,6 +283,22 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
             });
         }
     }
+    for entry in library::entries() {
+        let reference = &entry.reference;
+        entries.push(AddMenuEntry {
+            key: format!("group:{}", entry.id),
+            label: entry.label.clone(),
+            aliases: entry.aliases.clone(),
+            heading: heading_of(&entry.category),
+            section: entry.section.clone(),
+            search_section: entry.search_section.clone(),
+            kind: EntryKind::Group { definition_ref: reference.clone() },
+            data: None,
+            choices: model.project().document(reference).map(group_choices).unwrap_or_default(),
+            disabled: model.would_create_group_cycle(reference),
+            deletable: false,
+        });
+    }
     let used: HashSet<&str> = model
         .project()
         .definitions
@@ -268,7 +306,7 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
         .flat_map(|d| d.group_refs())
         .collect();
     for (reference, doc) in &model.project().definitions {
-        if reference == ROOT_ID {
+        if reference == ROOT_ID || library::is_library_ref(reference) {
             continue;
         }
         entries.push(AddMenuEntry {
@@ -276,6 +314,8 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
             label: doc.label.clone().unwrap_or_else(|| "Group".to_owned()),
             aliases: Vec::new(),
             heading: GROUPS_HEADING.to_owned(),
+            section: Vec::new(),
+            search_section: None,
             kind: EntryKind::Group { definition_ref: reference.clone() },
             data: None,
             choices: group_choices(doc),
@@ -303,6 +343,49 @@ pub fn group_by_heading(entries: &[AddMenuEntry]) -> Vec<(String, Vec<&AddMenuEn
         }
     }
     groups
+}
+
+/// A menu section: its entries, then its own sections, each in order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuSection<'a> {
+    pub name: String,
+    pub entries: Vec<&'a AddMenuEntry>,
+    pub sections: Vec<MenuSection<'a>>,
+}
+
+fn sections_of<'a>(entries: &[&'a AddMenuEntry], depth: usize) -> Vec<MenuSection<'a>> {
+    let mut names: Vec<&str> = Vec::new();
+    for name in entries.iter().filter_map(|e| e.section.get(depth)) {
+        if !names.contains(&name.as_str()) {
+            names.push(name);
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            let inside: Vec<&AddMenuEntry> =
+                entries.iter().copied().filter(|e| e.section.get(depth).map(String::as_str) == Some(name)).collect();
+            MenuSection {
+                name: name.to_owned(),
+                entries: inside.iter().copied().filter(|e| e.section.len() == depth + 1).collect(),
+                sections: sections_of(&inside, depth + 1),
+            }
+        })
+        .collect()
+}
+
+/// Entries under their heading, those without a section first, then the sections.
+pub fn group_by_heading_and_section(
+    entries: &[AddMenuEntry],
+) -> Vec<(String, Vec<&AddMenuEntry>, Vec<MenuSection<'_>>)> {
+    group_by_heading(entries)
+        .into_iter()
+        .map(|(heading, under)| {
+            let loose = under.iter().copied().filter(|e| e.section.is_empty()).collect();
+            let sections = sections_of(&under, 0);
+            (heading, loose, sections)
+        })
+        .collect()
 }
 
 /// Creates what an entry stands for at `position`; returns the id of the
@@ -474,6 +557,26 @@ pub struct SearchResult {
     /// Byte ranges of the label that matched.
     pub label_ranges: Vec<(usize, usize)>,
     pub alias_ranges: Vec<(usize, usize)>,
+}
+
+/// Search results in their search sections: the main results first, then
+/// each section's in the order they first appear, keeping the results' order
+/// within each.
+pub fn group_by_search_section(results: &[SearchResult]) -> Vec<(Option<String>, Vec<&SearchResult>)> {
+    let mut sections: Vec<Option<String>> = vec![None];
+    for section in results.iter().filter_map(|r| r.entry.search_section.as_ref()) {
+        if !sections.contains(&Some(section.clone())) {
+            sections.push(Some(section.clone()));
+        }
+    }
+    sections
+        .into_iter()
+        .filter_map(|section| {
+            let inside: Vec<&SearchResult> =
+                results.iter().filter(|r| r.entry.search_section == section).collect();
+            (!inside.is_empty()).then_some((section, inside))
+        })
+        .collect()
 }
 
 /// Text split into words with their byte offsets.

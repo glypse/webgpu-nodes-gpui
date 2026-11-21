@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
+# Without it parsed floats can differ in the last digit, which changes library versions.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
 uuid = { version = "1", features = ["v4"] }
 

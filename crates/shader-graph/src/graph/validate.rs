@@ -199,6 +199,7 @@ impl GraphProject {
         let value: serde_json::Value = serde_json::from_str(text).map_err(|_| LoadError::InvalidJson)?;
         let mut project: GraphProject =
             serde_json::from_value(value).map_err(|e| LoadError::InvalidSchema(e.to_string()))?;
+        crate::library::register(&mut project);
         project.reindex();
         let issues = project_issues(&project);
         if issues.is_empty() { Ok(project) } else { Err(LoadError::InvalidGraph(issues)) }

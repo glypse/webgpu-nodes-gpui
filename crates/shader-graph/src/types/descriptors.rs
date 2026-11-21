@@ -16,12 +16,13 @@ pub enum NodeCategory {
     Converter,
     Zone,
     Color,
+    Texture,
     Misc,
     Layout,
 }
 
 impl NodeCategory {
-    pub const ALL: [NodeCategory; 10] = [
+    pub const ALL: [NodeCategory; 11] = [
         NodeCategory::Input,
         NodeCategory::Math,
         NodeCategory::Vector,
@@ -30,6 +31,7 @@ impl NodeCategory {
         NodeCategory::Converter,
         NodeCategory::Zone,
         NodeCategory::Color,
+        NodeCategory::Texture,
         NodeCategory::Misc,
         NodeCategory::Layout,
     ];
@@ -44,6 +46,7 @@ impl NodeCategory {
             NodeCategory::Converter => "converter",
             NodeCategory::Zone => "zone",
             NodeCategory::Color => "color",
+            NodeCategory::Texture => "texture",
             NodeCategory::Misc => "misc",
             NodeCategory::Layout => "layout",
         }

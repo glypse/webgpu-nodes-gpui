@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod codegen;
 pub mod enums;
 pub mod graph;
+pub mod library;
 pub mod nodes;
 #[cfg(test)]
 mod testing;

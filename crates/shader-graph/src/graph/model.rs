@@ -56,6 +56,7 @@ impl Default for GraphModel {
 
 impl GraphModel {
     pub fn new(mut project: GraphProject) -> Self {
+        crate::library::register(&mut project);
         project.reindex();
         let snapshot = Self::snapshot_of(&project);
         let mut history = History::default();
@@ -86,6 +87,7 @@ impl GraphModel {
 
     /// Replace the whole project, forgetting history and selection.
     pub fn set_project(&mut self, mut project: GraphProject) {
+        crate::library::register(&mut project);
         project.reindex();
         self.project = project;
         self.path.clear();
@@ -119,6 +121,7 @@ impl GraphModel {
     /// Call after changing the project: rebuilds what is derived from it and
     /// records an undo step when it differs from the last one.
     pub(crate) fn changed(&mut self) {
+        crate::library::register(&mut self.project);
         self.project.reindex();
         self.resolver.clear();
         let valid = self.valid_path(&self.path);
@@ -167,6 +170,7 @@ impl GraphModel {
 
     fn restore(&mut self, snapshot: &str) -> bool {
         let Ok(mut project) = serde_json::from_str::<GraphProject>(snapshot) else { return false };
+        crate::library::register(&mut project);
         project.reindex();
         self.project = project;
         self.resolver.clear();
@@ -269,6 +273,7 @@ impl GraphModel {
                 return true;
             }
             match node.definition_ref().and_then(|r| self.project.document(r)) {
+                Some(next) if next.locked => return true,
                 Some(next) => doc = next,
                 None => return false,
             }

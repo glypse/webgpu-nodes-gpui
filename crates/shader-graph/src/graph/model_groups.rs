@@ -8,6 +8,7 @@ use super::{
     GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GroupRef,
     GroupSide, NODE_GROUP, Point, ROOT_ID, new_id,
 };
+use crate::library::is_library_ref;
 use crate::enums::{fit_variants, is_under, owner_exists};
 use crate::types::{
     EnumVariant, GroupHandleDef, HandleType, InputOwner, InputValue, TypeVariable, WgslType,
@@ -382,7 +383,10 @@ impl GraphModel {
 
     /// Delete a group's definition, and the nodes instancing it.
     pub fn delete_definition(&mut self, definition_ref: &str) {
-        if definition_ref == ROOT_ID || self.project.definitions.remove(definition_ref).is_none() {
+        if definition_ref == ROOT_ID
+            || is_library_ref(definition_ref)
+            || self.project.definitions.remove(definition_ref).is_none()
+        {
             return;
         }
         let mut gone: HashSet<String> = HashSet::new();
@@ -417,7 +421,7 @@ impl GraphModel {
         self.project
             .definitions
             .keys()
-            .filter(|k| k.as_str() != ROOT_ID && !used.contains(*k))
+            .filter(|k| k.as_str() != ROOT_ID && !used.contains(*k) && !is_library_ref(k))
             .cloned()
             .collect()
     }
@@ -436,7 +440,7 @@ impl GraphModel {
     // ── Interface ────────────────────────────────────────────────────────────
 
     fn user_definition(&mut self, definition_ref: &str) -> Option<&mut GraphDocument> {
-        if definition_ref == ROOT_ID {
+        if definition_ref == ROOT_ID || is_library_ref(definition_ref) {
             return None;
         }
         self.project.definitions.get_mut(definition_ref)

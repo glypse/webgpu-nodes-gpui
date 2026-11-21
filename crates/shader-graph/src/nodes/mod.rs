@@ -42,6 +42,7 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     all.extend(standard::logic_nodes());
     all.extend(standard::integer_nodes());
     all.extend(standard::converter_nodes());
+    all.extend(standard::color_nodes());
     all.push(width_switch_node());
     all.push(build_match_descriptor(&[]));
     all.push(build_index_switch_descriptor(&NodeData::default()));

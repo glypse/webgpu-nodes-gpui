@@ -1,7 +1,7 @@
 //! The registered node types with fixed sockets: input, math, vector,
 //! integer, logic and converters.
 
-use crate::codegen::{FRAGMENT_VAR, FRAME_VAR};
+use crate::codegen::{DISPLAY_P3_FIELD, FRAGMENT_VAR, FRAME_VAR};
 use crate::types::{
     BOOL_TYPES, FLOAT_VEC_TYPES, INTEGER_TYPES, InputControl, NUMERIC_TYPES, NodeCategory,
     NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeSetting, ScalarKind, SIGNED_TYPES,
@@ -502,6 +502,44 @@ pub(super) fn converter_nodes() -> Vec<D> {
             .aliases(&["uint", "Cast", "Convert"]),
         convert_node("to-bool", "To Boolean", ScalarKind::Bool, false).aliases(&["Cast", "Convert"]),
     ]
+}
+
+const SRGB_TO_DISPLAY_P3: [[f64; 3]; 3] = [
+    [0.822461969, 0.177538031, 0.0],
+    [0.033194199, 0.966805801, 0.0],
+    [0.017082631, 0.072397441, 0.910519929],
+];
+const DISPLAY_P3_TO_SRGB: [[f64; 3]; 3] = [
+    [1.224940176, -0.224940176, 0.0],
+    [-0.042056955, 1.042056955, 0.0],
+    [-0.019637555, -0.078636046, 1.0982736],
+];
+
+/// `m` as a `mat3x3f`, whose constructor takes columns.
+fn wgsl_mat3(m: &[[f64; 3]; 3]) -> String {
+    let column = |i: usize| format!("vec3f({:.9}, {:.9}, {:.9})", m[0][i], m[1][i], m[2][i]);
+    format!("mat3x3f({}, {}, {})", column(0), column(1), column(2))
+}
+
+pub(super) fn color_nodes() -> Vec<D> {
+    // Per draw rather than per project, so an sRGB export of a Display P3
+    // project fits sRGB.
+    let clip = D::new("display-gamut-clip", "Clip to Display Gamut", NodeCategory::Color)
+        .aliases(&["Gamut Clip", "Clip Color", "Display P3", "sRGB Gamut", "Color Space Conversion"])
+        .inputs(vec![NodeInputDef::new("color", "color", &[WgslType::Vec3f])])
+        .outputs(vec![NodeOutputDef::new("color", "color", WgslType::Vec3f)])
+        .defaults(float_values([("color", 0.0)]))
+        .wgsl(|ctx| {
+            let source = format!(
+                "fn clip_to_display_gamut(c: vec3f) -> vec3f {{\n  if ({FRAME_VAR}.{DISPLAY_P3_FIELD} == 0u) {{\n    return clamp(c, vec3f(0.0), vec3f(1.0));\n  }}\n  let p3 = clamp({} * c, vec3f(0.0), vec3f(1.0));\n  return {} * p3;\n}}",
+                wgsl_mat3(&SRGB_TO_DISPLAY_P3),
+                wgsl_mat3(&DISPLAY_P3_TO_SRGB),
+            );
+            let name = ctx.define_fn("clip_to_display_gamut", &source);
+            let color = ctx.promote_input("color");
+            vec![format!("let {} = {name}({color});", ctx.var_name)]
+        });
+    vec![clip]
 }
 
 pub(super) fn misc_nodes() -> Vec<D> {
