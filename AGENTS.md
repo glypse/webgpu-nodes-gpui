@@ -28,14 +28,11 @@ Loops of repeated waits are the most common way agents waste a session. Follow t
 - Port the original's tests for what you port, plus regression tests for bugs you hit.
 - Generated WGSL must validate with naga. GPU tests run on the real device.
 - UI behaviour: `TestAppContext` (see `crates/flow/tests/pointer.rs`); layout can be checked with `debug_selector`/`debug_bounds`.
-- Build into your own target dir on this drive: `CARGO_TARGET_DIR=/Volumes/T7WA/GitHub/webgpu-nodes-gpui/target/agents/<your-name>`. Before each commit: tests for your crates, `cargo build --workspace`, `cargo clippy --workspace --all-targets` clean for your files.
+- Build in the shared `target/` (don't set `CARGO_TARGET_DIR`): everyone reuses the same compiled dependencies. Cargo locks it, so a "Blocking waiting for file lock" message means another agent is building; it is not a hang. Before each commit: tests for your crates, `cargo build --workspace`, `cargo clippy --workspace --all-targets` clean for your files.
 
 ## Version control
 - GitButler: `but status`, then `but commit -b dev -m "<message>" <paths>` listing only your files. Never run git write commands, never push.
 - Focused commits; messages describe the change in one plain sentence (plus a short body if useful).
-
-## Finishing
-Delete your target dir (`target/agents/<your-name>`) once your work is committed: they take several GB each.
 
 ## Report
 At the end, briefly: what changed and how it was verified, what's left (and why), API changes other crates must know, edits outside your files. Send the final report exactly once; once it's delivered, stop, even if you're woken up again.

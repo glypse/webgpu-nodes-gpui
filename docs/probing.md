@@ -3,8 +3,8 @@
 Build once, then point the binary at a project with flags that bound the run.
 
 ```sh
-cargo build --release -p webgpu-nodes   # with CARGO_TARGET_DIR=target/agents/<name> if you use one
-BIN=target/release/webgpu-nodes         # or target/agents/<name>/release/webgpu-nodes
+cargo build --release -p webgpu-nodes
+BIN=target/release/webgpu-nodes
 ```
 
 `webgpu-nodes --help` lists every flag.
@@ -12,7 +12,7 @@ BIN=target/release/webgpu-nodes         # or target/agents/<name>/release/webgpu
 ## Screenshot
 
 ```sh
-$BIN crates/app/scenes/default.json --play --seconds 5 --screenshot target/agents/probe/d.png
+$BIN crates/app/scenes/default.json --play --seconds 5 --screenshot target/probe/d.png
 ```
 
 The PNG is the app window's own pixels, captured even when other windows cover it. Read it with the Read tool. The first run needs Screen Recording permission for the terminal (System Settings > Privacy & Security > Screen Recording); without it the capture still works in our tests but macOS logs a warning, so check the image.
@@ -32,7 +32,7 @@ Exit status is 0 on a clean quit, 1 if `--screenshot` could not be written.
 ## Profile
 
 ```sh
-$BIN crates/app/scenes/voronoi.wgnodes --play --seconds 10 --profile target/agents/probe/v.json
+$BIN crates/app/scenes/voronoi.wgnodes --play --seconds 10 --profile target/probe/v.json
 ```
 
 This writes a Chrome trace to `v.json` (open it in <https://ui.perfetto.dev>) and prints a summary when the app quits. The trace is written by the app's quit hook, so it is complete even though gpui exits the process itself.
@@ -58,9 +58,9 @@ Not covered: gpui's layout and paint phases. gpui-fast only exposes them through
 For where CPU time goes inside functions, use a sampling profiler. `samply` is not installed in this checkout. To install it, run `cargo install samply` (this compiles and installs a binary into `~/.cargo/bin`). Then:
 
 ```sh
-samply record --save-only -o target/agents/probe/cpu.json.gz -- \
+samply record --save-only -o target/probe/cpu.json.gz -- \
   $BIN crates/app/scenes/voronoi.wgnodes --play --seconds 10
-samply load target/agents/probe/cpu.json.gz
+samply load target/probe/cpu.json.gz
 ```
 
 This section has not been run; check `samply record --help` if the flags differ.
