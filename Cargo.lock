@@ -5384,6 +5384,7 @@ name = "shader-graph"
 version = "0.1.0"
 dependencies = [
  "naga 30.0.2",
+ "runtime",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

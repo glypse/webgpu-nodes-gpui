@@ -12,3 +12,4 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }
+runtime = { path = "../runtime" }

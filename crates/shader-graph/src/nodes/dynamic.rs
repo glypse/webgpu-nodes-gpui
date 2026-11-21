@@ -398,7 +398,8 @@ pub fn build_group_descriptor(node: &GraphNode, project: &GraphProject) -> NodeD
             data.values.insert(h.id.clone(), value);
         }
     }
-    NodeDescriptor::new("node-group", definition.label.as_deref().unwrap_or(reference), NodeCategory::Misc)
+    let mut descriptor =
+        NodeDescriptor::new("node-group", definition.label.as_deref().unwrap_or(reference), NodeCategory::Misc)
         .static_outputs()
         .inputs(
             definition
@@ -420,5 +421,7 @@ pub fn build_group_descriptor(node: &GraphNode, project: &GraphProject) -> NodeD
                 })
                 .collect(),
         )
-        .defaults(data)
+        .defaults(data);
+    descriptor.widget = definition.widget.clone().map(NodeWidget::Color);
+    descriptor
 }

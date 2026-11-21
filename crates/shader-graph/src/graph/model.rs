@@ -7,8 +7,9 @@ use std::sync::Arc;
 use super::history::History;
 use super::{
     Connection, FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode,
-    GraphProject, NODE_GROUP, Point, ROOT_ID, new_id,
+    GraphProject, GroupWidget, NODE_GROUP, Point, ROOT_ID, new_id,
 };
+use crate::color::color_mode_conversion;
 use crate::codegen::{CodegenError, Program, ShaderOptions, generate_program};
 use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, hidden_inputs_of};
 use crate::nodes::{default_data_for_type, registered, resolve_descriptor};
@@ -476,14 +477,48 @@ impl GraphModel {
 
     /// Set the value an input holds while unlinked (`None` clears it).
     pub fn set_input_value(&mut self, node_id: &str, input: &str, value: Option<InputValue>) {
-        self.update_node_data(node_id, |data| match value {
-            Some(v) => {
-                data.values.insert(input.to_owned(), v);
+        let converted = self.converted_colors(node_id, input, value.as_ref());
+        self.update_node_data(node_id, |data| {
+            match value {
+                Some(v) => {
+                    data.values.insert(input.to_owned(), v);
+                }
+                None => {
+                    data.values.remove(input);
+                }
             }
-            None => {
-                data.values.remove(input);
+            for (component, number) in converted {
+                data.values.insert(component, number.into());
             }
         });
+    }
+
+    /// The components a colour widget's mode change sets so the colour stays
+    /// the same.
+    fn converted_colors(&self, node_id: &str, input: &str, value: Option<&InputValue>) -> Vec<(String, f64)> {
+        let Some(node) = self.node(node_id) else { return Vec::new() };
+        let Some(def) = node.definition_ref().and_then(|r| self.project.document(r)) else {
+            return Vec::new();
+        };
+        let Some(widget @ GroupWidget::Color { mode, .. }) = &def.widget else { return Vec::new() };
+        if mode != input {
+            return Vec::new();
+        }
+        let Some(variants) = def.inputs.iter().find(|h| h.id == *mode).and_then(|h| h.variants.as_deref()) else {
+            return Vec::new();
+        };
+        let mut after = node.data.values.clone();
+        match value {
+            Some(v) => after.insert(input.to_owned(), *v),
+            None => after.remove(input),
+        };
+        let linked: HashSet<String> = self
+            .project
+            .document_of(node_id)
+            .map(|doc| doc.edges_into(node_id).map(|e| e.target_handle.clone()).collect())
+            .unwrap_or_default();
+        color_mode_conversion(widget, variants, &def.defaults, &node.data.values, &after, &linked)
+            .unwrap_or_default()
     }
 
     /// Pick an option of one of the node's settings.

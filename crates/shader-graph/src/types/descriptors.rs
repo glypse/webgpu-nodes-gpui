@@ -218,7 +218,7 @@ impl NodeSetting {
 }
 
 /// A larger editor a front end draws in a node's body.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum NodeWidget {
     /// A code editor for the node's WGSL and its sockets.
     Code,
@@ -226,6 +226,10 @@ pub enum NodeWidget {
     Cases,
     /// A graph editing the node's curve.
     Curve,
+    /// A gradient editing the node's colour ramp stops and their colours.
+    Ramp,
+    /// A colour wheel and value ramp editing the values of a colour group's inputs.
+    Color(crate::graph::GroupWidget),
 }
 
 /// Shader helper functions nodes may request through `WgslCtx::helper`.
