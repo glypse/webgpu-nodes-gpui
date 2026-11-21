@@ -18,6 +18,7 @@ use theme::{ActiveTheme as _, IconName};
 
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
+use crate::graph::breadcrumbs::Breadcrumbs;
 use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences;
@@ -109,6 +110,7 @@ struct AreaViews {
     timelines: HashMap<AreaId, Entity<TimelineBar>>,
     code: HashMap<AreaId, Entity<CodeView>>,
     graphs: HashMap<AreaId, Entity<Editor>>,
+    breadcrumbs: HashMap<AreaId, Entity<Breadcrumbs>>,
     /// Where the graph areas of a loaded layout were, until their editors are made.
     pending: HashMap<AreaId, GraphView>,
     /// Whether the shell's own editor is shown in an area: the others edit the same project through their own.
@@ -212,7 +214,12 @@ impl Shell {
                                 area
                             }
                         };
-                        AreaContent { toolbar: None, body: Some(area.into()) }
+                        let crumbs = views
+                            .breadcrumbs
+                            .entry(id)
+                            .or_insert_with(|| cx.new(|cx| Breadcrumbs::new(area.clone(), cx)))
+                            .clone();
+                        AreaContent { toolbar: Some(crumbs.into()), body: Some(area.into()) }
                     }
                     Panel::Preview => {
                         let (area, toolbar) = views
@@ -337,6 +344,7 @@ impl Shell {
         {
             let mut views = self.views.borrow_mut();
             views.graphs.clear();
+            views.breadcrumbs.clear();
             views.primary_shown = false;
             views.pending = graphs.into_iter().collect();
         }

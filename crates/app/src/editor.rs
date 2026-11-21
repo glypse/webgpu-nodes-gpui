@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 
 use handle::{ModelHandle, ModelMut};
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels,
-    Point, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    Point, Render, SharedString, Styled as _, Window, div,
+    px,
 };
 use gpui_flow::{
     Connection as FlowConnection, ControlsOptions, Edge, EdgeStyle, FitViewOptions, Flow, FlowEvent, Id,
@@ -28,7 +28,7 @@ use shader_graph::graph::{
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
 use gpui_component::menu::PopupMenu;
-use theme::{ActiveTheme as _, Icon, IconName, popup};
+use theme::{ActiveTheme as _, popup};
 
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
@@ -858,7 +858,7 @@ impl Editor {
         self.enter_document(cx, before);
     }
 
-    fn jump_to(&mut self, depth: usize, cx: &mut Context<Self>) {
+    pub(crate) fn jump_to(&mut self, depth: usize, cx: &mut Context<Self>) {
         self.save_viewport(cx);
         let before = self.model.borrow().active_definition_ref();
         let path: Vec<String> = self.model.borrow().path()[..depth].to_vec();
@@ -1454,42 +1454,14 @@ impl Editor {
         }
     }
 
-    fn render_breadcrumbs(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let c = &theme.colors;
+    /// The group path as crumbs, the root first, each with its depth, and whether the group is locked.
+    pub(crate) fn breadcrumbs(&self) -> (Vec<(usize, String)>, bool) {
         let model = self.model.borrow();
         let mut crumbs: Vec<(usize, String)> = vec![(0, "Root".to_owned())];
         for (i, (_, label, _)) in model.path_labels(model.path()).into_iter().enumerate() {
             crumbs.push((i + 1, label));
         }
-        let last = crumbs.len() - 1;
-        let locked = model.is_locked();
-        drop(model);
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .h(px(32.0))
-            .px_2()
-            .border_b_1()
-            .border_color(c.border)
-            .bg(c.card)
-            .text_size(theme.text.sm)
-            .children(crumbs.into_iter().enumerate().flat_map(|(i, (depth, label))| {
-                let current = i == last;
-                let crumb = div()
-                    .id(("crumb", depth))
-                    .px_2()
-                    .rounded(theme.radius.sm)
-                    .text_color(if current { c.foreground } else { c.muted_foreground })
-                    .when(!current, |d| d.cursor_pointer().hover(|s| s.bg(c.muted)))
-                    .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| this.jump_to(depth, cx)))
-                    .child(label)
-                    .into_any_element();
-                let sep: Vec<AnyElement> = if i > 0 { vec![div().text_color(c.muted_foreground).child(Icon::new(IconName::CaretRight).size(px(12.0))).into_any_element()] } else { Vec::new() };
-                sep.into_iter().chain([crumb])
-            }))
-            .when(locked, |d| d.child(div().ml_2().text_size(theme.text.xs).text_color(c.muted_foreground).child("locked")))
+        (crumbs, model.is_locked())
     }
 
     fn render_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1559,7 +1531,6 @@ impl Render for Editor {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.render_breadcrumbs(cx))
                     .child(div().flex_1().relative().child(self.flow.clone())),
             )
             .children(sheet)

@@ -1,4 +1,5 @@
 pub mod add_menu;
+pub mod breadcrumbs;
 pub mod fields;
 pub mod frames;
 pub mod handle_details;
