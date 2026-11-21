@@ -13,7 +13,7 @@ use gpui::{
 };
 use runtime::{Size, Timing};
 use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
-use shader_graph::graph::ProjectSettings;
+use shader_graph::graph::{GraphProject, ProjectSettings};
 use theme::{ActiveTheme as _, IconName};
 
 use crate::code_view::{self, CodeView};
@@ -23,7 +23,7 @@ use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences;
 use crate::settings::{SettingsDialog, SettingsEvent};
-use crate::project::{self, Loaded};
+use crate::project::{self, AssetFiles, Loaded};
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
 
@@ -159,6 +159,7 @@ impl Shell {
             match project::read(&last) {
                 Ok(Loaded { project: loaded, files }) => {
                     layout = layout::load(&loaded);
+                    Self::report_unusable_files(window, &unusable_files(&loaded, &files), cx);
                     editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
                     playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
                     path = Some(last);
@@ -351,6 +352,19 @@ impl Shell {
         window.set_window_edited(dirty);
     }
 
+    /// One dialog for every file a load couldn't use, rather than one per file.
+    fn report_unusable_files(window: &mut Window, names: &[String], cx: &mut App) {
+        if names.is_empty() {
+            return;
+        }
+        log::warn!("left out of the project: {}", names.join(", "));
+        let mut detail = "What couldn't be read was left out.".to_owned();
+        for name in names {
+            detail.push_str(&format!("\n• {name}"));
+        }
+        drop(window.prompt(PromptLevel::Warning, "Some files couldn't be used", Some(&detail), &["OK"], cx));
+    }
+
     fn report(window: &mut Window, message: &str, error: &anyhow::Error, cx: &mut App) {
         log::error!("{message}: {error:#}");
         let detail = format!("{error:#}");
@@ -450,6 +464,7 @@ impl Shell {
         match project::read(&path) {
             Ok(Loaded { project: loaded, files }) => {
                 let layout = layout::load(&loaded);
+                Self::report_unusable_files(window, &unusable_files(&loaded, &files), cx);
                 self.editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
                 self.playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
                 let (screen, graphs) = layout.map_or_else(|| (default_screen(), Vec::new()), |l| (l.screen, l.graphs));
@@ -537,6 +552,16 @@ fn apply_settings(
     if timing != playback.timing() {
         playback.set_timing(timing, window, cx);
     }
+}
+
+/// The names of the assets whose files the project's bundle doesn't have, or that don't match them.
+fn unusable_files(project: &GraphProject, files: &AssetFiles) -> Vec<String> {
+    project
+        .assets
+        .iter()
+        .filter(|asset| !files.contains_key(asset.id()))
+        .map(|asset| asset.name().to_owned())
+        .collect()
 }
 
 /// Asks before a closing or quitting app loses unsaved changes.
@@ -628,7 +653,8 @@ mod tests {
     use std::path::PathBuf;
 
     use gpui::{Modifiers, TestAppContext};
-    
+    use shader_graph::assets::{Asset, AssetFile, asset_hash};
+
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
@@ -753,4 +779,60 @@ mod tests {
         assert_eq!(open_windows(cx), 1);
     }
 
+    #[gpui::test]
+    fn a_project_missing_files_reports_them_in_one_dialog(cx: &mut TestAppContext) {
+        let dir = scratch("missing");
+        let path = dir.join("project.wgnodes");
+        let mut project = GraphProject::default();
+        for (id, name) in [("a1", "First"), ("a2", "Second")] {
+            project.assets.push(Asset::Image(AssetFile {
+                id: id.into(),
+                name: name.into(),
+                file: format!("assets/images/{id}.png"),
+                mime: "image/png".into(),
+                bytes: 3,
+                hash: asset_hash(&[1, 2, 3]),
+                width: 1,
+                height: 1,
+            }));
+        }
+        project::write(&path, &project, &AssetFiles::new()).expect("writes");
+
+        cx.update(|cx| {
+            theme::init(cx);
+            preferences::init(cx);
+            init(cx);
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| Shell::new(Some(path), None, window, cx));
+        cx.run_until_parked();
+        let (title, detail) = cx.pending_prompt().expect("the problems are reported");
+        assert_eq!(title, "Some files couldn't be used");
+        assert!(detail.contains("First") && detail.contains("Second"), "{detail}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn assets_without_their_files_are_the_unusable_ones() {
+        let mut project = GraphProject::default();
+        let asset = |id: &str| {
+            Asset::Image(AssetFile {
+                id: id.into(),
+                name: format!("{id}-name"),
+                file: format!("assets/images/{id}.png"),
+                mime: "image/png".into(),
+                bytes: 1,
+                hash: asset_hash(&[0]),
+                width: 1,
+                height: 1,
+            })
+        };
+        project.assets.extend([asset("a1"), asset("a2")]);
+        let files = AssetFiles::from([("a1".to_owned(), std::sync::Arc::new(vec![0]))]);
+        assert_eq!(unusable_files(&project, &files), ["a2-name"]);
+        assert!(unusable_files(&project, &AssetFiles::from([
+            ("a1".to_owned(), std::sync::Arc::new(vec![0])),
+            ("a2".to_owned(), std::sync::Arc::new(vec![0])),
+        ]))
+        .is_empty());
+    }
 }
