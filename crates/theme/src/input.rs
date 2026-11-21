@@ -76,6 +76,8 @@ pub struct TextInput {
     /// How far the text is scrolled left to keep the cursor in view.
     scroll: Pixels,
     was_focused: bool,
+    /// Height and text size to fit inside a control that isn't a field itself.
+    compact: Option<(Pixels, Pixels)>,
 }
 
 impl EventEmitter<InputEvent> for TextInput {}
@@ -94,6 +96,14 @@ impl TextInput {
             is_selecting: false,
             scroll: px(0.0),
             was_focused: false,
+            compact: None,
+        }
+    }
+
+    pub fn set_compact(&mut self, size: Option<(Pixels, Pixels)>, cx: &mut Context<Self>) {
+        if self.compact != size {
+            self.compact = size;
+            cx.notify();
         }
     }
 
@@ -643,17 +653,17 @@ impl Render for TextInput {
         div()
             .flex()
             .items_center()
-            .h(px(32.0))
+            .h(self.compact.map_or(px(32.0), |(h, _)| h))
             .w_full()
             .min_w_0()
-            .px(px(10.0))
-            .rounded(theme.radius.lg)
+            .px(px(if self.compact.is_some() { 4.0 } else { 10.0 }))
+            .rounded(if self.compact.is_some() { px(4.0) } else { theme.radius.lg })
             .border_1()
             .border_color(if focused { c.ring } else { c.input })
-            .when(theme.is_dark(), |d| d.bg(c.input.opacity(0.3)))
+            .when(theme.is_dark() && self.compact.is_none(), |d| d.bg(c.input.opacity(0.3)))
             .text_color(c.foreground)
             .font_family(theme.font.clone())
-            .text_size(theme.text.sm)
+            .text_size(self.compact.map_or(theme.text.sm, |(_, t)| t))
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .cursor(CursorStyle::IBeam)

@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, CursorStyle, DispatchPhase, ElementId, InteractiveElement as _, IntoElement, MouseButton,
-    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, RenderOnce, SharedString,
-    Styled as _, Window, canvas, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, CursorStyle, DispatchPhase, ElementId, Entity, FocusHandle,
+    InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Pixels, Point, RenderOnce, SharedString, Styled as _, Subscription, Window,
+    canvas, div, prelude::FluentBuilder as _, px,
 };
-use theme::ActiveTheme as _;
+use theme::{ActiveTheme as _, InputEvent, TextInput};
 
 /// Whether a change is a step of a gesture still going on, or its end.
 /// History keeps only the ends, so a scrub is undone in one go.
@@ -19,6 +20,104 @@ pub type OnNumber = Rc<dyn Fn(f64, Edit, &mut Window, &mut App)>;
 
 /// Moves under this many pixels are a click, not a scrub.
 const DRAG_THRESHOLD: f32 = 3.0;
+
+/// The typed entry of a number, kept beside its scrub across renders.
+struct EntryState {
+    input: Entity<TextInput>,
+    editing: bool,
+    /// Where focus was before typing began, to give it back once done.
+    previous_focus: Option<FocusHandle>,
+    value: f64,
+    integer: bool,
+    min: Option<f64>,
+    max: Option<f64>,
+    on_change: Option<OnNumber>,
+    _subscription: Subscription,
+}
+
+impl EntryState {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let input = cx.new(TextInput::new);
+        let subscription =
+            cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
+                guard::guard("number entry", || match event {
+                    InputEvent::Submit => {
+                        this.commit(window, cx);
+                        this.restore_focus(window);
+                    }
+                    InputEvent::Blur => this.commit(window, cx),
+                    InputEvent::Cancel => {
+                        this.finish(cx);
+                        this.restore_focus(window);
+                    }
+                    InputEvent::Change => {}
+                });
+            });
+        Self {
+            input,
+            editing: false,
+            previous_focus: None,
+            value: 0.0,
+            integer: false,
+            min: None,
+            max: None,
+            on_change: None,
+            _subscription: subscription,
+        }
+    }
+
+    fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.previous_focus = window.focused(cx);
+        self.editing = true;
+        let text = format_number(self.value, self.integer);
+        self.input.update(cx, |input, cx| {
+            input.set_value(text, cx);
+            input.select_all_text(cx);
+            input.focus(window);
+        });
+        cx.notify();
+    }
+
+    fn finish(&mut self, cx: &mut Context<Self>) {
+        if self.editing {
+            self.editing = false;
+            cx.notify();
+        }
+    }
+
+    fn restore_focus(&mut self, window: &mut Window) {
+        if let Some(handle) = self.previous_focus.take() {
+            window.focus(&handle);
+        }
+    }
+
+    /// Input that isn't a number leaves the value as it was.
+    fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editing {
+            return;
+        }
+        let typed = parse_number(self.input.read(cx).value());
+        self.finish(cx);
+        let Some(typed) = typed else {
+            return;
+        };
+        let next = constrain(typed, self.integer, self.min, self.max);
+        if next != self.value
+            && let Some(on_change) = self.on_change.clone()
+        {
+            on_change(next, Edit::Commit, window, cx);
+        }
+    }
+}
+
+fn parse_number(text: &str) -> Option<f64> {
+    text.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+fn constrain(value: f64, integer: bool, min: Option<f64>, max: Option<f64>) -> f64 {
+    let value = if integer { value.round() } else { value };
+    value.max(min.unwrap_or(f64::NEG_INFINITY)).min(max.unwrap_or(f64::INFINITY))
+}
 
 #[derive(Default)]
 struct ScrubState {
@@ -108,11 +207,22 @@ impl RenderOnce for Scrub {
         let scrubbing = state.read(cx).scrubbing;
         let pressed = state.read(cx).pressed.is_some();
         let (integer, value, min, max) = (self.integer, self.value, self.min, self.max);
-        let clamp = move |v: f64| {
-            let v = if integer { v.round() } else { v };
-            v.max(min.unwrap_or(f64::NEG_INFINITY))
-                .min(max.unwrap_or(f64::INFINITY))
-        };
+        let clamp = move |v: f64| constrain(v, integer, min, max);
+        let entry = window.use_keyed_state((self.id.clone(), "entry"), cx, |window, cx| {
+            EntryState::new(window, cx)
+        });
+        let typing = entry.read(cx).editing;
+        let input = entry.read(cx).input.clone();
+        entry.update(cx, |e, cx| {
+            e.value = value;
+            e.integer = integer;
+            e.min = min;
+            e.max = max;
+            e.on_change = self.on_change.clone();
+            e.input.update(cx, |input, cx| {
+                input.set_compact(Some((px(22.0 * z), px(12.0 * z))), cx);
+            });
+        });
         let group: SharedString = format!("scrub-{:?}", self.id).into();
 
         let side = |right: bool| {
@@ -167,7 +277,11 @@ impl RenderOnce for Scrub {
             .text_size(px(12.0 * z))
             .text_color(fg)
             .when(self.readonly, |d| d.opacity(0.5))
-            .when(!self.readonly, |d| {
+            .when(typing, |d| {
+                d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(input)
+            })
+            .when(!self.readonly && !typing, |d| {
                 d.cursor(CursorStyle::ResizeLeftRight)
                     .hover(move |s| s.bg(fg.opacity(0.08)))
                     .on_mouse_down(MouseButton::Left, move |e, _, cx| {
@@ -182,9 +296,10 @@ impl RenderOnce for Scrub {
                     .child(side(false))
                     .child(side(true))
             })
-            .child(format_number(value, integer))
-            .when(pressed, |d| {
+            .when(!typing, |d| d.child(format_number(value, integer)))
+            .when(pressed && !typing, |d| {
                 let state = state.clone();
+                let entry = entry.clone();
                 d.child(
                     canvas(
                         |_, _, _| {},
@@ -233,7 +348,9 @@ impl RenderOnce for Scrub {
                                     *s = ScrubState::default();
                                     cx.notify();
                                 });
-                                if was_scrubbing && let Some(f) = &changed {
+                                if !was_scrubbing {
+                                    entry.update(cx, |e, cx| e.start(window, cx));
+                                } else if let Some(f) = &changed {
                                     f(last, Edit::Commit, window, cx);
                                 }
                             });
@@ -318,4 +435,86 @@ pub fn picker(
         })
         .child(div().truncate().child(label.into()))
         .child(div().text_color(colors.muted_foreground).child("⌄"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+    use gpui::{Context, Modifiers, Render, TestAppContext, point};
+
+    type Changes = Rc<RefCell<Vec<(f64, Edit)>>>;
+
+    struct Host {
+        value: f64,
+        changes: Changes,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let host = cx.entity();
+            let changes = self.changes.clone();
+            div().w(px(200.0)).h(px(40.0)).child(
+                Scrub::new("n", self.value, 1.0).range(Some(0.0), Some(10.0)).on_change(
+                    move |v, edit, _, cx| {
+                        changes.borrow_mut().push((v, edit));
+                        host.update(cx, |h, cx| {
+                            h.value = v;
+                            cx.notify();
+                        });
+                    },
+                ),
+            )
+        }
+    }
+
+    fn setup(cx: &mut TestAppContext) -> (Changes, &mut gpui::VisualTestContext) {
+        cx.update(theme::init);
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let shared = changes.clone();
+        let (_, cx) = cx.add_window_view(move |_, _| Host { value: 1.0, changes: shared });
+        cx.run_until_parked();
+        (changes, cx)
+    }
+
+    fn type_into_field(cx: &mut gpui::VisualTestContext, text: &str, key: &str) {
+        let at = point(px(100.0), px(11.0));
+        cx.simulate_click(at, Modifiers::default());
+        cx.run_until_parked();
+        cx.simulate_input(text);
+        cx.simulate_keystrokes(key);
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn typing_a_number_and_pressing_enter_commits_it(cx: &mut TestAppContext) {
+        let (changes, cx) = setup(cx);
+        type_into_field(cx, "7.5", "enter");
+        assert_eq!(*changes.borrow(), vec![(7.5, Edit::Commit)]);
+    }
+
+    #[gpui::test]
+    fn typed_values_are_held_to_the_range(cx: &mut TestAppContext) {
+        let (changes, cx) = setup(cx);
+        type_into_field(cx, "99", "enter");
+        assert_eq!(*changes.borrow(), vec![(10.0, Edit::Commit)]);
+    }
+
+    #[gpui::test]
+    fn escape_and_invalid_text_leave_the_value_alone(cx: &mut TestAppContext) {
+        let (changes, cx) = setup(cx);
+        type_into_field(cx, "7", "escape");
+        type_into_field(cx, "abc", "enter");
+        assert!(changes.borrow().is_empty());
+    }
+
+    #[test]
+    fn parsing_rejects_what_is_not_a_finite_number() {
+        assert_eq!(parse_number(" 2.5 "), Some(2.5));
+        assert_eq!(parse_number("-3"), Some(-3.0));
+        assert_eq!(parse_number(""), None);
+        assert_eq!(parse_number("1e999"), None);
+        assert_eq!(parse_number("NaN"), None);
+    }
 }
