@@ -4,7 +4,8 @@ use super::{ColorSpace, Rgb};
 pub type Mat3 = [[f64; 3]; 3];
 
 // Between linear sRGB and linear Display P3, both D65: CSS Color 4's
-// rational matrices through XYZ, multiplied out.
+// rational matrices through XYZ, multiplied out. `palette` derives Display P3
+// from the primaries and differs from these by about 3e-5, so they stay.
 pub const SRGB_TO_DISPLAY_P3: Mat3 = [
     [0.822461969, 0.177538031, 0.0],
     [0.033194199, 0.966805801, 0.0],

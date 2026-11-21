@@ -3,7 +3,14 @@
 //! HSV is of the sRGB-encoded colour, as Blender shows it, and hex and
 //! on-screen swatches are encoded in the colour space shown.
 
-use super::{ColorSpace, Mat3, apply_mat3, clip_to_gamut, from_gamut, to_gamut};
+use palette::{
+    Hsv as PaletteHsv, LinSrgb, Oklab, Oklch, Srgb as PaletteSrgb,
+    convert::FromColorUnclamped,
+    encoding::{FromLinear, IntoLinear, Srgb as SrgbEncoding},
+    hues::{OklabHue, RgbHue},
+};
+
+use super::{ColorSpace, Mat3, clip_to_gamut, from_gamut, to_gamut};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rgb {
@@ -52,24 +59,14 @@ pub struct Lch {
     pub h: f64,
 }
 
-type Lab = [f64; 3];
+type Lab = Oklab<f64>;
 
 pub fn srgb_encode(linear: f64) -> f64 {
-    let c = linear.max(0.0);
-    if c <= 0.003_130_8 {
-        12.92 * c
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    }
+    <SrgbEncoding as FromLinear<f64, f64>>::from_linear(linear.max(0.0))
 }
 
 pub fn srgb_decode(encoded: f64) -> f64 {
-    let c = encoded.max(0.0);
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
+    <SrgbEncoding as IntoLinear<f64, f64>>::into_linear(encoded.max(0.0))
 }
 
 pub fn encode_rgb(Rgb { r, g, b }: Rgb) -> Rgb {
@@ -92,39 +89,30 @@ pub fn decode_from(color: Rgb, space: ColorSpace) -> Rgb {
 
 /// HSV of an (encoded) RGB colour, clamped to [0, 1] first.
 pub fn rgb_to_hsv(rgb: Rgb) -> Hsv {
-    let r = rgb.r.clamp(0.0, 1.0);
-    let g = rgb.g.clamp(0.0, 1.0);
-    let b = rgb.b.clamp(0.0, 1.0);
-    let max = r.max(g).max(b);
-    let delta = max - r.min(g).min(b);
-    let mut h = 0.0;
-    if delta > 0.0 {
-        h = if max == r {
-            ((g - b) / delta + 6.0) % 6.0
-        } else if max == g {
-            (b - r) / delta + 2.0
-        } else {
-            (r - g) / delta + 4.0
-        };
-    }
+    let hsv = PaletteHsv::from_color_unclamped(PaletteSrgb::new(
+        rgb.r.clamp(0.0, 1.0),
+        rgb.g.clamp(0.0, 1.0),
+        rgb.b.clamp(0.0, 1.0),
+    ));
     Hsv {
-        h: h / 6.0,
-        s: if max == 0.0 { 0.0 } else { delta / max },
-        v: max,
+        h: hsv.hue.into_positive_degrees() / 360.0,
+        s: hsv.saturation,
+        v: hsv.value,
     }
 }
 
 pub fn hsv_to_rgb(Hsv { h, s, v }: Hsv) -> Rgb {
-    let sector = (((h % 1.0) + 1.0) % 1.0) * 6.0;
-    let channel = |n: f64| {
-        let k = (n + sector) % 6.0;
-        v - v * s * k.min(4.0 - k).clamp(0.0, 1.0)
-    };
-    Rgb::new(channel(5.0), channel(3.0), channel(1.0))
+    let hue = ((h % 1.0) + 1.0) % 1.0;
+    let rgb = PaletteSrgb::from_color_unclamped(PaletteHsv::new(
+        RgbHue::from_degrees(hue * 360.0),
+        s,
+        v,
+    ));
+    Rgb::new(rgb.red, rgb.green, rgb.blue)
 }
 
-// Björn Ottosson's OKLab: linear sRGB to the cones' responses (LMS), whose
-// cube roots make OKLab, and back.
+// Björn Ottosson's OKLab matrices, as f64 constants to emit as WGSL. The CPU
+// conversions use `palette`; a test checks these agree with it.
 pub const LINEAR_RGB_TO_LMS: Mat3 = [
     [0.4122214708, 0.5363325363, 0.0514459929],
     [0.2119034982, 0.6806995451, 0.1073969566],
@@ -147,26 +135,17 @@ pub const LMS_TO_LINEAR_RGB: Mat3 = [
 ];
 
 fn linear_to_oklab(rgb: Rgb) -> Lab {
-    let lms = apply_mat3(&LINEAR_RGB_TO_LMS, rgb);
-    let Rgb { r, g, b } = apply_mat3(
-        &LMS_TO_OKLAB,
-        Rgb::new(lms.r.cbrt(), lms.g.cbrt(), lms.b.cbrt()),
-    );
-    [r, g, b]
+    Oklab::from_color_unclamped(LinSrgb::new(rgb.r, rgb.g, rgb.b))
 }
 
 /// Linear RGB of an OKLab colour, outside [0, 1] when out of the sRGB gamut.
-fn oklab_to_linear([l, a, b]: Lab) -> Rgb {
-    let lms = apply_mat3(&OKLAB_TO_LMS, Rgb::new(l, a, b));
-    apply_mat3(
-        &LMS_TO_LINEAR_RGB,
-        Rgb::new(lms.r.powi(3), lms.g.powi(3), lms.b.powi(3)),
-    )
+fn oklab_to_linear(lab: Lab) -> Rgb {
+    let linear = LinSrgb::from_color_unclamped(lab);
+    Rgb::new(linear.red, linear.green, linear.blue)
 }
 
 fn oklch_to_oklab(l: f64, c: f64, h: f64) -> Lab {
-    let rad = h.to_radians();
-    [l, c * rad.cos(), c * rad.sin()]
+    Oklab::from_color_unclamped(Oklch::new(l, c, OklabHue::from_degrees(h)))
 }
 
 /// Linear RGB of an OKLch colour as is: outside [0, 1] when out of the sRGB gamut.
@@ -176,12 +155,11 @@ pub fn oklch_to_linear_unmapped(Lch { l, c, h }: Lch) -> Rgb {
 
 /// OKLch of a linear RGB colour.
 pub fn linear_to_oklch(rgb: Rgb) -> Lch {
-    let [l, a, b] = linear_to_oklab(rgb);
-    let hue = b.atan2(a).to_degrees();
+    let lch = Oklch::from_color_unclamped(linear_to_oklab(rgb));
     Lch {
-        l,
-        c: a.hypot(b),
-        h: (hue + 360.0) % 360.0,
+        l: lch.l,
+        c: lch.chroma,
+        h: lch.hue.into_positive_degrees(),
     }
 }
 
@@ -200,8 +178,10 @@ pub fn oklch_to_linear(Lch { l, c, h }: Lch, space: ColorSpace) -> Rgb {
     }
     let clip = |rgb: Rgb| clip_to_gamut(rgb, space);
     let off_by = |lab: Lab, clipped: Rgb| {
-        let [cl, ca, cb] = linear_to_oklab(clipped);
-        (cl - lab[0]).hypot(ca - lab[1]).hypot(cb - lab[2])
+        let mapped = linear_to_oklab(clipped);
+        (mapped.l - lab.l)
+            .hypot(mapped.a - lab.a)
+            .hypot(mapped.b - lab.b)
     };
     let fits = |rgb: Rgb| {
         let clipped = clip(rgb);
@@ -311,6 +291,7 @@ pub fn lch_keeping_hue(color: Rgb, previous: Lch) -> Lch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::apply_mat3;
 
     fn close(actual: f64, expected: f64, digits: i32) {
         let tolerance = 0.5 * 10f64.powi(-digits);
@@ -387,7 +368,7 @@ mod tests {
     #[test]
     fn reads_and_writes_srgb_encoded_hex() {
         let hex = |r, g, b, a, alpha| linear_to_hex(Rgba::new(r, g, b, a), alpha, ColorSpace::Srgb);
-        assert_eq!(hex(1.0, 0.0, srgb_decode(0.5), 1.0, false), "#FF0080");
+        assert_eq!(hex(1.0, 0.0, srgb_decode(128.0 / 255.0), 1.0, false), "#FF0080");
         assert_eq!(hex(2.0, -1.0, 0.0, 0.5, true), "#FF000080");
         let parsed = hex_to_linear("#ff0080", ColorSpace::Srgb);
         let Some(parsed) = parsed else {
@@ -477,6 +458,34 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_codegen_oklab_matrices_match_palette() {
+        for rgb in [
+            Rgb::new(0.2, 0.5, 0.1),
+            Rgb::new(1.0, 0.0, 0.0),
+            Rgb::new(0.05, 0.9, 1.4),
+        ] {
+            let lms = apply_mat3(&LINEAR_RGB_TO_LMS, rgb);
+            let lab = apply_mat3(
+                &LMS_TO_OKLAB,
+                Rgb::new(lms.r.cbrt(), lms.g.cbrt(), lms.b.cbrt()),
+            );
+            let expected = linear_to_oklab(rgb);
+            close(lab.r, expected.l, 7);
+            close(lab.g, expected.a, 7);
+            close(lab.b, expected.b, 7);
+
+            let back = apply_mat3(
+                &LMS_TO_LINEAR_RGB,
+                {
+                    let lms = apply_mat3(&OKLAB_TO_LMS, lab);
+                    Rgb::new(lms.r.powi(3), lms.g.powi(3), lms.b.powi(3))
+                },
+            );
+            close_rgb(back, rgb, 6);
         }
     }
 
