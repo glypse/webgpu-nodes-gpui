@@ -3,10 +3,13 @@
 //! the first one's right handle and the second one's left handle; before the
 //! first point and after the last one the curve stays flat.
 
+use kurbo::common::{solve_cubic, solve_quadratic};
+use kurbo::{CubicBez, ParamCurve, Point};
 use serde::{Deserialize, Serialize};
 
-/// Iterations solving a segment's parameter for an x: Newton steps kept
-/// within a bisected bracket. The shader runs the same ones.
+/// Newton iterations the generated WGSL takes to find a segment's parameter
+/// for an x. The shader has no closed-form solve, so this count is its only
+/// accuracy knob.
 pub const CURVE_SOLVE_STEPS: usize = 16;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -19,13 +22,14 @@ impl Vec2 {
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
+}
 
-    fn lerp(self, other: Vec2, t: f64) -> Vec2 {
-        Vec2::new(
-            self.x + (other.x - self.x) * t,
-            self.y + (other.y - self.y) * t,
-        )
-    }
+fn to_point(v: Vec2) -> Point {
+    Point::new(v.x, v.y)
+}
+
+fn to_vec2(p: Point) -> Vec2 {
+    Vec2::new(p.x, p.y)
 }
 
 /// How a point's handles relate.
@@ -104,53 +108,58 @@ pub fn curve_segments(points: &[CurvePoint]) -> Vec<CurveSegment> {
         .collect()
 }
 
-fn bezier(a: f64, b: f64, c: f64, d: f64, t: f64) -> f64 {
-    let u = 1.0 - t;
-    u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d
-}
-
-fn bezier_slope(a: f64, b: f64, c: f64, d: f64, t: f64) -> f64 {
-    let u = 1.0 - t;
-    3.0 * u * u * (b - a) + 6.0 * u * t * (c - b) + 3.0 * t * t * (d - c)
+fn cubic(segment: &CurveSegment) -> CubicBez {
+    let [p0, c0, c1, p1] = *segment;
+    CubicBez {
+        p0: to_point(p0),
+        p1: to_point(c0),
+        p2: to_point(c1),
+        p3: to_point(p1),
+    }
 }
 
 /// The parameter at which a segment reaches `x` (within its x range).
+///
+/// x is non-decreasing along a segment (see `curve_segments`), so the cubic
+/// `x(t) - x` has one root in [0, 1] up to rounding. Its roots are solved
+/// exactly, and the one nearest the linear guess is kept.
 pub fn segment_parameter(segment: &CurveSegment, x: f64) -> f64 {
-    let [p0, c0, c1, p1] = *segment;
-    let (mut low, mut high) = (0.0, 1.0);
-    let mut t = if p1.x > p0.x {
-        ((x - p0.x) / (p1.x - p0.x)).clamp(0.0, 1.0)
-    } else {
-        0.5
-    };
-    for _ in 0..CURVE_SOLVE_STEPS {
-        let error = bezier(p0.x, c0.x, c1.x, p1.x, t) - x;
-        if error.abs() < 1e-7 {
-            break;
-        }
-        if error < 0.0 {
-            low = t;
-        } else {
-            high = t;
-        }
-        let slope = bezier_slope(p0.x, c0.x, c1.x, p1.x, t);
-        let next = t - error / slope;
-        t = if slope > 0.0 && next > low && next < high {
-            next
-        } else {
-            (low + high) / 2.0
-        };
+    let [p0, _, _, p1] = *segment;
+    if p1.x <= p0.x {
+        return 0.5;
     }
-    t
+    let guess = ((x - p0.x) / (p1.x - p0.x)).clamp(0.0, 1.0);
+    let [a, b, c, d] = [p0.x, segment[1].x, segment[2].x, p1.x];
+    // Power-basis coefficients of x(t) - x.
+    let (c0, c1, c2, c3) = (
+        a - x,
+        3.0 * (b - a),
+        3.0 * (a - 2.0 * b + c),
+        d - 3.0 * c + 3.0 * b - a,
+    );
+    let scale = c0.abs().max(c1.abs()).max(c2.abs()).max(c3.abs());
+    // A near-zero cubic term makes the cubic formula lose precision.
+    let roots: Vec<f64> = if c3.abs() > 1e-9 * scale {
+        solve_cubic(c0, c1, c2, c3).iter().copied().collect()
+    } else {
+        solve_quadratic(c0, c1, c2).iter().copied().collect()
+    };
+    let mut best: Option<f64> = None;
+    for t in roots {
+        if !(-1e-9..=1.0 + 1e-9).contains(&t) {
+            continue;
+        }
+        let t = t.clamp(0.0, 1.0);
+        if best.is_none_or(|b| (t - guess).abs() < (b - guess).abs()) {
+            best = Some(t);
+        }
+    }
+    best.unwrap_or(guess)
 }
 
 /// The point of a segment at parameter `t`.
 pub fn segment_point(segment: &CurveSegment, t: f64) -> Vec2 {
-    let [p0, c0, c1, p1] = *segment;
-    Vec2::new(
-        bezier(p0.x, c0.x, c1.x, p1.x, t),
-        bezier(p0.y, c0.y, c1.y, p1.y, t),
-    )
+    to_vec2(cubic(segment).eval(t))
 }
 
 /// The curve's y at `x`.
@@ -176,12 +185,15 @@ pub fn split_segment(points: &[CurvePoint], index: usize, x: f64) -> Option<[Cur
     let segments = curve_segments(points);
     let segment = segments.get(index)?;
     let (a, b) = (points.get(index)?, points.get(index + 1)?);
-    let [p0, c0, c1, p1] = *segment;
+    let [p0, _, _, p1] = *segment;
     let t = segment_parameter(segment, x);
-    let (q0, q1, q2) = (p0.lerp(c0, t), c0.lerp(c1, t), c1.lerp(p1, t));
-    let (r0, r1) = (q0.lerp(q1, t), q1.lerp(q2, t));
-    let s = r0.lerp(r1, t);
-    let offset = |from: Vec2, to: Vec2| Vec2::new(from.x - to.x, from.y - to.y);
+    // De Casteljau's halves: the left one ends at the new point, and its
+    // handle controls are the shortened handles of the neighbours.
+    let curve = cubic(segment);
+    let (left, right) = (curve.subsegment(0.0..t), curve.subsegment(t..1.0));
+    let s = to_vec2(left.p3);
+    // A handle as an offset from `to`, where `from` is a control point of a half.
+    let offset = |from: Point, to: Vec2| Vec2::new(from.x - to.x, from.y - to.y);
     let straight = a.kind == CurvePointKind::Vector && b.kind == CurvePointKind::Vector;
     let added = CurvePoint {
         x: s.x.clamp(a.x, b.x.max(a.x)),
@@ -191,13 +203,13 @@ pub fn split_segment(points: &[CurvePoint], index: usize, x: f64) -> Option<[Cur
         } else {
             CurvePointKind::Aligned
         },
-        left: offset(r0, s),
-        right: offset(r1, s),
+        left: offset(left.p2, s),
+        right: offset(right.p1, s),
     };
     let shaped = |kind| matches!(kind, CurvePointKind::Free | CurvePointKind::Aligned);
     let before = if shaped(a.kind) {
         CurvePoint {
-            right: offset(q0, p0),
+            right: offset(left.p1, p0),
             ..*a
         }
     } else {
@@ -205,7 +217,7 @@ pub fn split_segment(points: &[CurvePoint], index: usize, x: f64) -> Option<[Cur
     };
     let after = if shaped(b.kind) {
         CurvePoint {
-            left: offset(q2, p1),
+            left: offset(right.p2, p1),
             ..*b
         }
     } else {
@@ -616,6 +628,38 @@ mod tests {
             let x = f64::from(i) / 20.0;
             let split = evaluate_curve(&[a, added, b], x);
             assert!((split - evaluate_curve(&points, x)).abs() < 1e-5, "{x}");
+        }
+    }
+
+    #[test]
+    fn the_segment_parameter_reaches_every_x() {
+        let skewed = [
+            CurvePoint {
+                x: 0.0,
+                y: 0.0,
+                kind: CurvePointKind::Free,
+                left: ZERO,
+                right: Vec2::new(0.9, -0.3),
+            },
+            CurvePoint {
+                x: 1.0,
+                y: 1.0,
+                kind: CurvePointKind::Free,
+                left: Vec2::new(-0.2, 0.8),
+                right: ZERO,
+            },
+        ];
+        let mut curves = vec![skewed.to_vec()];
+        curves.extend(curve_presets().into_iter().map(|p| p.points));
+        for points in curves {
+            for segment in curve_segments(&points) {
+                let (start, end) = (segment[0].x, segment[3].x);
+                for s in samples() {
+                    let x = start + (end - start) * s;
+                    let t = segment_parameter(&segment, x);
+                    near(segment_point(&segment, t).x, x, 1e-9);
+                }
+            }
         }
     }
 

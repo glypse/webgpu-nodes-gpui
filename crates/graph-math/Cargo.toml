@@ -6,4 +6,6 @@ license.workspace = true
 description = "Colour, curve and ramp maths shared by the node graph and the editor widgets"
 
 [dependencies]
+kurbo.workspace = true
+palette.workspace = true
 serde.workspace = true

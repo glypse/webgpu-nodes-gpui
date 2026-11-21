@@ -17,6 +17,8 @@ serde_json = "1"
 pollster = "0.4"
 log = "0.4"
 env_logger = "0.11"
+kurbo = "0.13"
+palette = { version = "0.7.7", default-features = false, features = ["std"] }
 
 # Dependencies (wgpu, naga, image…) optimised even in dev: tests and the debug app are much faster.
 [profile.dev.package."*"]
