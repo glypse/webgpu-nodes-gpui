@@ -102,18 +102,20 @@ fn highlighted(text: &str, ranges: &[(usize, usize)], muted: gpui::Hsla, strong:
     let mut parts = div().flex().flex_none().whitespace_nowrap();
     let mut at = 0;
     for &(start, end) in ranges {
-        if start > at {
-            parts = parts.child(div().text_color(muted).child(text[at..start].to_owned()));
+        let (Some(before), Some(matched)) = (text.get(at.min(start)..start), text.get(start..end)) else {
+            log::warn!("ignoring highlight {start}..{end} outside {text:?}");
+            continue;
+        };
+        if !before.is_empty() {
+            parts = parts.child(div().text_color(muted).child(before.to_owned()));
         }
-        if end > start {
-            parts = parts.child(
-                div().text_color(strong).font_weight(FontWeight::SEMIBOLD).child(text[start..end].to_owned()),
-            );
+        if !matched.is_empty() {
+            parts = parts.child(div().text_color(strong).font_weight(FontWeight::SEMIBOLD).child(matched.to_owned()));
         }
         at = at.max(end);
     }
-    if at < text.len() {
-        parts = parts.child(div().text_color(muted).child(text[at..].to_owned()));
+    if let Some(rest) = text.get(at..).filter(|r| !r.is_empty()) {
+        parts = parts.child(div().text_color(muted).child(rest.to_owned()));
     }
     parts
 }

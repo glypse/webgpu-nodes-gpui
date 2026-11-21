@@ -783,12 +783,12 @@ pub fn search_entries(
                     tier += 1;
                 }
                 // A label shifts nothing; an alias keeps its own ranges.
-                let (label_ranges, alias_ranges) = if alias.is_some() {
-                    (Vec::new(), ranges.iter().map(|r| (r.0, r.1.min(name.len()))).collect())
-                } else {
-                    let label_len = created.label.len();
-                    (ranges.iter().map(|r| (r.0, r.1.min(label_len))).collect(), Vec::new())
+                // Ranges past the name fall in the option text, which isn't displayed with it.
+                let clip = |len: usize| -> Vec<(usize, usize)> {
+                    ranges.iter().filter(|r| r.0 < len).map(|r| (r.0, r.1.min(len))).collect()
                 };
+                let (label_ranges, alias_ranges) =
+                    if alias.is_some() { (Vec::new(), clip(name.len())) } else { (clip(created.label.len()), Vec::new()) };
                 hits.push(Hit {
                     key: key.clone(),
                     tier,
@@ -865,6 +865,22 @@ mod tests {
     fn search_picks_named_options() {
         let hits = found("value vec2i");
         assert!(hits.contains(&"Declare vec2i".to_owned()), "{hits:?}");
+    }
+
+    #[test]
+    fn highlights_stay_inside_the_displayed_text() {
+        for query in ["value vec2i", "declare vec3f", "math f32", "mix vec4f", "a b c d"] {
+            for hit in search_entries(&entries(), query, &|_| true) {
+                for &(start, end) in &hit.label_ranges {
+                    assert!(hit.entry.label.get(start..end).is_some(), "{query}: {start}..{end} in {:?}", hit.entry.label);
+                }
+                if let Some(alias) = &hit.alias {
+                    for &(start, end) in &hit.alias_ranges {
+                        assert!(alias.get(start..end).is_some(), "{query}: {start}..{end} in {alias:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
