@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use gpui::{
-    App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding,
+    App, AppContext as _, Context, Entity, ExternalPaths, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding,
     ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, StyleRefinement, Window,
     actions, div,
 };
@@ -16,6 +16,7 @@ use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
 use shader_graph::graph::{GraphProject, ProjectSettings};
 use theme::{ActiveTheme as _, IconName};
 
+use crate::assets::{self, AssetsPanel};
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
 use crate::graph::breadcrumbs::Breadcrumbs;
@@ -46,6 +47,7 @@ actions!(
         ZoomPreviewOut,
         FitPreview,
         ActualSizePreview,
+        ImportMedia,
     ]
 );
 
@@ -80,11 +82,12 @@ pub enum Panel {
     Preview,
     Timeline,
     Code,
+    Assets,
 }
 
 impl screen::Editor for Panel {
     fn all() -> &'static [Self] {
-        &[Self::Graph, Self::Preview, Self::Timeline, Self::Code]
+        &[Self::Graph, Self::Preview, Self::Timeline, Self::Code, Self::Assets]
     }
 
     fn label(&self) -> &'static str {
@@ -93,6 +96,7 @@ impl screen::Editor for Panel {
             Self::Preview => "Preview",
             Self::Timeline => "Timeline",
             Self::Code => "WGSL",
+            Self::Assets => "Assets",
         }
     }
 
@@ -102,6 +106,7 @@ impl screen::Editor for Panel {
             Self::Preview => IconName::MonitorPlay,
             Self::Timeline => IconName::FilmStrip,
             Self::Code => IconName::Code,
+            Self::Assets => IconName::Palette,
         }
     }
 }
@@ -121,6 +126,7 @@ struct AreaViews {
     previews: HashMap<AreaId, (Entity<PreviewArea>, Entity<PreviewToolbar>)>,
     timelines: HashMap<AreaId, Entity<TimelineBar>>,
     code: HashMap<AreaId, Entity<CodeView>>,
+    assets: HashMap<AreaId, Entity<AssetsPanel>>,
     graphs: HashMap<AreaId, Entity<Editor>>,
     breadcrumbs: HashMap<AreaId, Entity<Breadcrumbs>>,
     /// Where the graph areas of a loaded layout were, until their editors are made.
@@ -159,9 +165,9 @@ impl Shell {
             match project::read(&last) {
                 Ok(Loaded { project: loaded, files }) => {
                     layout = layout::load(&loaded);
-                    Self::report_unusable_files(window, &unusable_files(&loaded, &files), cx);
-                    editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+                    assets::report_problems(window, &unusable_files(&loaded, &files), cx);
                     playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
+                    editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
                     path = Some(last);
                 }
                 Err(e) => log::warn!("couldn't reopen {}: {e:#}", last.display()),
@@ -181,6 +187,7 @@ impl Shell {
                         EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
                         EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
                         EditorEvent::Settings(settings) => apply_settings(p, settings, window, cx),
+                        EditorEvent::Edited => {}
                     })
                 });
                 this.refresh_title(window, cx);
@@ -255,6 +262,14 @@ impl Shell {
                             })
                             .clone();
                         AreaContent { toolbar: Some(bar.into()), body: None }
+                    }
+                    Panel::Assets => {
+                        let panel = views
+                            .assets
+                            .entry(id)
+                            .or_insert_with(|| cx.new(|cx| AssetsPanel::new(editor.clone(), playback.clone(), window, cx)))
+                            .clone();
+                        AreaContent { toolbar: None, body: Some(panel.into()) }
                     }
                     Panel::Code => AreaContent {
                         toolbar: None,
@@ -350,19 +365,6 @@ impl Shell {
         let dirty = self.editor.read(cx).has_unsaved_changes();
         window.set_window_title(&format!("{name}{} - webgpu-nodes", if dirty { " *" } else { "" }));
         window.set_window_edited(dirty);
-    }
-
-    /// One dialog for every file a load couldn't use, rather than one per file.
-    fn report_unusable_files(window: &mut Window, names: &[String], cx: &mut App) {
-        if names.is_empty() {
-            return;
-        }
-        log::warn!("left out of the project: {}", names.join(", "));
-        let mut detail = "What couldn't be read was left out.".to_owned();
-        for name in names {
-            detail.push_str(&format!("\n• {name}"));
-        }
-        drop(window.prompt(PromptLevel::Warning, "Some files couldn't be used", Some(&detail), &["OK"], cx));
     }
 
     fn report(window: &mut Window, message: &str, error: &anyhow::Error, cx: &mut App) {
@@ -464,9 +466,9 @@ impl Shell {
         match project::read(&path) {
             Ok(Loaded { project: loaded, files }) => {
                 let layout = layout::load(&loaded);
-                Self::report_unusable_files(window, &unusable_files(&loaded, &files), cx);
-                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+                assets::report_problems(window, &unusable_files(&loaded, &files), cx);
                 self.playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
+                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
                 let (screen, graphs) = layout.map_or_else(|| (default_screen(), Vec::new()), |l| (l.screen, l.graphs));
                 self.show_screen(screen, graphs, cx);
                 self.adopt(Some(path), window, cx);
@@ -616,6 +618,9 @@ impl Render for Shell {
             .on_action(cx.safe_listener(|this, _: &SaveProjectAs, window, cx| {
                 this.save_project_as(window, cx);
             }))
+            .on_action(cx.safe_listener(|this, _: &ImportMedia, window, cx| {
+                assets::pick_and_import(&this.editor, &this.playback, window, cx);
+            }))
             .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
                 this.open_settings(window, cx);
             }))
@@ -641,6 +646,9 @@ impl Render for Shell {
             .on_action(cx.safe_listener(|this, _: &Redo, window, cx| {
                 this.editor.update(cx, |e, cx| e.redo(cx));
                 this.refresh_title(window, cx);
+            }))
+            .on_drop(cx.safe_listener(|this, paths: &ExternalPaths, window, cx| {
+                assets::import_paths(&this.editor, &this.playback, &paths.0, window, cx);
             }))
             .child(self.screen.clone().cached(StyleRefinement::default().size_full()))
             .children(self.settings.clone())

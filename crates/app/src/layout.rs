@@ -40,6 +40,7 @@ fn editor_json(panel: &Panel, graph: &GraphView) -> Value {
         Panel::Preview => json!({ "type": "preview" }),
         Panel::Timeline => json!({ "type": "timeline" }),
         Panel::Code => json!({ "type": "code" }),
+        Panel::Assets => json!({ "type": "assets" }),
     }
 }
 
@@ -90,8 +91,7 @@ fn editor_from_json(v: &Value) -> Option<(Panel, Option<GraphView>)> {
         "preview" => Some((Panel::Preview, None)),
         "timeline" => Some((Panel::Timeline, None)),
         "code" => Some((Panel::Code, None)),
-        // The assets area isn't part of this editor yet.
-        "assets" => Some((Panel::Code, None)),
+        "assets" => Some((Panel::Assets, None)),
         _ => None,
     }
 }
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn assets_areas_load_as_something_this_editor_has() {
+    fn assets_areas_load_as_the_assets_panel() {
         let mut project = GraphProject::default();
         project.extra.insert(
             "layout".to_owned(),
@@ -227,6 +227,6 @@ mod tests {
                 { "id": "a", "rect": { "left": 0, "top": 0, "right": 1, "bottom": 1 }, "editor": { "type": "assets" } },
             ] }),
         );
-        assert_eq!(load(&project).map(|l| l.screen.areas()[0].editor), Some(Panel::Code));
+        assert_eq!(load(&project).map(|l| l.screen.areas()[0].editor), Some(Panel::Assets));
     }
 }

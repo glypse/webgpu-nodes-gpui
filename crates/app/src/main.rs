@@ -1,3 +1,4 @@
+mod assets;
 mod cli;
 mod code_view;
 mod editor;
@@ -25,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser as _;
 use gpui::{AsyncApp, WindowHandle};
-use shell::{NewProject, OpenProject, OpenSettings, Redo, SaveProject, SaveProjectAs, Shell, Undo};
+use shell::{ImportMedia, NewProject, OpenProject, OpenSettings, Redo, SaveProject, SaveProjectAs, Shell, Undo};
 
 actions!(app, [Quit]);
 
@@ -49,6 +50,8 @@ fn menus() -> Vec<Menu> {
                 MenuItem::separator(),
                 MenuItem::action("Save", SaveProject),
                 MenuItem::action("Save As...", SaveProjectAs),
+                MenuItem::separator(),
+                MenuItem::action("Import media...", ImportMedia),
             ],
         },
         Menu {

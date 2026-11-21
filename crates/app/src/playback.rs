@@ -9,7 +9,7 @@ use shader_graph::graph::MAX_CANVAS_SIZE;
 
 use crate::project::AssetFiles;
 use runtime::{
-    Frame, MediaSource, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
+    Frame, MediaSource, MediaStatus, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
     RenderOptions, Renderer, Size, Timing,
 };
 
@@ -143,6 +143,11 @@ impl Playback {
             hashes: HashMap::new(),
             media_watching: false,
         }
+    }
+
+    /// How the renderer holds an asset's file. Only the files programs read reach the renderer.
+    pub fn media_status(&self, asset: &str) -> Option<MediaStatus> {
+        self.renderer.as_ref().map(|r| r.media_status(asset))
     }
 
     pub fn asset_files(&self) -> &AssetFiles {
