@@ -39,8 +39,21 @@ pub enum ScreenEvent {
 const MIN_AREA: (f32, f32) = (96.0, 56.0);
 /// How far from an edge the pointer grabs it.
 const EDGE_GRAB: f32 = 4.0;
-const HEADER_HEIGHT: f32 = 36.0;
+pub const HEADER_HEIGHT: f32 = 36.0;
 const CORNER_SIZE: f32 = 12.0;
+
+/// Lays out an area's toolbar across the header row's free width. The toolbar's own
+/// flex layout (right alignment, vertical centring) only applies inside a flex box,
+/// so the slot itself must be one.
+pub fn toolbar_slot(toolbar: AnyView) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .items_center()
+        .child(toolbar)
+}
 
 #[derive(Clone, Copy)]
 struct EdgeDrag;
@@ -421,15 +434,19 @@ impl<E: Editor> ScreenView<E> {
                 Button::new(("area-type", id.0 as usize))
                     .ghost()
                     .xsmall()
-                    .icon(area.editor.icon())
-                    .dropdown_caret(true)
                     .selected(type_open)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_0p5()
+                            .child(theme::Icon::new(area.editor.icon()).size(px(16.0)))
+                            .child(theme::Icon::new(IconName::CaretDown).size(px(12.0))),
+                    )
                     .tooltip("Editor type")
                     .on_click(cx.safe_listener(move |this, event, _, cx| open_type(this, event, cx))),
             )
-            .children(toolbar.map(|toolbar| {
-                toolbar.cached(StyleRefinement::default().flex_1().min_w_0().h_full())
-            }))
+            .children(toolbar.map(toolbar_slot))
             .into_any_element()
     }
 
