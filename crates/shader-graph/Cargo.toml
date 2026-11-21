@@ -10,8 +10,11 @@ graph-math = { path = "../graph-math" }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
 sha2 = "0.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 zip = { version = "9.8.1", default-features = false, features = ["deflate"] }
 uuid = { version = "1", features = ["v4"] }
+# Exact pin: ELK's placement changes between releases, so layouts would shift on upgrade.
+elk-layout = "=0.12.2"
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }

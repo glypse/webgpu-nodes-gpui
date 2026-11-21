@@ -7,14 +7,20 @@ use std::sync::Arc;
 use super::history::History;
 use super::{
     Connection, FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode,
-    GraphProject, GroupWidget, NODE_GROUP, Point, ROOT_ID, new_id,
+    GraphProject, GroupWidget, LAYOUT_FRAME, NODE_GROUP, Point, REROUTE, ROOT_ID, estimate_frame_header,
+    frame_note, new_id,
 };
 use crate::color::color_mode_conversion;
+use crate::layout::{
+    InputRow, LayoutError, LayoutInput, LayoutOptions, NodeGeometry, NodeRows, RerouteBranches,
+    compute_layout, estimate_node_geometry, reroute_branches,
+};
 use crate::codegen::{CodegenError, Program, ShaderOptions, generate_program};
 use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, group_constants, hidden_inputs_of};
+use crate::library::is_library_ref;
 use crate::nodes::{COLOR_RAMP, color_ramp_hidden_inputs, default_data_for_type, registered, resolve_descriptor};
 use crate::types::{
-    InputValue, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, ResolvedNodeTypes,
+    InputValue, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget, ResolvedNodeTypes,
     TypeBindings, TypeResolver, WgslType, input_family_key, is_connection_compatible,
 };
 use crate::zones::{
@@ -982,6 +988,172 @@ impl GraphModel {
     /// The model's nodes that are group boundaries, for editors.
     pub fn is_boundary(&self, node_id: &str) -> bool {
         self.node(node_id).is_some_and(|n| n.is(GROUP_INPUT) || n.is(GROUP_OUTPUT))
+    }
+
+    // ── Layout ───────────────────────────────────────────────────────────────
+
+    /// Lay out a document's nodes left to right, among themselves (`node_ids`
+    /// only, if given), after splitting its branching outputs at reroutes.
+    /// Returns whether any node moved or reroute was added.
+    pub fn layout_document(
+        &mut self,
+        definition_ref: &str,
+        node_ids: Option<&[String]>,
+        options: &LayoutOptions<'_>,
+    ) -> Result<bool, LayoutError> {
+        if self.project.document(definition_ref).is_none() || is_library_ref(definition_ref) {
+            return Ok(false);
+        }
+        let only: Option<HashSet<&str>> = node_ids.map(|ids| ids.iter().map(String::as_str).collect());
+        let branched = self.split_branches(definition_ref, only.as_ref());
+        let Some(doc) = self.project.document(definition_ref) else { return Ok(false) };
+        let nodes: Vec<GraphNode> = doc
+            .nodes
+            .iter()
+            .filter(|n| only.as_ref().is_none_or(|o| o.contains(n.id.as_str())) || branched.contains(&n.id))
+            .cloned()
+            .collect();
+        let zones = self.zone_analysis(doc);
+        let frames = self.frame_analysis(doc);
+        let geometry = |node: &GraphNode| {
+            options
+                .measure
+                .and_then(|measure| measure(definition_ref, node))
+                .unwrap_or_else(|| self.estimated_geometry(doc, node))
+        };
+        let positions = compute_layout(&LayoutInput {
+            nodes: &nodes,
+            edges: &doc.edges,
+            zones: &zones,
+            frames: &frames,
+            geometry: &geometry,
+            spacing: options.spacing,
+        })?;
+        Ok(self.apply_positions(definition_ref, &positions) || !branched.is_empty())
+    }
+
+    /// Lay out the selected nodes of the active document, among themselves.
+    pub fn layout_selection(&mut self, options: &LayoutOptions<'_>) -> Result<bool, LayoutError> {
+        if self.is_locked() || self.selected.is_empty() {
+            return Ok(false);
+        }
+        let key = self.active_definition_ref();
+        let selected = self.selected.clone();
+        self.layout_document(&key, Some(&selected), options)
+    }
+
+    /// Lay out every document of the project (the standard library excluded).
+    pub fn layout_project(&mut self, options: &LayoutOptions<'_>) -> Result<bool, LayoutError> {
+        let refs: Vec<String> =
+            self.project.definitions.keys().filter(|r| !is_library_ref(r)).cloned().collect();
+        let mut moved = false;
+        for key in refs {
+            moved |= self.layout_document(&key, None, options)?;
+        }
+        Ok(moved)
+    }
+
+    /// Split each output linked to several inputs at a reroute, among `only`
+    /// (all nodes if absent). Returns the reroutes added.
+    fn split_branches(&mut self, definition_ref: &str, only: Option<&HashSet<&str>>) -> HashSet<String> {
+        let Some(doc) = self.project.document(definition_ref) else { return HashSet::new() };
+        let skipped = self.zone_analysis(doc).invalid_edges;
+        let among = |id: &str| only.is_none_or(|o| o.contains(id));
+        let RerouteBranches { reroutes, links, moved } =
+            reroute_branches(&doc.nodes, &doc.edges, among, |_| new_id(), &skipped);
+        if reroutes.is_empty() {
+            return HashSet::new();
+        }
+        let added: HashSet<String> = reroutes.iter().map(|n| n.id.clone()).collect();
+        let moved: HashMap<String, GraphEdge> = moved.into_iter().map(|e| (e.id.clone(), e)).collect();
+        let Some(doc) = self.doc_mut(definition_ref) else { return HashSet::new() };
+        for edge in &mut doc.edges {
+            if let Some(replacement) = moved.get(&edge.id) {
+                *edge = replacement.clone();
+            }
+        }
+        doc.edges.extend(links);
+        doc.nodes.extend(reroutes);
+        self.changed();
+        added
+    }
+
+    /// Move nodes of a document to `positions`, where they differ. Returns whether any moved.
+    fn apply_positions(&mut self, definition_ref: &str, positions: &HashMap<String, Point>) -> bool {
+        let Some(doc) = self.doc_mut(definition_ref) else { return false };
+        let mut moved = false;
+        for node in &mut doc.nodes {
+            if let Some(at) = positions.get(&node.id).filter(|at| **at != node.position) {
+                node.position = *at;
+                moved = true;
+            }
+        }
+        if moved {
+            self.changed();
+        }
+        moved
+    }
+
+    /// A node's geometry when no front end measured it.
+    fn estimated_geometry(&self, doc: &GraphDocument, node: &GraphNode) -> NodeGeometry {
+        if node.is(LAYOUT_FRAME) {
+            let header = estimate_frame_header(&self.node_label(&node.id), frame_note(&node.data));
+            return NodeGeometry { width: header.width, height: header.height, ..Default::default() };
+        }
+        if node.is(REROUTE) {
+            return NodeGeometry {
+                width: 18.0,
+                height: 18.0,
+                inputs: vec![("in".to_owned(), 9.0)],
+                outputs: vec![("out".to_owned(), 9.0)],
+            };
+        }
+        estimate_node_geometry(&self.layout_rows(doc, node))
+    }
+
+    /// What a node shows, top to bottom, for estimating its geometry.
+    fn layout_rows(&self, doc: &GraphDocument, node: &GraphNode) -> NodeRows {
+        let descriptor = self.resolve_descriptor(node);
+        let linked: HashSet<&str> = doc.edges_into(&node.id).map(|e| e.target_handle.as_str()).collect();
+        let linked_out: HashSet<&str> = doc.edges_from(&node.id).map(|e| e.source_handle.as_str()).collect();
+        let hidden = self.hidden_inputs(&node.id);
+        let shown = |id: &str, linked_to: &HashSet<&str>| {
+            node.data.hide_unlinked != Some(true) || linked_to.contains(id)
+        };
+        let header = descriptor.settings.len()
+            + usize::from(self.type_choice(&node.id).is_some())
+            + self.variable_choices(&node.id).iter().filter(|c| c.variable.types.len() > 1).count();
+        NodeRows {
+            header,
+            outputs: self
+                .resolve_node_outputs(&node.id)
+                .into_iter()
+                .map(|o| o.id)
+                .filter(|id| shown(id.as_str(), &linked_out))
+                .collect(),
+            widget: descriptor.widget.as_ref().map_or(0, widget_rows),
+            inputs: self
+                .resolve_node_inputs(&node.id)
+                .into_iter()
+                .filter(|i| !hidden.contains(&i.id) && shown(i.id.as_str(), &linked))
+                .map(|i| InputRow {
+                    editor: !linked.contains(i.id.as_str()) && !i.fallback && !i.variadic,
+                    id: i.id,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A widget's height in rows, as the front end draws it.
+fn widget_rows(widget: &NodeWidget) -> usize {
+    match widget {
+        NodeWidget::Color(_) => 6,
+        NodeWidget::Curve => 10,
+        NodeWidget::Ramp => 4,
+        NodeWidget::Code | NodeWidget::Asset(_) => 5,
+        NodeWidget::Cases => 1,
+        NodeWidget::Items => 2,
     }
 }
 

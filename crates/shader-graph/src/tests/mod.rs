@@ -12,6 +12,7 @@ mod textures;
 mod custom;
 mod enums;
 mod index_switch;
+mod layout;
 mod frame_values;
 mod nodes;
 mod reroute;

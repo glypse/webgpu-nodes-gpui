@@ -9,6 +9,7 @@ pub mod enums;
 pub mod evaluate;
 pub mod frame;
 pub mod graph;
+pub mod layout;
 pub mod library;
 pub mod nodes;
 pub mod passes;
