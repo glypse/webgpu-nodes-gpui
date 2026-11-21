@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use super::{GraphDocument, GraphProject, ROOT_ID};
-use crate::nodes::is_known_node_type;
+use crate::nodes::{has_valid_socket_names, is_known_node_type};
 use crate::zones::{is_zone_output, paired_output_id};
 
 /// What a file may ask for. Far above anything drawn by hand, yet low enough
@@ -34,6 +34,7 @@ pub enum GraphIssue {
     TooManyDefinitions,
     TooManyNodes,
     TooManyInDocument { definition: String },
+    InvalidSocketNames { definition: String, node: String },
 }
 
 /// Why a file can't be read.
@@ -160,6 +161,12 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
                     definition: key.clone(),
                     node: node.id.clone(),
                     node_type: node.node_type.clone(),
+                });
+            }
+            if node.data.sockets.as_ref().is_some_and(|s| !has_valid_socket_names(s)) {
+                issues.push(GraphIssue::InvalidSocketNames {
+                    definition: key.clone(),
+                    node: node.id.clone(),
                 });
             }
             if let Some(reference) = node.definition_ref() {

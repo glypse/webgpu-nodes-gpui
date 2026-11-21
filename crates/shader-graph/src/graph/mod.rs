@@ -7,6 +7,7 @@ mod history;
 mod model;
 mod model_edits;
 mod model_frames;
+mod model_custom;
 mod model_groups;
 mod model_textures;
 mod model_zones;

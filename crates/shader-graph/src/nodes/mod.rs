@@ -2,7 +2,9 @@
 
 mod builders;
 mod color_ramp;
+pub mod cpu;
 mod curve;
+mod custom;
 mod dynamic;
 mod render_texture;
 mod standard;
@@ -13,6 +15,7 @@ use std::sync::{Arc, LazyLock};
 
 pub use builders::*;
 pub use color_ramp::*;
+pub use custom::*;
 pub use dynamic::*;
 pub use render_texture::*;
 pub use standard::{COMPONENT_COUNT, COMPONENT_COUNT_INPUT};
@@ -60,7 +63,13 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     all.push(build_index_switch_descriptor(&NodeData::default()));
     all.push(build_custom_wgsl_descriptor(&NodeData::default()));
     all.extend(standard::misc_nodes());
-    let ordered: Vec<_> = all.into_iter().map(Arc::new).collect();
+    let ordered: Vec<_> = all
+        .into_iter()
+        .map(|mut d| {
+            d.cpu = d.cpu.take().or_else(|| cpu::standard_cpu(&d.type_id));
+            Arc::new(d)
+        })
+        .collect();
     let by_type = ordered.iter().map(|d| (d.type_id.clone(), d.clone())).collect();
     Registry { ordered, by_type }
 });

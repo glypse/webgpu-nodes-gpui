@@ -1,3 +1,4 @@
+mod cpu;
 mod codegen;
 mod edits;
 mod frames;
@@ -7,3 +8,4 @@ mod library;
 mod settings;
 mod passes;
 mod textures;
+mod custom;
