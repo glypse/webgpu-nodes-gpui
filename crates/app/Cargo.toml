@@ -8,6 +8,7 @@ log.workspace = true
 env_logger.workspace = true
 guard = { path = "../guard" }
 gpui.workspace = true
+gpui-component.workspace = true
 gpui_platform.workspace = true
 wgpu.workspace = true
 anyhow.workspace = true

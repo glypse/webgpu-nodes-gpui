@@ -6,7 +6,9 @@ use gpui::{
     anchored, deferred, div, point, prelude::FluentBuilder as _, px,
 };
 
-use crate::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName};
+use gpui_component::{Sizable as _, button::{Button, ButtonVariants as _}};
+
+use crate::{ActiveTheme as _, IconName};
 
 actions!(theme_dialog, [Dismiss]);
 
@@ -148,8 +150,8 @@ impl RenderOnce for Dialog {
                     .right(if side.is_some() { px(12.0) } else { px(8.0) })
                     .child(
                         Button::new("dialog-close")
-                            .variant(ButtonVariant::Ghost)
-                            .size(ButtonSize::IconSm)
+                            .ghost()
+                            .small()
                             .icon(IconName::X)
                             .on_click(move |_, window, cx| {
                                 if let Some(dismiss) = &dismiss {

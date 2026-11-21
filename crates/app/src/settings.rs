@@ -10,10 +10,8 @@ use gpui::{
 };
 use runtime::Size;
 use shader_graph::graph::{ColorSpace, MAX_CANVAS_SIZE, MAX_FPS, ProjectSettings};
-use theme::{
-    ActiveTheme as _, Button, ButtonSize, ButtonVariant, InputEvent, NumberEvent, NumberField,
-    TextInput, ToggleGroup,
-};
+use gpui_component::{Disableable as _, Selectable as _, Sizable as _, button::{Button, ButtonGroup, ButtonVariants as _}};
+use theme::{ActiveTheme as _, InputEvent, NumberEvent, NumberField, TextInput};
 
 use crate::editor::Editor;
 use crate::playback::Playback;
@@ -277,20 +275,21 @@ impl SettingsDialog {
                 }
                 .to_owned(),
             ),
-            ToggleGroup::new("canvas-size")
-                .label("Fixed size")
-                .label("Follow preview")
-                .selected(usize::from(follow))
-                .on_change(cx.listener_for_group(|this, index, cx| {
+            segmented(
+                "canvas-size",
+                ["Fixed size", "Follow preview"],
+                usize::from(follow),
+                cx.listener_for_group(|this, index, cx| {
                     this.update(cx, |s| s.canvas.follow_preview = index == 1);
-                })),
+                }),
+            ),
             cx,
         );
         let swap = {
             let (w, h) = (canvas.width, canvas.height);
             Button::new("swap-size")
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::Sm)
+                .ghost()
+                .small()
                 .label("⇄")
                 .tooltip("Swap width and height")
                 .on_click(cx.safe_listener(move |this, _, _, cx| {
@@ -353,26 +352,28 @@ impl SettingsDialog {
                 }
                 .to_owned(),
             ),
-            ToggleGroup::new("playback")
-                .label("Real time")
-                .label("Fixed frame rate")
-                .selected(usize::from(!timing.realtime))
-                .on_change(cx.listener_for_group(|this, index, cx| {
+            segmented(
+                "playback",
+                ["Real time", "Fixed frame rate"],
+                usize::from(!timing.realtime),
+                cx.listener_for_group(|this, index, cx| {
                     this.update(cx, |s| s.timing.realtime = index == 0);
-                })),
+                }),
+            ),
             cx,
         );
         let current = FRAME_RATES.iter().position(|&r| f64::from(r) == timing.fps);
-        let mut rates = ToggleGroup::new("frame-rates");
-        for rate in FRAME_RATES {
-            rates = rates.label(rate.to_string());
-        }
         // No preset is selected for a rate that isn't one; an out-of-range index selects none.
-        rates = rates.selected(current.unwrap_or(usize::MAX)).on_change(cx.listener_for_group(|this, index, cx| {
-            if let Some(&rate) = FRAME_RATES.get(index) {
-                this.update(cx, |s| s.timing.fps = f64::from(rate));
-            }
-        }));
+        let rates = segmented(
+            "frame-rates",
+            FRAME_RATES.iter().map(|rate| rate.to_string()),
+            current.unwrap_or(usize::MAX),
+            cx.listener_for_group(|this, index, cx| {
+                if let Some(&rate) = FRAME_RATES.get(index) {
+                    this.update(cx, |s| s.timing.fps = f64::from(rate));
+                }
+            }),
+        );
         let rate = self.field(
             "Frame rate",
             Some(
@@ -431,16 +432,11 @@ impl SettingsDialog {
         let theme = self.field(
             "Theme",
             None,
-            ToggleGroup::new("theme")
-                .label("Light")
-                .label("Dark")
-                .label("System")
-                .selected(selected)
-                .on_change(move |index, window, cx| {
-                    if let Some(&choice) = themes.get(index) {
-                        guard::guard("theme", || preferences::update(window, cx, |p| p.theme = choice));
-                    }
-                }),
+            segmented("theme", ["Light", "Dark", "System"], selected, move |index, window, cx| {
+                if let Some(&choice) = themes.get(index) {
+                    guard::guard("theme", || preferences::update(window, cx, |p| p.theme = choice));
+                }
+            }),
             cx,
         );
         let font = self.field(
@@ -461,8 +457,8 @@ impl SettingsDialog {
                 )
                 .child(
                     Button::new("reset-font")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Sm)
+                        .ghost()
+                        .small()
                         .label("Reset")
                         .disabled(current.font.is_empty())
                         .on_click(cx.safe_listener(|this, _, window, cx| {
@@ -542,7 +538,24 @@ impl SettingsDialog {
     }
 }
 
-/// A change handler for a `ToggleGroup`, run on the dialog.
+/// A row of buttons, one selected, that reports the index of the one clicked.
+fn segmented(
+    id: &'static str,
+    labels: impl IntoIterator<Item = impl Into<SharedString>>,
+    selected: usize,
+    on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
+) -> ButtonGroup {
+    let buttons = labels.into_iter().enumerate().map(|(index, label)| {
+        Button::new((id, index)).label(label).selected(index == selected)
+    });
+    ButtonGroup::new(id).children(buttons).on_click(move |indices: &Vec<usize>, window, cx| {
+        if let Some(&index) = indices.first() {
+            on_change(index, window, cx);
+        }
+    })
+}
+
+/// A change handler for a `segmented` group, run on the dialog.
 trait GroupListener {
     fn listener_for_group(
         &self,
@@ -645,8 +658,8 @@ impl Render for SettingsDialog {
                             )
                             .child(
                                 Button::new("close-settings")
-                                    .variant(ButtonVariant::Ghost)
-                                    .size(ButtonSize::IconSm)
+                                    .ghost()
+                                    .small()
                                     .icon(theme::IconName::X)
                                     .tooltip("Close")
                                     .on_click(cx.safe_listener(|this, _, _, cx| this.close(cx))),

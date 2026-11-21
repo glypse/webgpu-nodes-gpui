@@ -18,6 +18,8 @@ use shader_graph::graph::{
 use shader_graph::passes::{ItemSizeMode, TextureFormat};
 use shader_graph::types::{HandleType, SOCKET_TYPES, TypeVariable, WgslType, type_set_of};
 use shader_graph::zones::{DEFAULT_MAX_ITERATIONS, MAX_ITERATIONS, is_zone_node_type, zone_max_iterations};
+use gpui_component::Disableable as _;
+use gpui_component::checkbox::Checkbox;
 use theme::{ActiveTheme as _, InputEvent, NumberEvent, NumberField, TextInput, Textarea};
 
 use super::frames::tint_color;
@@ -324,7 +326,10 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             .text_size(theme.text.sm)
             .when(disabled, |d| d.opacity(0.4))
             .when(!disabled, |d| d.cursor_pointer().hover(|s| s.bg(c.muted)))
-            .tooltip(theme::Tooltip::text(format!("Reset to {default}")))
+            .tooltip({
+                let text = format!("Reset to {default}");
+                move |window, cx| gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+            })
             .on_click(cx.safe_listener(move |this, _, _, cx| {
                 if disabled {
                     return;
@@ -353,7 +358,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                 .gap_2()
                 .child(div().mt(px(2.0)).child({
                     let weak = cx.entity().downgrade();
-                    theme::Checkbox::new("hide-links").checked(subject.hide_links).disabled(locked).on_change(
+                    Checkbox::new("hide-links").checked(subject.hide_links).disabled(locked).on_change(
                         move |_, _, cx| {
                             let ids = vec![id.clone()];
                             weak.update(cx, |e, cx| e.edit_model(cx, move |m| m.toggle_hidden_links(&ids))).ok();
@@ -403,7 +408,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                                 .bg(tint_color(option, &theme).opacity(0.6))
                                 .when(tint == option, |d| d.border_2().border_color(c.primary))
                                 .when(!locked, |d| d.cursor_pointer())
-                                .tooltip(theme::Tooltip::text(name))
+                                .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(name.clone()).build(window, cx))
                                 .on_click(cx.safe_listener(move |this, _, _, cx| {
                                     if locked {
                                         return;

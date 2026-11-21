@@ -6,7 +6,8 @@ use gpui::{
     Pixels, Point, Render, StatefulInteractiveElement as _, Styled as _, StyleRefinement, Window,
     canvas, div, point, prelude::FluentBuilder as _, px, relative,
 };
-use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
+use gpui_component::{Sizable as _, Selectable as _, button::{Button, ButtonVariants as _}};
+use theme::{ActiveTheme as _, IconName, Menu, MenuItem};
 
 use crate::gestures::{self, Outcome, Pixels as ScreenPixels};
 use crate::{Area, AreaId, Axis, EdgeSelection, MinSize, Part, Screen};
@@ -412,10 +413,10 @@ impl<E: Editor> ScreenView<E> {
             )
             .child(
                 Button::new(("area-type", id.0 as usize))
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
+                    .ghost()
+                    .xsmall()
                     .icon(area.editor.icon())
-                    .icon_end(IconName::CaretDown)
+                    .dropdown_caret(true)
                     .selected(type_open)
                     .tooltip("Editor type")
                     .on_click(cx.safe_listener(move |this, event, _, cx| open_type(this, event, cx))),

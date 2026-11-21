@@ -12,8 +12,10 @@ use graph_math::curve::{
 };
 use guard::SafeListener as _;
 
+use gpui_component::{Disableable as _, Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
+
 use crate::{
-    ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, NumberEvent, NumberField,
+    ActiveTheme as _, IconName, NumberEvent, NumberField,
 };
 
 /// Room around the square, so points on its edges are drawn whole.
@@ -782,8 +784,8 @@ impl Render for CurveEditor {
                     let applied = preset.points;
                     let id = preset.id;
                     let button = Button::new(SharedString::from(format!("curve-preset-{id}")))
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconXs)
+                        .ghost()
+                        .xsmall()
                         .tooltip(label)
                         .disabled(disabled)
                         .child(
@@ -835,8 +837,8 @@ impl Render for CurveEditor {
                     let (lines, dot, handles) = kind_glyph(kind);
                     let ink = c.foreground;
                     let button = Button::new(SharedString::from(format!("curve-kind-{kind:?}")))
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconSm)
+                        .ghost()
+                        .small()
                         .tooltip(label)
                         .selected(pressed)
                         .disabled(disabled || active.is_none())
@@ -890,8 +892,8 @@ impl Render for CurveEditor {
                 .child(div().flex_1())
                 .child({
                     let b = Button::new("curve-flip-x")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconSm)
+                        .ghost()
+                        .small()
                         .icon(IconName::FlipHorizontal)
                         .tooltip("Flip left to right")
                         .disabled(disabled)
@@ -902,8 +904,8 @@ impl Render for CurveEditor {
                 })
                 .child({
                     let b = Button::new("curve-flip-y")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconSm)
+                        .ghost()
+                        .small()
                         .icon(IconName::FlipVertical)
                         .tooltip("Flip upside down")
                         .disabled(disabled)
@@ -914,8 +916,8 @@ impl Render for CurveEditor {
                 })
                 .child({
                     let b = Button::new("curve-delete")
-                        .variant(ButtonVariant::Destructive)
-                        .size(ButtonSize::IconSm)
+                        .danger()
+                        .small()
                         .icon(IconName::X)
                         .tooltip("Delete point")
                         .disabled(disabled || active.is_none() || points.len() <= 2)

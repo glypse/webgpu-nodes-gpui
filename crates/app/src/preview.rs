@@ -6,7 +6,8 @@ use gpui::{
 };
 use guard::SafeListener as _;
 use runtime::Size;
-use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
+use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
+use theme::{ActiveTheme as _, IconName, Menu, MenuItem};
 
 use crate::playback::{Playback, Shown, device_size};
 
@@ -281,8 +282,8 @@ impl Render for PreviewArea {
                 .child(
                     div().absolute().left_2().bottom_2().child(
                         Button::new("fit-view")
-                            .variant(ButtonVariant::Outline)
-                            .size(ButtonSize::Icon)
+                            .outline()
+                            
                             .icon(IconName::ArrowsIn)
                             .tooltip("Fit view (0)")
                             .on_click(cx.safe_listener(|this, _, _, cx| this.fit(cx))),
@@ -496,8 +497,8 @@ impl Render for PreviewToolbar {
                 .gap_1()
                 .child(
                     Button::new("resolution")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Xs)
+                        .ghost()
+                        .xsmall()
                         .label(format!("{} × {}", resolution.width, resolution.height))
                         .selected(is_open(Open::Resolution))
                         .tooltip("Canvas size")
@@ -505,18 +506,18 @@ impl Render for PreviewToolbar {
                 )
                 .child(
                     Button::new("zoom")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Xs)
+                        .ghost()
+                        .xsmall()
                         .label(format!("{}%", (zoom * 100.0).round()))
-                        .icon_end(IconName::CaretUpDown)
+                        .dropdown_caret(true)
                         .selected(is_open(Open::Zoom))
                         .tooltip("Zoom")
                         .on_click(open(Open::Zoom)),
                 )
                 .child(
                     Button::new("export")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconXs)
+                        .ghost()
+                        .xsmall()
                         .icon(IconName::DownloadSimple)
                         .selected(is_open(Open::Export))
                         .tooltip("Export")

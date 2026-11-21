@@ -5,10 +5,8 @@ use gpui::{
     Subscription, Window, div, point, prelude::FluentBuilder as _, px,
 };
 use runtime::Timing;
-use theme::{
-    ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem, NumberEvent,
-    NumberField,
-};
+use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
+use theme::{ActiveTheme as _, IconName, Menu, MenuItem, NumberEvent, NumberField};
 
 use crate::playback::{Playback, PlaybackEvent};
 
@@ -178,24 +176,24 @@ impl Render for TimelineBar {
             .gap_1()
             .child(
                 Button::new("to-start")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
+                    .ghost()
+                    .small()
                     .icon(IconName::SkipBack)
                     .tooltip("Back to the start (Home)")
                     .on_click(act(|p, w, cx| p.seek(0.0, w, cx))),
             )
             .child(
                 Button::new("previous")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
+                    .ghost()
+                    .small()
                     .icon(IconName::CaretLeft)
                     .tooltip("Previous frame (,)")
                     .on_click(act(|p, w, cx| p.step(-1, w, cx))),
             )
             .child(
                 Button::new("play")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
+                    .ghost()
+                    .small()
                     .icon(if playing {
                         IconName::Pause
                     } else {
@@ -210,8 +208,8 @@ impl Render for TimelineBar {
             )
             .child(
                 Button::new("next")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
+                    .ghost()
+                    .small()
                     .icon(IconName::CaretRight)
                     .tooltip("Next frame (.)")
                     .on_click(act(|p, w, cx| p.step(1, w, cx))),
@@ -315,8 +313,8 @@ impl Render for TimingControl {
             .overflow_hidden()
             .child(
                 Button::new("timing")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
+                    .ghost()
+                    .xsmall()
                     .tooltip(hint.join("\n"))
                     .selected(self.menu.is_some())
                     .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {

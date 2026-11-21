@@ -62,17 +62,29 @@ icons! {
 /// The theme's embedded assets; pass to `Application::with_assets`.
 pub struct Assets;
 
+/// Also serves gpui-component's own icons, which its widgets draw.
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
-        Ok(icon_bytes(path).map(Cow::Borrowed))
+        match icon_bytes(path) {
+            Some(bytes) => Ok(Some(Cow::Borrowed(bytes))),
+            None => gpui_kit_assets::Assets.load(path),
+        }
     }
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
-        Ok(ICON_PATHS
+        let mut listed: Vec<SharedString> = ICON_PATHS
             .iter()
             .filter(|p| p.starts_with(path))
             .map(|p| SharedString::from(*p))
-            .collect())
+            .collect();
+        listed.extend(gpui_kit_assets::Assets.list(path)?);
+        Ok(listed)
+    }
+}
+
+impl From<IconName> for gpui_component::Icon {
+    fn from(name: IconName) -> Self {
+        gpui_component::Icon::empty().path(name.path())
     }
 }
 

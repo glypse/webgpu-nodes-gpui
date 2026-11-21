@@ -18,6 +18,8 @@ use shader_graph::types::{
 };
 use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
 use shader_graph::color::{ColorSpace as DisplayGamut, Rgb};
+use gpui_component::Disableable as _;
+use gpui_component::checkbox::Checkbox;
 use theme::{ActiveTheme as _, ColorWheels, linear_to_hsla};
 
 use super::fields::{Edit, Scrub, picker};
@@ -319,12 +321,12 @@ fn value_control(
                         .items_center()
                         .gap(px(4.0 * z))
                         .child(
-                            theme::Checkbox::new(SharedString::from(format!("t-{node}-{handle}-{i}")))
+                            Checkbox::new(SharedString::from(format!("t-{node}-{handle}-{i}")))
                                 .checked(on)
                                 .disabled(readonly)
                                 .on_change(move |value, _, cx| {
                                     ed.update(cx, |e, cx| {
-                                        e.set_component(&node, &handle, ty, i, f64::from(u8::from(value)), Edit::Commit, cx);
+                                        e.set_component(&node, &handle, ty, i, f64::from(u8::from(*value)), Edit::Commit, cx);
                                     })
                                     .ok();
                                 }),
@@ -489,7 +491,7 @@ pub fn render_node(
                         .text_color(c.muted_foreground)
                         .when(locked, |d| d.opacity(0.5))
                         .when(!locked, |d| d.cursor_pointer().hover(|st| st.bg(c.muted).text_color(c.foreground)))
-                        .tooltip(theme::Tooltip::text("Unlinked sockets hidden: show them (Ctrl+H)"))
+                        .tooltip(|window, cx| gpui_component::tooltip::Tooltip::new("Unlinked sockets hidden: show them (Ctrl+H)").build(window, cx))
                         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                             cx.stop_propagation();
                             if !locked {

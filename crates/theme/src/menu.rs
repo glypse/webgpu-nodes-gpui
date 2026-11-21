@@ -8,7 +8,9 @@ use gpui::{
 };
 
 use crate::popover::Popover;
-use crate::{ActiveTheme as _, Icon, IconName, Kbd, Separator};
+use gpui_component::separator::Separator;
+
+use crate::{ActiveTheme as _, Icon, IconName};
 
 type Select = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -283,7 +285,8 @@ impl RenderOnce for Menu {
                                 })
                             }))
                             .child(div().flex_1().child(item.label))
-                            .children(item.shortcut.map(|s| Kbd::new(s).quiet()))
+                            // Glyph strings such as "⌘⌫" are not keystrokes, so gpui-component's Kbd cannot show them.
+                            .children(item.shortcut.map(|s| div().flex_none().text_sm().text_color(c.muted_foreground).child(s)))
                             .when(!disabled, |d| {
                                 d.on_click(move |_: &ClickEvent, window, cx| {
                                     if let Some(select) = &select {

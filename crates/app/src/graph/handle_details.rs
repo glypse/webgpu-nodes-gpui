@@ -14,6 +14,8 @@ use shader_graph::types::{
     ColorDisplay, EnumVariant, GroupHandleDef, HandleType, InputValue, ScalarKind, TypeVariable,
     WgslType,
 };
+use gpui_component::Disableable as _;
+use gpui_component::checkbox::Checkbox;
 use theme::ActiveTheme as _;
 
 use super::fields::{Edit, Scrub};
@@ -218,9 +220,9 @@ pub fn details(
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(theme::Checkbox::new(SharedString::from(format!("compile-{id}"))).checked(on).disabled(locked).on_change(
+                        .child(Checkbox::new(SharedString::from(format!("compile-{id}"))).checked(on).disabled(locked).on_change(
                             move |checked, _, cx| {
-                                let (r, id) = (r.clone(), id.clone());
+                                let (r, id, checked) = (r.clone(), id.clone(), *checked);
                                 w.update(cx, |e, cx| e.edit_model(cx, move |m| m.set_handle_compiled(&r, &id, checked))).ok();
                             },
                         ))

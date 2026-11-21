@@ -14,10 +14,9 @@ use graph_math::ramp::{
 };
 use guard::SafeListener as _;
 
-use crate::{
-    ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, NumberEvent, NumberField,
-    linear_to_hsla,
-};
+use gpui_component::{Disableable as _, Sizable as _, button::{Button, ButtonVariants as _}};
+
+use crate::{ActiveTheme as _, IconName, NumberEvent, NumberField, linear_to_hsla};
 
 /// How close the pointer must be (in pixels) to grab a stop on a double click.
 const GRAB: f32 = 6.0;
@@ -570,8 +569,8 @@ impl Render for RampEditor {
 
             let tool = |id: &'static str, icon: IconName, label: &'static str, off: bool| {
                 Button::new(id)
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
+                    .ghost()
+                    .small()
                     .icon(icon)
                     .tooltip(label)
                     .disabled(disabled || off)

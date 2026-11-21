@@ -95,6 +95,7 @@ pub fn apply(window: &mut Window, cx: &mut App) {
     let current = cx.try_global::<Theme>();
     if current.is_none_or(|t| t.appearance != appearance || t.font != wanted.font) {
         cx.set_global(wanted);
+        theme::sync_component_theme(appearance, cx);
         window.refresh();
     }
 }
