@@ -226,6 +226,7 @@ impl<'g> FrameValueAnalysis<'g> {
         match zone_kind_of(ty) {
             Some(ZoneKind::Simulation) => return no(format!("{label} keeps its state for each pixel.")),
             Some(ZoneKind::Repeat) => return self.zone_value(path, node_id),
+            Some(ZoneKind::Passes) => return no(format!("{label} repeats passes, not a computation.")),
             None => {}
         }
         if resolve_descriptor(node, self.graph.project).cpu.is_none() {

@@ -29,13 +29,15 @@ use crate::types::{NodeData, NodeDescriptor};
 use crate::zones::{build_zone_descriptor, is_zone_node_type};
 
 /// Node types whose descriptor is built from their node, not registered.
-pub const DYNAMIC_NODE_TYPES: [&str; 10] = [
+pub const DYNAMIC_NODE_TYPES: [&str; 12] = [
     GROUP_INPUT,
     GROUP_OUTPUT,
     crate::zones::REPEAT_INPUT,
     crate::zones::REPEAT_OUTPUT,
     crate::zones::SIMULATION_INPUT,
     crate::zones::SIMULATION_OUTPUT,
+    crate::zones::PASS_REPEAT_INPUT,
+    crate::zones::PASS_REPEAT_OUTPUT,
     NODE_GROUP,
     MATCH,
     INDEX_SWITCH,

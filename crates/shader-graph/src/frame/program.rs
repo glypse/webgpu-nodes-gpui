@@ -551,7 +551,7 @@ impl<'g> FrameCompiler<'g> {
             REROUTE => self.input(path, node_id, "in"),
             ty => match zone_kind_of(ty) {
                 Some(ZoneKind::Repeat) => self.compile_zone_value(path, node_id, handle),
-                Some(ZoneKind::Simulation) => None,
+                Some(ZoneKind::Simulation | ZoneKind::Passes) => None,
                 None => self.compile_node(path, node_id, handle),
             },
         }

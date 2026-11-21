@@ -30,8 +30,16 @@ pub const REPEAT_INPUT: &str = "repeat-input";
 pub const REPEAT_OUTPUT: &str = "repeat-output";
 pub const SIMULATION_INPUT: &str = "simulation-input";
 pub const SIMULATION_OUTPUT: &str = "simulation-output";
-pub const ZONE_NODE_TYPES: [&str; 4] =
-    [REPEAT_INPUT, REPEAT_OUTPUT, SIMULATION_INPUT, SIMULATION_OUTPUT];
+pub const PASS_REPEAT_INPUT: &str = "pass-repeat-input";
+pub const PASS_REPEAT_OUTPUT: &str = "pass-repeat-output";
+pub const ZONE_NODE_TYPES: [&str; 6] = [
+    REPEAT_INPUT,
+    REPEAT_OUTPUT,
+    SIMULATION_INPUT,
+    SIMULATION_OUTPUT,
+    PASS_REPEAT_INPUT,
+    PASS_REPEAT_OUTPUT,
+];
 
 /// Repeat Input's iteration count input.
 pub const ITERATIONS_HANDLE: &str = "iterations";
@@ -51,6 +59,10 @@ pub const MAX_ITERATIONS: u32 = i32::MAX as u32;
 pub enum ZoneKind {
     Repeat,
     Simulation,
+    /// Repeats passes, not a pixel's computation: stepped like a simulation,
+    /// as many times as it's told within one frame, its items kept in
+    /// textures between iterations.
+    Passes,
 }
 
 impl ZoneKind {
@@ -58,6 +70,7 @@ impl ZoneKind {
         match self {
             ZoneKind::Repeat => (REPEAT_INPUT, REPEAT_OUTPUT),
             ZoneKind::Simulation => (SIMULATION_INPUT, SIMULATION_OUTPUT),
+            ZoneKind::Passes => (PASS_REPEAT_INPUT, PASS_REPEAT_OUTPUT),
         }
     }
 }
@@ -71,16 +84,17 @@ pub fn zone_kind_of(ty: &str) -> Option<ZoneKind> {
     match ty {
         REPEAT_INPUT | REPEAT_OUTPUT => Some(ZoneKind::Repeat),
         SIMULATION_INPUT | SIMULATION_OUTPUT => Some(ZoneKind::Simulation),
+        PASS_REPEAT_INPUT | PASS_REPEAT_OUTPUT => Some(ZoneKind::Passes),
         _ => None,
     }
 }
 
 pub fn is_zone_input(ty: &str) -> bool {
-    ty == REPEAT_INPUT || ty == SIMULATION_INPUT
+    ty == REPEAT_INPUT || ty == SIMULATION_INPUT || ty == PASS_REPEAT_INPUT
 }
 
 pub fn is_zone_output(ty: &str) -> bool {
-    ty == REPEAT_OUTPUT || ty == SIMULATION_OUTPUT
+    ty == REPEAT_OUTPUT || ty == SIMULATION_OUTPUT || ty == PASS_REPEAT_OUTPUT
 }
 
 /// The id of the zone output a zone input is paired with.
@@ -97,7 +111,7 @@ pub fn paired_input<'a>(nodes: &'a [GraphNode], output_id: &str) -> Option<&'a G
 
 /// Whether a zone keeps its items in textures: a repeat zone's live in one pixel's computation.
 pub fn keeps_textures(kind: Option<ZoneKind>) -> bool {
-    kind == Some(ZoneKind::Simulation)
+    matches!(kind, Some(ZoneKind::Simulation | ZoneKind::Passes))
 }
 
 /// Whether a zone of `kind` can carry `item`: only a simulation's may be a texture.
@@ -208,6 +222,29 @@ pub fn build_zone_descriptor(
                 .outputs(items.iter().map(|i| item_output(i, variables)).collect())
                 .defaults(data)
         }
+        PASS_REPEAT_INPUT => {
+            let items = zone_items(output_node());
+            let mut iterations = NodeInputDef::new(ITERATIONS_HANDLE, "Iterations", &[WgslType::I32]);
+            iterations.frame = true;
+            let mut inputs = vec![iterations];
+            inputs.extend(items.iter().map(|i| item_input(i, variables)));
+            for item in &items {
+                let mode = ItemSizeMode::parse(item.size.as_deref());
+                inputs.extend(size_inputs(&item_size_handles(&item.id), mode, Some(&item.label)));
+            }
+            let mut outputs = vec![NodeOutputDef::new(ITERATION_HANDLE, "Iteration", WgslType::I32)];
+            outputs.extend(items.iter().map(|i| item_output(i, variables)));
+            let data = NodeData::with_values([(ITERATIONS_HANDLE, DEFAULT_ITERATIONS)]);
+            base(PASS_REPEAT_INPUT, "Repeat Passes Input").inputs(inputs).outputs(outputs).defaults(data)
+        }
+        PASS_REPEAT_OUTPUT => {
+            let items = zone_items(Some(node));
+            let data = NodeData { items: Some(Vec::new()), ..Default::default() };
+            base(PASS_REPEAT_OUTPUT, "Repeat Passes Output")
+                .inputs(items.iter().map(|i| item_input(i, variables)).collect())
+                .outputs(items.iter().map(|i| item_output(i, variables)).collect())
+                .defaults(data)
+        }
         _ => {
             let items = zone_items(Some(node));
             let data = NodeData { items: Some(Vec::new()), ..Default::default() };
@@ -229,20 +266,33 @@ fn root_only(node: &GraphNode, simulating: &HashSet<String>) -> bool {
 }
 
 const SIMULATION_REASON: &str = "A simulation steps once a frame: it can't be inside a zone.";
+const REPEAT_REASON: &str =
+    "Passes can't be repeated inside a repeat zone, which is one pixel's computation.";
 
 #[derive(Clone, Debug, Default)]
 pub struct ZoneOptions {
     /// Group nodes computing a simulation zone, themselves or through groups
     /// they nest: they can't be in a zone either.
     pub simulating: HashSet<String>,
+    /// Group nodes computing a passes zone, themselves or through groups
+    /// they nest: they can't be in a repeat zone, which is one pixel's computation.
+    pub looping: HashSet<String>,
 }
 
 /// What a project's zones need to know about the groups nesting them.
 pub fn zone_options(project: &GraphProject) -> ZoneOptions {
+    ZoneOptions {
+        simulating: definitions_holding(project, SIMULATION_INPUT),
+        looping: definitions_holding(project, PASS_REPEAT_INPUT),
+    }
+}
+
+/// The definitions having a node of `node_type`, themselves or through the groups they nest.
+fn definitions_holding(project: &GraphProject, node_type: &str) -> HashSet<String> {
     let mut holding: HashSet<String> = project
         .definitions
         .iter()
-        .filter(|(_, d)| d.nodes.iter().any(|n| n.is(SIMULATION_INPUT)))
+        .filter(|(_, d)| d.nodes.iter().any(|n| n.is(node_type)))
         .map(|(k, _)| k.clone())
         .collect();
     loop {
@@ -253,10 +303,9 @@ pub fn zone_options(project: &GraphProject) -> ZoneOptions {
             }
         }
         if holding.len() == before {
-            break;
+            return holding;
         }
     }
-    ZoneOptions { simulating: holding }
 }
 
 #[derive(Clone, Debug)]
@@ -488,6 +537,20 @@ pub fn analyze_zones(
                     refused.insert(id.clone(), SIMULATION_REASON);
                 }
                 ins.clear();
+            }
+            let repeats_passes = node.is_some_and(|n| {
+                n.is(PASS_REPEAT_INPUT) || n.definition_ref().is_some_and(|r| options.looping.contains(r))
+            });
+            if repeats_passes {
+                let in_repeat: Vec<String> = ins
+                    .iter()
+                    .filter(|z| zones.get(*z).is_some_and(|zone| zone.kind == ZoneKind::Repeat))
+                    .cloned()
+                    .collect();
+                for z in in_repeat {
+                    ins.remove(&z);
+                    refused.insert(id.clone(), REPEAT_REASON);
+                }
             }
             if let Some(zone) = zone {
                 if id == zone.input_id {

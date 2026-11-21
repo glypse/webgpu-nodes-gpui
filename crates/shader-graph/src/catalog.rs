@@ -249,6 +249,12 @@ pub fn add_menu_entries(model: &GraphModel) -> Vec<AddMenuEntry> {
         &["Feedback", "Previous Frame", "Persistent", "State", "Ping Pong"],
         ZoneKind::Simulation,
     ));
+    entries.push(zone(
+        "zone:passes",
+        "Repeat Passes",
+        &["Loop", "Iterate", "Multipass", "Feedback Loop", "Ping Pong", "For Loop"],
+        ZoneKind::Passes,
+    ));
     for descriptor in registered_nodes() {
         if descriptor.hidden {
             continue;

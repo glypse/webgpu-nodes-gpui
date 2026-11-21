@@ -121,6 +121,7 @@ fn color(kind: ZoneKind) -> Hsla {
     match kind {
         ZoneKind::Repeat => hsla(0.0, 0.0, 0.62, 1.0),
         ZoneKind::Simulation => hsla(0.03, 0.55, 0.62, 1.0),
+        ZoneKind::Passes => hsla(0.58, 0.45, 0.62, 1.0),
     }
 }
 

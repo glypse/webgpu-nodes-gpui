@@ -831,7 +831,7 @@ impl BodyEmitter {
             if let Some(zone_id) = unit.strip_prefix("zone:") {
                 let Some(zone) = self.zones.zones.get(zone_id).cloned() else { continue };
                 match zone.kind {
-                    ZoneKind::Repeat => self.emit_zone_loop(state, &zone, indent),
+                    ZoneKind::Repeat | ZoneKind::Passes => self.emit_zone_loop(state, &zone, indent),
                     ZoneKind::Simulation => self.emit_simulation(state, &zone, indent),
                 }
                 continue;
