@@ -10,6 +10,29 @@ pub use graph::{
 };
 pub use nodes::{Interface, MathOp, NodeKind, Signature, Socket};
 
+/// The proof-of-concept generator's shader as a program: its entry points and
+/// frame layout. Goes away with the legacy module.
+pub fn program(code: String) -> crate::codegen::Program {
+    use crate::codegen::{ShaderProgram, UniformBlock, UniformField, UniformScalar};
+    use std::collections::BTreeMap;
+    let field = |offset, components| UniformField { offset, scalar: UniformScalar::F32, components };
+    crate::codegen::Program {
+        program: ShaderProgram {
+            code,
+            vertex_entry: "vs_main".into(),
+            fragment_entry: "fs_main".into(),
+            frame: UniformBlock {
+                binding: 0,
+                size: 16,
+                fields: BTreeMap::from([("time".into(), field(0, 1)), ("resolution".into(), field(8, 2))]),
+            },
+            uniforms: UniformBlock { binding: 1, size: 0, fields: BTreeMap::new() },
+        },
+        uniforms: Vec::new(),
+        line_map: BTreeMap::new(),
+    }
+}
+
 impl Project {
     /// A starting graph: animated stripes from UV and Time.
     pub fn demo() -> Self {

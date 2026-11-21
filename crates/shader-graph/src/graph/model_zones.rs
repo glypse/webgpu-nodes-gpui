@@ -1,0 +1,418 @@
+//! Editing zones, and nodes whose sockets are their own data (Custom WGSL,
+//! Index Switch).
+
+use std::collections::HashSet;
+
+use super::model::GraphModel;
+use super::{Connection, GraphEdge, GraphNode, Point, new_id};
+use crate::nodes::{
+    CUSTOM_WGSL, INDEX_SWITCH, clamp_cases, custom_sockets, is_socket_name, new_socket_label,
+};
+use crate::types::{
+    CustomSockets, HandleDef, HandleType, NodeData, WgslType, ZoneItem,
+};
+use crate::zones::{
+    DEFAULT_ITERATIONS, DEFAULT_MAX_ITERATIONS, DELTA_TIME_HANDLE, ITERATIONS_HANDLE,
+    ITERATION_HANDLE, MAX_ITERATIONS, NEW_ITEM_HANDLE, REPEAT_INPUT, SKIP_HANDLE, ZoneKind,
+    inferred_item_family, is_zone_input, paired_output_id, zone_items, zone_kind_of,
+};
+
+/// Distance between a new zone's input and output nodes.
+const ZONE_SPACING: f32 = 500.0;
+const MAX_CODE_LENGTH: usize = 1024 * 1024;
+
+pub struct ZoneNodes {
+    pub input: GraphNode,
+    pub output: GraphNode,
+    pub kind: ZoneKind,
+}
+
+impl GraphModel {
+    /// Add a new zone (paired input/output nodes) to the active document,
+    /// with one inferred state item passed straight through. Returns its
+    /// input's id, or `None` if the document is locked.
+    pub fn create_zone(&mut self, kind: ZoneKind, position: Point) -> Option<String> {
+        if self.is_locked() {
+            return None;
+        }
+        let (input_id, output_id) = (new_id(), new_id());
+        let item = ZoneItem::new(new_id(), "Value", HandleType::inferred());
+        let (input_type, output_type) = kind.boundaries();
+        let repeat = kind == ZoneKind::Repeat;
+        let mut input_data = NodeData { paired_output: Some(output_id.clone()), ..Default::default() };
+        if repeat {
+            input_data.values.insert(ITERATIONS_HANDLE.to_owned(), DEFAULT_ITERATIONS.into());
+            input_data.max_iterations = Some(DEFAULT_MAX_ITERATIONS);
+        }
+        input_data.values.insert(item.id.clone(), 0.0.into());
+        let mut output_data = NodeData::default();
+        if !repeat {
+            output_data.values.insert(SKIP_HANDLE.to_owned(), false.into());
+        }
+        output_data.items = Some(vec![item.clone()]);
+        let mut input = GraphNode::new(input_type, position);
+        input.id = input_id.clone();
+        input.data = input_data;
+        let mut output = GraphNode::new(output_type, Point::new(position.x + ZONE_SPACING, position.y));
+        output.id = output_id.clone();
+        output.data = output_data;
+        let passthrough = GraphEdge {
+            id: new_id(),
+            source: input_id.clone(),
+            source_handle: item.id.clone(),
+            target: output_id,
+            target_handle: item.id,
+        };
+        let key = self.active_definition_ref();
+        let doc = self.project.definitions.get_mut(&key)?;
+        doc.nodes.extend([input, output]);
+        doc.edges.push(passthrough);
+        self.changed();
+        Some(input_id)
+    }
+
+    /// The paired nodes of a zone of the active document, by its input's id.
+    pub fn zone_nodes(&self, zone_id: &str) -> Option<ZoneNodes> {
+        let doc = self.active_document();
+        let input = doc.node(zone_id)?;
+        let output = doc.node(paired_output_id(input)?)?;
+        let kind = zone_kind_of(&input.node_type)?;
+        (is_zone_input(&input.node_type) && output.node_type == kind.boundaries().1)
+            .then(|| ZoneNodes { input: input.clone(), output: output.clone(), kind })
+    }
+
+    pub fn zone_items_of(&self, zone_id: &str) -> Vec<ZoneItem> {
+        zone_items(self.zone_nodes(zone_id).as_ref().map(|z| &z.output))
+    }
+
+    /// Write a zone's item list (on its output node), dropping links to
+    /// items that no longer exist or no longer fit their type.
+    fn set_zone_items(&mut self, zone_id: &str, items: Vec<ZoneItem>) {
+        let Some(zone) = self.zone_nodes(zone_id) else { return };
+        if self.is_locked() {
+            return;
+        }
+        let key = self.active_definition_ref();
+        let ids: HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        let boundary = [zone.input.id.clone(), zone.output.id.clone()];
+        let fixed = [ITERATIONS_HANDLE, ITERATION_HANDLE, DELTA_TIME_HANDLE, SKIP_HANDLE];
+        {
+            let doc = self.project.definitions.get_mut(&key).expect("active");
+            if let Some(node) = doc.node_mut(&zone.output.id) {
+                node.data.items = Some(items.clone());
+            }
+            doc.edges.retain(|e| {
+                let bad_target = boundary.contains(&e.target)
+                    && !fixed.contains(&e.target_handle.as_str())
+                    && !ids.contains(e.target_handle.as_str());
+                let bad_source = boundary.contains(&e.source)
+                    && !fixed.contains(&e.source_handle.as_str())
+                    && !ids.contains(e.source_handle.as_str());
+                !(bad_target || bad_source)
+            });
+        }
+        self.project.reindex();
+        self.resolver.clear();
+        self.drop_unfit_links_among(&key, &boundary);
+        self.changed();
+    }
+
+    /// Drop the links of `key` touching `nodes` whose types no longer fit.
+    pub(crate) fn drop_unfit_links_among(&mut self, key: &str, nodes: &[String]) {
+        let Some(doc) = self.project.document(key) else { return };
+        let unfit: HashSet<String> = doc
+            .edges
+            .iter()
+            .filter(|e| nodes.contains(&e.source) || nodes.contains(&e.target))
+            .filter(|e| {
+                let (Some(source), Some(target)) = (doc.node(&e.source), doc.node(&e.target)) else {
+                    return true;
+                };
+                !self.link_fits(source, &e.source_handle, target, &e.target_handle)
+            })
+            .map(|e| e.id.clone())
+            .collect();
+        if unfit.is_empty() {
+            return;
+        }
+        if let Some(doc) = self.project.definitions.get_mut(key) {
+            doc.edges.retain(|e| !unfit.contains(&e.id));
+        }
+        self.project.reindex();
+        self.resolver.clear();
+    }
+
+    /// Append a state item to a zone. Returns the new item.
+    pub fn add_zone_item(
+        &mut self,
+        zone_id: &str,
+        ty: HandleType,
+        label: Option<&str>,
+    ) -> Option<ZoneItem> {
+        let zone = self.zone_nodes(zone_id)?;
+        if self.is_locked() {
+            return None;
+        }
+        let items = zone_items(Some(&zone.output));
+        let base = label.unwrap_or("Value");
+        let mut name = base.to_owned();
+        let mut n = 2;
+        while items.iter().any(|i| i.label == name) {
+            name = format!("{base} {n}");
+            n += 1;
+        }
+        let item = ZoneItem::new(new_id(), name, ty);
+        let mut all = items;
+        all.push(item.clone());
+        self.set_zone_items(zone_id, all);
+        Some(item)
+    }
+
+    pub fn remove_zone_item(&mut self, zone_id: &str, item_id: &str) {
+        let items: Vec<ZoneItem> =
+            self.zone_items_of(zone_id).into_iter().filter(|i| i.id != item_id).collect();
+        self.pick_item_type(zone_id, item_id, None);
+        self.set_zone_items(zone_id, items);
+    }
+
+    /// Rename a state item; names stay unique. Returns whether it was applied.
+    pub fn rename_zone_item(&mut self, zone_id: &str, item_id: &str, label: &str) -> bool {
+        let label = label.trim();
+        let items = self.zone_items_of(zone_id);
+        if label.is_empty() || items.iter().any(|i| i.id != item_id && i.label == label) {
+            return false;
+        }
+        let items = items
+            .into_iter()
+            .map(|mut i| {
+                if i.id == item_id {
+                    i.label = label.to_owned();
+                }
+                i
+            })
+            .collect();
+        self.set_zone_items(zone_id, items);
+        true
+    }
+
+    /// Change a state item's type; links that no longer fit are removed. An
+    /// item becoming inferred keeps its type until its initial value is linked.
+    pub fn set_zone_item_type(&mut self, zone_id: &str, item_id: &str, ty: HandleType) {
+        let items = self.zone_items_of(zone_id);
+        let current = self.resolve_output_handle_type(zone_id, item_id);
+        self.pick_item_type(zone_id, item_id, ty.is_inferred().then_some(current));
+        let items = items
+            .into_iter()
+            .map(|mut i| {
+                if i.id == item_id {
+                    i.ty = ty.clone();
+                }
+                i
+            })
+            .collect();
+        self.set_zone_items(zone_id, items);
+    }
+
+    pub fn move_zone_item(&mut self, zone_id: &str, item_id: &str, offset: isize) {
+        let mut items = self.zone_items_of(zone_id);
+        let Some(index) = items.iter().position(|i| i.id == item_id) else { return };
+        let Some(target) = index.checked_add_signed(offset).filter(|t| *t < items.len()) else {
+            return;
+        };
+        items.swap(index, target);
+        self.set_zone_items(zone_id, items);
+    }
+
+    /// Pick the type an inferred item takes while its initial value is
+    /// unlinked (or forget it, with `None`).
+    fn pick_item_type(&mut self, zone_id: &str, item_id: &str, ty: Option<WgslType>) {
+        let Some(zone) = self.zone_nodes(zone_id) else { return };
+        if self.is_locked() {
+            return;
+        }
+        let key = inferred_item_family(item_id);
+        self.update_node_data(&zone.input.id, |data| match ty {
+            Some(t) => {
+                data.types.insert(key, t);
+            }
+            None => {
+                data.types.remove(&key);
+            }
+        });
+    }
+
+    /// Set a repeat zone's iteration safety cap.
+    pub fn set_zone_max_iterations(&mut self, zone_id: &str, max: u32) {
+        let Some(zone) = self.zone_nodes(zone_id) else { return };
+        if zone.input.node_type != REPEAT_INPUT || self.is_locked() {
+            return;
+        }
+        self.update_node_data(&zone.input.id, |data| data.max_iterations = Some(max.min(MAX_ITERATIONS)));
+    }
+
+    /// Complete a connection dropped on a zone's virtual "new item" handle:
+    /// create an inferred item, then link to it. Unless the link is its
+    /// initial value, the item takes the type at the other end until one is
+    /// linked.
+    pub(crate) fn connect_new_zone_item(&mut self, c: &Connection) -> bool {
+        let to_new = c.target_handle == NEW_ITEM_HANDLE;
+        let zone_node = if to_new { &c.target } else { &c.source };
+        let Some(zone_id) =
+            self.active_zones().zone_of_boundary.get(zone_node).cloned()
+        else {
+            return false;
+        };
+        let (ty, label) = if to_new {
+            (
+                self.resolve_output_handle_type(&c.source, &c.source_handle),
+                self.resolve_node_outputs(&c.source).into_iter().find(|o| o.id == c.source_handle).map(|o| o.label),
+            )
+        } else {
+            (
+                self.resolve_input_type(&c.target, &c.target_handle),
+                self.resolve_node_inputs(&c.target).into_iter().find(|i| i.id == c.target_handle).map(|i| i.label),
+            )
+        };
+        let Some(item) = self.add_zone_item(&zone_id, HandleType::inferred(), label.as_deref()) else {
+            return false;
+        };
+        if !(to_new && c.target == zone_id) {
+            self.pick_item_type(&zone_id, &item.id, Some(ty));
+        }
+        let edge = GraphEdge {
+            id: new_id(),
+            source: c.source.clone(),
+            source_handle: if to_new { c.source_handle.clone() } else { item.id.clone() },
+            target: c.target.clone(),
+            target_handle: if to_new { item.id.clone() } else { c.target_handle.clone() },
+        };
+        let key = self.active_definition_ref();
+        if let Some(doc) = self.project.definitions.get_mut(&key) {
+            if !to_new {
+                doc.edges.retain(|e| !(e.target == edge.target && e.target_handle == edge.target_handle));
+            }
+            doc.edges.push(edge);
+        }
+        self.changed();
+        true
+    }
+
+    // ── Custom WGSL ──────────────────────────────────────────────────────────
+
+    fn custom_node(&self, node_id: &str) -> Option<GraphNode> {
+        let node = self.active_document().node(node_id)?;
+        (node.is(CUSTOM_WGSL) && !self.is_locked()).then(|| node.clone())
+    }
+
+    pub fn set_custom_code(&mut self, node_id: &str, code: &str) {
+        if self.custom_node(node_id).is_none() || code.len() > MAX_CODE_LENGTH {
+            return;
+        }
+        self.update_node_data(node_id, |data| data.code = Some(code.to_owned()));
+    }
+
+    /// Write a node's sockets, dropping links to sockets gone or no longer fitting their type.
+    fn set_custom_sockets(&mut self, node_id: &str, sockets: CustomSockets) {
+        let key = self.active_definition_ref();
+        {
+            let Some(doc) = self.project.definitions.get_mut(&key) else { return };
+            if let Some(node) = doc.node_mut(node_id) {
+                node.data.sockets = Some(sockets.clone());
+            }
+            doc.edges.retain(|e| {
+                !(e.target == node_id && !sockets.inputs.iter().any(|s| s.id == e.target_handle))
+                    && !(e.source == node_id && !sockets.outputs.iter().any(|s| s.id == e.source_handle))
+            });
+        }
+        self.project.reindex();
+        self.resolver.clear();
+        self.drop_unfit_links_among(&key, &[node_id.to_owned()]);
+        self.changed();
+    }
+
+    fn update_sockets(
+        &mut self,
+        node_id: &str,
+        input: bool,
+        update: impl FnOnce(&mut Vec<HandleDef>),
+    ) {
+        let Some(node) = self.custom_node(node_id) else { return };
+        let mut sockets = custom_sockets(&node.data);
+        update(if input { &mut sockets.inputs } else { &mut sockets.outputs });
+        self.set_custom_sockets(node_id, sockets);
+    }
+
+    /// Append a socket with a free name; returns it.
+    pub fn add_custom_socket(&mut self, node_id: &str, input: bool, ty: WgslType) -> Option<HandleDef> {
+        let node = self.custom_node(node_id)?;
+        let socket = HandleDef::new(new_id(), new_socket_label(&custom_sockets(&node.data), input), ty);
+        let added = socket.clone();
+        self.update_sockets(node_id, input, |s| s.push(added));
+        Some(socket)
+    }
+
+    pub fn remove_custom_socket(&mut self, node_id: &str, input: bool, socket_id: &str) {
+        self.update_sockets(node_id, input, |s| s.retain(|x| x.id != socket_id));
+    }
+
+    /// Rename a socket, which is also the variable the code reads or writes.
+    /// Rejects names that aren't WGSL identifiers or that another socket has;
+    /// returns whether it was applied.
+    pub fn rename_custom_socket(&mut self, node_id: &str, input: bool, socket_id: &str, label: &str) -> bool {
+        let Some(node) = self.custom_node(node_id) else { return false };
+        let name = label.trim();
+        let sockets = custom_sockets(&node.data);
+        if !is_socket_name(name)
+            || sockets.inputs.iter().chain(&sockets.outputs).any(|s| s.id != socket_id && s.label == name)
+        {
+            return false;
+        }
+        self.update_sockets(node_id, input, |list| {
+            for s in list.iter_mut().filter(|s| s.id == socket_id) {
+                s.label = name.to_owned();
+            }
+        });
+        true
+    }
+
+    /// Change a socket's type; links that no longer fit are removed.
+    pub fn set_custom_socket_type(&mut self, node_id: &str, input: bool, socket_id: &str, ty: WgslType) {
+        self.update_sockets(node_id, input, |list| {
+            for s in list.iter_mut().filter(|s| s.id == socket_id) {
+                s.ty = ty;
+            }
+        });
+    }
+
+    /// Move a socket up (-1) or down (+1) among its side's.
+    pub fn move_custom_socket(&mut self, node_id: &str, input: bool, socket_id: &str, offset: isize) {
+        self.update_sockets(node_id, input, |list| {
+            if let Some(index) = list.iter().position(|s| s.id == socket_id)
+                && let Some(target) = index.checked_add_signed(offset).filter(|t| *t < list.len()) {
+                    list.swap(index, target);
+                }
+        });
+    }
+
+    // ── Index Switch ─────────────────────────────────────────────────────────
+
+    /// Set how many cases an Index Switch has; links to cases that go are dropped.
+    pub fn set_index_switch_cases(&mut self, node_id: &str, count: i64) {
+        let Some(node) = self.active_document().node(node_id).cloned() else { return };
+        if !node.is(INDEX_SWITCH) || self.is_locked() {
+            return;
+        }
+        let count = clamp_cases(count);
+        self.update_node_data(node_id, |data| data.cases = Some(count));
+        let key = self.active_definition_ref();
+        let cases: HashSet<String> = (0..count).map(|i| crate::enums::case_handle(i64::from(i))).collect();
+        if let Some(doc) = self.project.definitions.get_mut(&key) {
+            doc.edges.retain(|e| {
+                e.target != node_id
+                    || !crate::enums::is_case_handle(&e.target_handle)
+                    || cases.contains(&e.target_handle)
+            });
+        }
+        self.changed();
+    }
+}
