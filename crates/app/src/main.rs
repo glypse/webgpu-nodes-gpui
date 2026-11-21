@@ -81,7 +81,7 @@ fn main() -> ExitCode {
         preferences::init(cx);
         shell::init(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &Quit, cx| shell::request_quit(cx));
         cx.set_menus(menus());
         let window_size = launch.window.unwrap_or(cli::Size { width: 1400.0, height: 860.0 });
         let bounds = Bounds::centered(None, size(px(window_size.width), px(window_size.height)), cx);

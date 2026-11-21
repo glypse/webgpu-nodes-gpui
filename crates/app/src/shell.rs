@@ -139,6 +139,8 @@ pub struct Shell {
     views: Rc<RefCell<AreaViews>>,
     path: Option<PathBuf>,
     settings: Option<Entity<SettingsDialog>>,
+    /// Whether a discard prompt is open, so repeated close or quit requests don't stack prompts.
+    confirming: bool,
 }
 
 impl Shell {
@@ -267,9 +269,22 @@ impl Shell {
                 }
             }, cx)
         });
-        let shell = Self { screen, playback, editor, views, path, settings: None };
+        let shell = Self { screen, playback, editor, views, path, settings: None, confirming: false };
         shell.refresh_title(window, cx);
+        let shell_weak = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            shell_weak.update(cx, |this, cx| this.close_requested(window, cx)).unwrap_or(true)
+        });
         shell
+    }
+
+    /// Whether the window may close now: with unsaved changes it closes only once they are discarded.
+    fn close_requested(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.editor.read(cx).has_unsaved_changes() {
+            return true;
+        }
+        self.confirm_discard(window, cx, |_, window, _| window.remove_window());
+        false
     }
 
     /// Applies `f` to the preview areas the pointer is over. Keys reach the shell whatever has focus,
@@ -353,6 +368,10 @@ impl Shell {
             then(self, window, cx);
             return;
         }
+        if self.confirming {
+            return;
+        }
+        self.confirming = true;
         let answer = window.prompt(
             PromptLevel::Warning,
             "Discard unsaved changes?",
@@ -361,12 +380,14 @@ impl Shell {
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
-            if answer.await == Ok(0) {
-                this.update_in(cx, |this, window, cx| {
+            let discard = answer.await == Ok(0);
+            this.update_in(cx, |this, window, cx| {
+                this.confirming = false;
+                if discard {
                     guard::guard("discard changes", || then(this, window, cx));
-                })
-                .ok();
-            }
+                }
+            })
+            .ok();
         })
         .detach();
     }
@@ -518,6 +539,19 @@ fn apply_settings(
     }
 }
 
+/// Asks before a closing or quitting app loses unsaved changes.
+pub fn request_quit(cx: &mut App) {
+    let Some(handle) = cx.windows().into_iter().find_map(|w| w.downcast::<Shell>()) else {
+        cx.quit();
+        return;
+    };
+    if let Err(error) = handle.update(cx, |shell, window, cx| {
+        shell.confirm_discard(window, cx, |_, _, cx| cx.quit());
+    }) {
+        log::error!("couldn't ask about unsaved changes: {error:#}");
+    }
+}
+
 fn dirs_home() -> Option<PathBuf> {
     dirs::document_dir().or_else(dirs::home_dir)
 }
@@ -616,10 +650,25 @@ mod tests {
         (shell, cx.clone())
     }
 
+    fn dirty(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) {
+        shell.update(cx, |shell, cx| {
+            shell.editor.update(cx, |editor, cx| {
+                let mut settings = editor.settings();
+                settings.canvas.width += 1;
+                editor.update_settings(settings, cx);
+            });
+        });
+        assert!(shell.read_with(cx, |s, cx| s.editor.read(cx).has_unsaved_changes()));
+    }
+
     fn preview_area(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) -> Entity<PreviewArea> {
         shell.read_with(cx, |s, _| {
             s.views.borrow().previews.values().next().map(|(area, _)| area.clone()).expect("a preview area")
         })
+    }
+
+    fn open_windows(cx: &mut gpui::VisualTestContext) -> usize {
+        cx.cx.update(|cx| cx.windows().len())
     }
 
     #[gpui::test]
@@ -663,6 +712,45 @@ mod tests {
         assert_eq!(theme(cx), preferences::ThemePreference::Dark);
         cx.simulate_keystrokes("cmd-m");
         assert_eq!(theme(cx), preferences::ThemePreference::Light);
+    }
+
+    #[gpui::test]
+    fn closing_with_unsaved_changes_asks_first(cx: &mut TestAppContext) {
+        let (shell, mut cx) = open(cx);
+        let cx = &mut cx;
+        dirty(&shell, cx);
+
+        assert!(!cx.simulate_close(), "the window stays open while the prompt is up");
+        assert!(cx.has_pending_prompt());
+        cx.simulate_prompt_answer("Cancel");
+        cx.run_until_parked();
+        assert_eq!(open_windows(cx), 1, "cancel keeps the window open");
+
+        assert!(!cx.simulate_close());
+        cx.simulate_prompt_answer("Discard");
+        cx.run_until_parked();
+        assert_eq!(open_windows(cx), 0, "discarding closes the window");
+    }
+
+    #[gpui::test]
+    fn closing_a_saved_project_does_not_ask(cx: &mut TestAppContext) {
+        let (_, mut cx) = open(cx);
+        let cx = &mut cx;
+        assert!(cx.simulate_close());
+        assert!(!cx.has_pending_prompt());
+    }
+
+    #[gpui::test]
+    fn quitting_with_unsaved_changes_asks_first(cx: &mut TestAppContext) {
+        let (shell, mut cx) = open(cx);
+        let cx = &mut cx;
+        dirty(&shell, cx);
+
+        cx.cx.update(request_quit);
+        assert!(cx.has_pending_prompt());
+        cx.simulate_prompt_answer("Cancel");
+        cx.run_until_parked();
+        assert_eq!(open_windows(cx), 1);
     }
 
 }
