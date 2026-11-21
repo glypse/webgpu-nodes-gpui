@@ -1,53 +1,56 @@
+use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Cursor, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
+use shader_graph::assets::{BundleKind, pack_bundle, unpack_bundle, verified_files};
 use shader_graph::graph::GraphProject;
-use zip::write::SimpleFileOptions;
 
-/// Name of the project's JSON inside a bundle; any other entry is an asset's.
-const BUNDLE_JSON: &str = "project.json";
-pub const EXTENSION: &str = "wgnodes";
+pub const EXTENSION: &str = BundleKind::Project.extension();
 const ZIP_MAGIC: &[u8] = b"PK";
-/// What a bundle's JSON may inflate to, so a crafted file can't exhaust memory.
-const MAX_JSON_BYTES: u64 = shader_graph::graph::MAX_JSON_BYTES as u64;
 
-/// Reads a project from a bundle (zip with `project.json`) or from bare JSON.
-pub fn read(path: &Path) -> Result<GraphProject> {
+/// The files of a project's assets, by asset id.
+pub type AssetFiles = BTreeMap<String, Arc<Vec<u8>>>;
+
+/// A project and the files of its assets.
+pub struct Loaded {
+    pub project: GraphProject,
+    pub files: AssetFiles,
+}
+
+/// Reads a project from a bundle (zip with `project.json` and its assets' files) or from bare JSON.
+pub fn read(path: &Path) -> Result<Loaded> {
     let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     parse(&bytes)
 }
 
-fn parse(bytes: &[u8]) -> Result<GraphProject> {
-    let json = if bytes.starts_with(ZIP_MAGIC) {
-        let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-            .map_err(|e| anyhow!("it isn't a readable bundle: {e}"))?;
-        let entry = archive
-            .by_name(BUNDLE_JSON)
-            .map_err(|_| anyhow!("the bundle has no {BUNDLE_JSON}"))?;
-        let mut json = String::new();
-        entry
-            .take(MAX_JSON_BYTES + 1)
-            .read_to_string(&mut json)
-            .map_err(|e| anyhow!("{BUNDLE_JSON} can't be read: {e}"))?;
-        json
-    } else {
-        String::from_utf8(bytes.to_vec()).map_err(|_| anyhow!("it isn't text or a bundle"))?
-    };
-    Ok(GraphProject::from_json(&json)?)
+fn parse(bytes: &[u8]) -> Result<Loaded> {
+    if !bytes.starts_with(ZIP_MAGIC) {
+        let json = std::str::from_utf8(bytes).map_err(|_| anyhow!("it isn't text or a bundle"))?;
+        return Ok(Loaded { project: GraphProject::from_json(json)?, files: AssetFiles::new() });
+    }
+    let bundle = unpack_bundle(bytes, BundleKind::Project)?;
+    let project = GraphProject::from_json(&bundle.json)?;
+    let verified = verified_files(&bundle, &project.assets);
+    for asset in &verified.altered {
+        log::warn!("the file of the asset \"{}\" isn't what the project says, so it's left out", asset.name());
+    }
+    let files = verified.files.into_iter().map(|(id, data)| (id, Arc::new(data))).collect();
+    Ok(Loaded { project, files })
 }
 
-fn encode(project: &GraphProject) -> Result<Vec<u8>> {
-    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    writer.start_file(BUNDLE_JSON, SimpleFileOptions::default())?;
-    writer.write_all(project.to_json().as_bytes())?;
-    Ok(writer.finish()?.into_inner())
+fn encode(project: &GraphProject, files: &AssetFiles) -> Result<Vec<u8>> {
+    let entries = project.assets.iter().filter_map(|asset| {
+        let data = files.get(asset.id())?;
+        Some((asset.file(), data.as_slice()))
+    });
+    Ok(pack_bundle(BundleKind::Project, &project.to_json(), entries)?)
 }
 
-/// Writes the project as a bundle, replacing the file only once it is whole.
-pub fn write(path: &Path, project: &GraphProject) -> Result<()> {
-    let bytes = encode(project)?;
+/// Writes the project and its assets' files as a bundle, replacing the file only once it is whole.
+pub fn write(path: &Path, project: &GraphProject, files: &AssetFiles) -> Result<()> {
+    let bytes = encode(project, files)?;
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(".tmp");
     let temporary = PathBuf::from(temporary);
@@ -90,6 +93,7 @@ pub fn file_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shader_graph::assets::{Asset, AssetFile, asset_hash};
 
     /// Loading registers the standard library, so compare against a project that has it.
     fn loaded_default() -> GraphProject {
@@ -102,20 +106,62 @@ mod tests {
         dir
     }
 
+    fn image(bytes: &[u8]) -> Asset {
+        Asset::Image(AssetFile {
+            id: "a1".into(),
+            name: "Photo".into(),
+            file: "assets/images/a1.png".into(),
+            mime: "image/png".into(),
+            bytes: bytes.len() as u64,
+            hash: asset_hash(bytes),
+            width: 1,
+            height: 1,
+        })
+    }
+
     #[test]
     fn a_saved_project_reads_back_the_same() {
         let dir = scratch("roundtrip");
         let path = dir.join("a.wgnodes");
         let project = loaded_default();
-        write(&path, &project).expect("write");
-        assert_eq!(read(&path).expect("read"), project);
+        write(&path, &project, &AssetFiles::new()).expect("write");
+        assert_eq!(read(&path).expect("read").project, project);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_saved_project_keeps_its_assets_and_their_files() {
+        let dir = scratch("assets");
+        let path = dir.join("a.wgnodes");
+        let bytes = [1u8, 2, 3];
+        let mut project = loaded_default();
+        project.assets.push(image(&bytes));
+        let files = AssetFiles::from([("a1".to_owned(), Arc::new(bytes.to_vec()))]);
+        write(&path, &project, &files).expect("write");
+        let loaded = read(&path).expect("read");
+        assert_eq!(loaded.project, project);
+        assert_eq!(loaded.files.get("a1").map(|f| f.as_slice()), Some(&bytes[..]));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_file_that_isnt_what_its_asset_says_is_left_out() {
+        let dir = scratch("altered");
+        let path = dir.join("a.wgnodes");
+        let mut project = loaded_default();
+        project.assets.push(image(&[1, 2, 3]));
+        let files = AssetFiles::from([("a1".to_owned(), Arc::new(vec![9, 9, 9]))]);
+        write(&path, &project, &files).expect("write");
+        let loaded = read(&path).expect("read");
+        assert_eq!(loaded.project.assets.len(), 1);
+        assert!(loaded.files.is_empty());
         fs::remove_dir_all(dir).ok();
     }
 
     #[test]
     fn bare_json_reads_too() {
         let project = loaded_default();
-        assert_eq!(parse(project.to_json().as_bytes()).expect("parse"), project);
+        assert_eq!(parse(project.to_json().as_bytes()).expect("parse").project, project);
     }
 
     #[test]
@@ -129,10 +175,7 @@ mod tests {
 
     #[test]
     fn a_bundle_without_its_json_is_an_error() {
-        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        writer.start_file("assets/x.png", SimpleFileOptions::default()).expect("start");
-        writer.write_all(b"x").expect("write");
-        let bytes = writer.finish().expect("finish").into_inner();
+        let bytes = pack_bundle(BundleKind::Groups, "{}", []).expect("packs");
         assert!(parse(&bytes).is_err());
     }
 }

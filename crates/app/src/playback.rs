@@ -1,7 +1,12 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{Context, EventEmitter, RenderImage, SharedString, Window};
+use shader_graph::assets::AssetKind;
+use shader_graph::codegen::ResourceDecl;
+
+use crate::project::AssetFiles;
 use runtime::{
     Frame, PixelFormat, Player, Program, ProgramError, RefreshRateMeter,
     RenderOptions, Renderer, Size, Timing,
@@ -80,6 +85,10 @@ pub struct Playback {
     refresh_meter: RefreshRateMeter,
     epoch: Instant,
     scheduled: bool,
+    /// The files of the project's assets, which programs reading them are given.
+    files: AssetFiles,
+    /// The files already given to the renderer, to give each once.
+    given: HashMap<String, Arc<Vec<u8>>>,
 }
 
 impl EventEmitter<PlaybackEvent> for Playback {}
@@ -105,6 +114,53 @@ impl Playback {
             refresh_meter: RefreshRateMeter::new(REFRESH_SAMPLES),
             epoch: Instant::now(),
             scheduled: false,
+            files: AssetFiles::new(),
+            given: HashMap::new(),
+        }
+    }
+
+    pub fn asset_files(&self) -> &AssetFiles {
+        &self.files
+    }
+
+    /// Takes the files of the project's assets, for the programs reading them.
+    pub fn set_asset_files(&mut self, files: AssetFiles, window: &mut Window, cx: &mut Context<Self>) {
+        self.files = files;
+        self.sync_media();
+        self.player.invalidate();
+        self.changed(window, cx);
+    }
+
+    /// Gives the renderer the files the program reads that it doesn't have yet,
+    /// and forgets those no longer there. A file that can't be used is logged
+    /// and read as a transparent image.
+    fn sync_media(&mut self) {
+        let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else { return };
+        let wanted: HashMap<&str, AssetKind> = program
+            .plan()
+            .resources
+            .iter()
+            .filter_map(|r| match r {
+                ResourceDecl::Media { asset, video, .. } => {
+                    Some((asset.as_str(), if video.is_some() { AssetKind::Video } else { AssetKind::Image }))
+                }
+                _ => None,
+            })
+            .collect();
+        for (asset, kind) in wanted {
+            match self.files.get(asset) {
+                Some(file) if self.given.get(asset).is_some_and(|g| Arc::ptr_eq(g, file)) => {}
+                Some(file) => {
+                    self.given.insert(asset.to_owned(), file.clone());
+                    if let Err(error) = renderer.set_media(asset, kind, file) {
+                        log::error!("the asset {asset} can't be shown: {error}");
+                    }
+                }
+                None => {
+                    self.given.remove(asset);
+                    renderer.remove_media(asset);
+                }
+            }
         }
     }
 
@@ -147,6 +203,7 @@ impl Playback {
                                 .collect();
                             renderer.set_uniforms(&program, &values);
                             self.program = Some(program);
+                            self.sync_media();
                             self.failure = None;
                             self.player.invalidate();
                         }

@@ -125,8 +125,8 @@ pub struct FrameProgram {
     pub steps: Vec<FrameStep>,
 }
 
-pub type IterationOf = dyn Fn(&str) -> Option<f64>;
-pub type TextureSizeOf = dyn Fn(&str) -> Option<(Size, Option<u32>)>;
+pub type IterationOf<'a> = dyn Fn(&str) -> Option<f64> + 'a;
+pub type TextureSizeOf<'a> = dyn Fn(&str) -> Option<(Size, Option<u32>)> + 'a;
 
 /// What a frame program's sources are while a pass is drawn.
 #[derive(Default)]
@@ -138,9 +138,9 @@ pub struct FrameEnv<'a> {
     /// The size of the pass being drawn.
     pub pass_size: Size,
     /// The current iteration of each loop of the plan, by id.
-    pub iteration: Option<&'a IterationOf>,
+    pub iteration: Option<&'a IterationOf<'a>>,
     /// The size of a resource's texture, by id, and how many mip levels it has (one without).
-    pub texture_size: Option<&'a TextureSizeOf>,
+    pub texture_size: Option<&'a TextureSizeOf<'a>>,
     /// The values of uniform inputs, by name.
     pub uniforms: &'a [(String, UniformValue)],
 }

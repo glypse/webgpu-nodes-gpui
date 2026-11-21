@@ -2,6 +2,7 @@
 //! and simulations kept between frames. Frames are read back sRGB-encoded.
 
 use runtime::{FrameInputs, PixelFormat, Program, RenderOptions, Renderer, Size};
+use shader_graph::assets::{Asset, AssetFile, AssetKind};
 use shader_graph::graph::{Connection, FRAG_OUTPUT, GraphModel, Point};
 use shader_graph::types::{InputValue, WgslType};
 use shader_graph::zones::ZoneKind;
@@ -525,4 +526,53 @@ fn a_size_made_of_frame_values_follows_them() {
     assert_eq!(red(&pixels, 0), red(&pixels, 1), "two pixels per texel");
     assert_ne!(red(&pixels, 1), red(&pixels, 2));
     assert_eq!(red(&pixels, 2), red(&pixels, 3));
+}
+
+fn png(width: u32, height: u32, pixels: &[[u8; 4]]) -> Vec<u8> {
+    let raw = pixels.iter().flatten().copied().collect();
+    let image = image::RgbaImage::from_raw(width, height, raw).expect("pixels fit");
+    let mut out = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+    out.into_inner()
+}
+
+/// An image asset, read closest at the pixel: left red, right blue.
+#[test]
+fn an_image_asset_is_decoded_and_sampled() {
+    let mut scene = Scene::new();
+    let file = png(2, 1, &[[255, 0, 0, 255], [0, 0, 255, 255]]);
+    assert!(scene.model.add_asset(Asset::Image(AssetFile {
+        id: "pair".into(),
+        name: "pair".into(),
+        file: "assets/images/pair.png".into(),
+        mime: "image/png".into(),
+        bytes: file.len() as u64,
+        hash: "0".repeat(64),
+        width: 2,
+        height: 1,
+    })));
+    let image = scene.add("image");
+    scene.model.set_node_asset(&image, Some("pair"));
+    let sample = scene.add("sample-texture");
+    scene.model.set_input_value(&sample, "interpolation", Some(InputValue::from(1.0)));
+    scene.link((&image, "texture"), (&sample, "texture"));
+    let out = scene.output();
+    scene.link((&sample, "color"), (&out, "color"));
+    let program = scene.compile();
+    let size = scene.renderer.set_media("pair", AssetKind::Image, &file).expect("decodes");
+    assert_eq!(size, Size::new(2, 1));
+    let pixels = scene.draw(&program, Size::new(4, 2), 0);
+    assert_eq!(pixel(&pixels, 4, 0, 0), [255, 0, 0, 255]);
+    assert_eq!(pixel(&pixels, 4, 3, 1), [0, 0, 255, 255]);
+    // Without its file an image reads nothing.
+    scene.renderer.remove_media("pair");
+    let pixels = scene.draw(&program, Size::new(4, 2), 0);
+    assert_eq!(pixel(&pixels, 4, 0, 0)[3], 0);
+}
+
+#[test]
+fn a_video_asset_cant_be_given_yet() {
+    let mut scene = Scene::new();
+    let error = scene.renderer.set_media("clip", AssetKind::Video, b"bytes").expect_err("unsupported");
+    assert!(error.to_string().contains("video"));
 }

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context as _, Result};
 use shader_graph::ShaderProgram;
+use shader_graph::assets::AssetKind;
 use shader_graph::codegen::{
     PLAN_TARGET, PassDecl, RenderPlan, ResourceDecl, SimulationStage, UniformValue,
 };
@@ -13,6 +14,7 @@ use shader_graph::types::{SamplerAddress, SamplerFilter};
 use crate::clock::FrameInputs;
 use crate::formats::{wgpu_format, wgpu_sample_type};
 use crate::gpu_timer::{GpuTimer, TIMING_BYTES};
+use crate::media::{DecodedImage, MediaError, decode_image, texels_of_srgb8};
 use crate::mips::MipGenerator;
 use crate::present::{PresentOptions, Presenter};
 use crate::simulation::{SimulationState, Step, StepKind};
@@ -461,35 +463,54 @@ impl Renderer {
         }
     }
 
-    /// Gives a project asset's image to the programs reading it: straight-alpha
-    /// linear RGBA, 8 bits per channel, `size.width * size.height * 4` bytes.
-    pub fn set_media(&mut self, asset: &str, size: Size, rgba: &[u8]) -> Result<()> {
-        anyhow::ensure!(
-            rgba.len() == size.width as usize * size.height as usize * 4 && size.width > 0 && size.height > 0,
-            "the image's pixels don't match its size"
-        );
+    /// Gives a project asset's file to the programs reading it, decoded: images
+    /// only, as no video decoder is built in. Returns the image's size.
+    pub fn set_media(&mut self, asset: &str, kind: AssetKind, file: &[u8]) -> Result<Size, MediaError> {
+        if kind == AssetKind::Video {
+            return Err(MediaError::VideoUnsupported);
+        }
+        let decoded = decode_image(file, self.device.limits().max_texture_dimension_2d)?;
+        Ok(self.upload_media(asset, &decoded))
+    }
+
+    /// Gives a project asset's image to the programs reading it, from
+    /// sRGB-encoded straight-alpha RGBA of 8 bits per channel.
+    pub fn set_media_pixels(&mut self, asset: &str, size: Size, rgba: &[u8]) -> Result<(), MediaError> {
+        let decoded = texels_of_srgb8(size, rgba)?;
+        self.upload_media(asset, &decoded);
+        Ok(())
+    }
+
+    fn upload_media(&mut self, asset: &str, image: &DecodedImage) -> Size {
+        let size = image.size;
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("media"),
             size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: LINEAR_FORMAT,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         self.queue.write_texture(
             texture.as_image_copy(),
-            rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size.width * 4),
-                rows_per_image: None,
-            },
+            &image.texels,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size.width * 8), rows_per_image: None },
             texture.size(),
         );
         self.media.insert(asset.to_owned(), texture);
-        Ok(())
+        size
+    }
+
+    /// Forgets a project asset's image: programs read nothing where it was.
+    pub fn remove_media(&mut self, asset: &str) {
+        self.media.remove(asset);
+    }
+
+    /// Whether a project asset's image is given.
+    pub fn has_media(&self, asset: &str) -> bool {
+        self.media.contains_key(asset)
     }
 
     /// Forgets every simulation's state: they all start over on the next frame.

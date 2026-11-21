@@ -4909,6 +4909,7 @@ name = "runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "half",
  "image",
  "log",
  "pollster 0.4.0",
@@ -6787,7 +6788,6 @@ dependencies = [
  "smallvec",
  "theme",
  "wgpu",
- "zip",
 ]
 
 [[package]]

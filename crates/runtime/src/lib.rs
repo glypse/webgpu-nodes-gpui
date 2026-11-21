@@ -5,6 +5,7 @@ mod clock;
 mod formats;
 mod frame_meter;
 mod gpu_timer;
+mod media;
 mod mips;
 mod player;
 mod present;
@@ -15,6 +16,7 @@ mod uniforms;
 
 pub use clock::{Clock, FrameInputs, Timing};
 pub use frame_meter::{FrameMeter, FrameRate};
+pub use media::MediaError;
 pub use player::Player;
 pub use refresh_rate::RefreshRateMeter;
 pub use renderer::{

@@ -21,7 +21,7 @@ use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences;
 use crate::settings::{SettingsDialog, SettingsEvent};
-use crate::project;
+use crate::project::{self, Loaded};
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
 
@@ -133,9 +133,10 @@ impl Shell {
         let requested = std::env::args_os().nth(1).map(PathBuf::from);
         if let Some(last) = requested.or_else(project::last) {
             match project::read(&last) {
-                Ok(loaded) => {
+                Ok(Loaded { project: loaded, files }) => {
                     layout = layout::load(&loaded);
                     editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+                    playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
                     path = Some(last);
                 }
                 Err(e) => log::warn!("couldn't reopen {}: {e:#}", last.display()),
@@ -371,9 +372,10 @@ impl Shell {
 
     pub fn load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         match project::read(&path) {
-            Ok(loaded) => {
+            Ok(Loaded { project: loaded, files }) => {
                 let layout = layout::load(&loaded);
                 self.editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+                self.playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
                 let (screen, graphs) = layout.map_or_else(|| (default_screen(), Vec::new()), |l| (l.screen, l.graphs));
                 self.show_screen(screen, graphs, cx);
                 self.adopt(Some(path), window, cx);
@@ -432,7 +434,8 @@ impl Shell {
             let graph = |id: AreaId| views.graphs.get(&id).map(|e| e.read(cx).view(cx)).unwrap_or_default();
             layout::store(&mut project, self.screen.read(cx).screen(), &graph);
         }
-        let result: Result<()> = project::write(&path, &project);
+        let files = self.playback.read(cx).asset_files().clone();
+        let result: Result<()> = project::write(&path, &project, &files);
         match result {
             Ok(()) => {
                 self.editor.read(cx).mark_saved();
