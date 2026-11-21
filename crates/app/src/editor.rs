@@ -4,11 +4,14 @@ use gpui::{
     Pixels, Point, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
     anchored, deferred, div, hsla, point, prelude::FluentBuilder as _, px,
 };
-use gpui_flow::{Flow, FlowEdge, FlowEvent, FlowNode, FlowPort, PortRef};
+use gpui_flow::{
+    ControlsOptions, Edge as FlowEdge, Flow, FlowEvent, HandleType, Id, Node as FlowNode, NodeProps,
+    Position, Xy,
+};
 use shader_graph::{DocId, Edge, Endpoint, NodeId, NodeKind, Project};
 
 struct Menu {
-    graph: Point<f32>,
+    graph: Xy,
     window: Point<Pixels>,
 }
 
@@ -33,7 +36,15 @@ impl EventEmitter<EditorEvent> for Editor {}
 
 impl Editor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let flow = cx.new(Flow::new);
+        let flow = cx.new(|cx| {
+            let mut flow = Flow::new(cx);
+            flow.options.fit_view_on_init = true;
+            flow.options.delete_key = true;
+            flow.options.controls = Some(ControlsOptions { show_zoom: false, show_interactive: false, ..Default::default() });
+            flow.options.min_zoom = 0.1;
+            flow.options.max_zoom = 3.0;
+            flow
+        });
         cx.subscribe(&flow, |this, _, event, cx| {
             this.on_flow_event(event.clone(), cx)
         })
@@ -58,53 +69,72 @@ impl Editor {
 
     fn on_flow_event(&mut self, event: FlowEvent, cx: &mut Context<Self>) {
         let doc = self.doc();
-        let endpoint = |p: PortRef| Endpoint {
-            node: NodeId(p.node),
-            socket: p.port,
+        let node_id = |id: &Id| id.parse::<u64>().ok().map(NodeId);
+        let socket = |h: &Option<Id>| -> usize {
+            h.as_ref()
+                .and_then(|h| h.trim_start_matches(['i', 'o']).parse().ok())
+                .unwrap_or(0)
         };
         let result = match event {
-            FlowEvent::Connected(FlowEdge { from, to }) => self.project.connect(
-                doc,
-                Edge {
-                    from: endpoint(from),
-                    to: endpoint(to),
-                },
-            ),
-            FlowEvent::Disconnected(to) => self.project.disconnect(doc, endpoint(to)),
-            FlowEvent::NodesMoved(moved) => {
-                for (id, p) in moved {
-                    self.project.move_node(doc, NodeId(id), [p.x, p.y]).ok();
+            FlowEvent::Connect(c) => {
+                let (Some(from), Some(to)) = (node_id(&c.source), node_id(&c.target)) else {
+                    return;
+                };
+                self.project.connect(
+                    doc,
+                    Edge {
+                        from: Endpoint { node: from, socket: socket(&c.source_handle) },
+                        to: Endpoint { node: to, socket: socket(&c.target_handle) },
+                    },
+                )
+            }
+            FlowEvent::NodeDragStop { nodes, .. } => {
+                let positions: Vec<(Id, Xy)> = self
+                    .flow
+                    .read(cx)
+                    .nodes()
+                    .iter()
+                    .filter(|n| nodes.contains(&n.id))
+                    .map(|n| (n.id.clone(), n.position))
+                    .collect();
+                for (id, p) in positions {
+                    if let Some(id) = node_id(&id) {
+                        self.project.move_node(doc, id, [p.x, p.y]).ok();
+                    }
                 }
                 return;
             }
-            FlowEvent::Deleted(ids) => {
-                let ids: Vec<NodeId> = ids.into_iter().map(NodeId).collect();
+            FlowEvent::Delete { nodes, .. } => {
+                let ids: Vec<NodeId> = nodes.iter().filter_map(node_id).collect();
                 self.project.remove_nodes(doc, &ids)
             }
-            FlowEvent::ValueChanged { port, value } => {
-                let result = self.project.set_value(doc, endpoint(port), value);
-                // The flow already shows the value: only the shader changes.
-                self.recompile(cx);
-                cx.notify();
-                return result.unwrap_or_default();
-            }
-            FlowEvent::Opened(id) => {
-                let kind = self
-                    .project
-                    .document(doc)
-                    .and_then(|d| d.node(NodeId(id)))
+            FlowEvent::NodeDoubleClick { id } => {
+                let kind = node_id(&id)
+                    .and_then(|id| self.project.document(doc).and_then(|d| d.node(id)))
                     .map(|n| n.kind);
                 if let Some(NodeKind::Group(group)) = kind {
                     self.path.push(DocId::Group(group));
                     self.menu = None;
+                    self.sync(cx);
                 }
-                Ok(())
+                return;
             }
-            FlowEvent::ContextMenu { graph, window } => {
-                self.menu = Some(Menu { graph, window });
+            FlowEvent::PaneContextMenu { window, flow } => {
+                self.menu = Some(Menu { graph: flow, window });
                 cx.notify();
                 return;
             }
+            FlowEvent::NodesChange(changes) => {
+                let nodes = gpui_flow::apply_node_changes(&changes, self.flow.read(cx).nodes().to_vec());
+                self.flow.update(cx, |f, cx| f.set_nodes(nodes, cx));
+                return;
+            }
+            FlowEvent::EdgesChange(changes) => {
+                let edges = gpui_flow::apply_edge_changes(&changes, self.flow.read(cx).edges().to_vec());
+                self.flow.update(cx, |f, cx| f.set_edges(edges, cx));
+                return;
+            }
+            _ => return,
         };
         self.error = result.err().map(|e| e.to_string().into());
         self.sync(cx);
@@ -117,52 +147,46 @@ impl Editor {
         let Some(document) = self.project.document(doc) else {
             return;
         };
+        let selected: Vec<Id> = self.flow.read(cx).selected_nodes();
         let nodes = document
             .nodes
             .iter()
             .map(|node| {
                 let signature = self.project.signature(doc, node.kind);
-                FlowNode {
-                    id: node.id.0,
-                    position: point(node.position[0], node.position[1]),
-                    title: signature.title.into(),
-                    color: color(node.kind),
-                    inputs: signature
-                        .inputs
-                        .into_iter()
-                        .zip(&node.values)
-                        .map(|(socket, value)| FlowPort {
-                            label: socket.label.into(),
-                            value: Some(*value),
-                        })
-                        .collect(),
-                    outputs: signature
-                        .outputs
-                        .into_iter()
-                        .map(|socket| FlowPort {
-                            label: socket.label.into(),
-                            value: None,
-                        })
-                        .collect(),
-                }
+                let title = signature.title.clone();
+                let tint = color(node.kind);
+                let inputs: Vec<(String, f32)> = signature
+                    .inputs
+                    .iter()
+                    .zip(&node.values)
+                    .map(|(s, v)| (s.label.clone(), *v))
+                    .collect();
+                let outputs: Vec<String> = signature.outputs.iter().map(|s| s.label.clone()).collect();
+                let id: Id = node.id.0.to_string().into();
+                let mut n = FlowNode::new(id.clone(), Xy::new(node.position[0], node.position[1]))
+                    .render(move |props, _, _| card(props, &title, tint, &inputs, &outputs))
+                    .width(170.0);
+                n.selected = selected.contains(&id);
+                n
             })
             .collect();
         let edges = document
             .edges
             .iter()
-            .map(|e| FlowEdge {
-                from: PortRef {
-                    node: e.from.node.0,
-                    port: e.from.socket,
-                },
-                to: PortRef {
-                    node: e.to.node.0,
-                    port: e.to.socket,
-                },
+            .map(|e| {
+                FlowEdge::new(
+                    format!("{}:{}-{}:{}", e.from.node.0, e.from.socket, e.to.node.0, e.to.socket),
+                    e.from.node.0.to_string(),
+                    Some(format!("o{}", e.from.socket).into()),
+                    e.to.node.0.to_string(),
+                    Some(format!("i{}", e.to.socket).into()),
+                )
             })
             .collect();
-        self.flow
-            .update(cx, |flow, cx| flow.set_graph(nodes, edges, cx));
+        self.flow.update(cx, |flow, cx| {
+            flow.set_nodes(nodes, cx);
+            flow.set_edges(edges, cx);
+        });
         cx.notify();
     }
 
@@ -187,7 +211,11 @@ impl Editor {
         {
             Ok(id) => {
                 self.sync(cx);
-                self.flow.update(cx, |flow, cx| flow.select([id.0], cx));
+                {
+                    let id: Id = id.0.to_string().into();
+                    self.sync(cx);
+                    self.flow.update(cx, |flow, cx| flow.set_selection(&[id], &[], cx));
+                }
             }
             Err(e) => self.error = Some(e.to_string().into()),
         }
@@ -201,14 +229,18 @@ impl Editor {
                 let selection: Vec<NodeId> = self
                     .flow
                     .read(cx)
-                    .selection()
-                    .into_iter()
-                    .map(NodeId)
+                    .selected_nodes()
+                    .iter()
+                    .filter_map(|id| id.parse().ok().map(NodeId))
                     .collect();
                 match self.project.group_nodes(self.doc(), &selection) {
                     Ok(id) => {
                         self.sync(cx);
-                        self.flow.update(cx, |flow, cx| flow.select([id.0], cx));
+                        {
+                    let id: Id = id.0.to_string().into();
+                    self.sync(cx);
+                    self.flow.update(cx, |flow, cx| flow.set_selection(&[id], &[], cx));
+                }
                         self.error = None;
                     }
                     Err(e) => self.error = Some(e.to_string().into()),
@@ -290,6 +322,44 @@ impl Editor {
             .into_any_element(),
         )
     }
+}
+
+fn card(
+    props: &NodeProps,
+    title: &str,
+    tint: Hsla,
+    inputs: &[(String, f32)],
+    outputs: &[String],
+) -> AnyElement {
+    let s = |v: f32| props.scaled(v);
+    let theme = props.theme;
+    let row = || div().relative().h(s(22.0)).px(s(10.0)).flex().items_center();
+    div()
+        .relative()
+        .rounded(s(6.0))
+        .border(px(1.0))
+        .border_color(if props.selected { theme.node_border_selected } else { theme.node_border })
+        .bg(theme.node_background)
+        .text_color(theme.node_text)
+        .text_size(s(12.0))
+        .child(div().h(s(26.0)).px(s(8.0)).flex().items_center().rounded_t(s(5.0)).bg(tint).child(title.to_string()))
+        .children(outputs.iter().enumerate().map(|(i, label)| {
+            row().justify_end().child(label.clone()).child(props.handle(
+                Some(format!("o{i}").into()),
+                HandleType::Source,
+                Position::Right,
+            ))
+        }))
+        .children(inputs.iter().enumerate().map(|(i, (label, value))| {
+            let linked = props.is_connected(HandleType::Target, Some(&format!("i{i}").into()));
+            row()
+                .justify_between()
+                .child(label.clone())
+                .when(!linked, |d| d.child(format!("{value:.3}")))
+                .child(props.handle(Some(format!("i{i}").into()), HandleType::Target, Position::Left))
+        }))
+        .child(div().h(s(6.0)))
+        .into_any_element()
 }
 
 fn color(kind: NodeKind) -> Hsla {
