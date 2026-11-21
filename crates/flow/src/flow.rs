@@ -924,7 +924,8 @@ impl Flow {
                 animating = true;
             }
         }
-        if animating {
+        // A fit resolved above may have just started an animation.
+        if animating || self.anim.is_some() {
             window.request_animation_frame();
         }
     }
