@@ -7,7 +7,7 @@ use gpui::{
     canvas, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::input::{Escape, InputEvent, InputState, MaskPattern, NumberInput};
-use theme::ActiveTheme as _;
+use theme::{ActiveTheme as _, Icon, IconName};
 
 /// Whether a change is a step of a gesture still going on, or its end.
 /// History keeps only the ends, so a scrub is undone in one go.
@@ -129,6 +129,42 @@ struct ScrubState {
     last: f64,
 }
 
+/// Where a field sits in a stack of fields, such as a vector's components:
+/// only the outer corners of the stack are rounded, and each field below the
+/// first is set off by a separating line.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Stack {
+    #[default]
+    Single,
+    First,
+    Middle,
+    Last,
+}
+
+impl Stack {
+    /// The stack position of item `index` of `count`.
+    pub fn of(index: usize, count: usize) -> Self {
+        match (index, count) {
+            (_, 0 | 1) => Self::Single,
+            (0, _) => Self::First,
+            (i, n) if i + 1 == n => Self::Last,
+            _ => Self::Middle,
+        }
+    }
+
+    fn rounds_top(self) -> bool {
+        matches!(self, Self::Single | Self::First)
+    }
+
+    fn rounds_bottom(self) -> bool {
+        matches!(self, Self::Single | Self::Last)
+    }
+
+    fn separated(self) -> bool {
+        matches!(self, Self::Middle | Self::Last)
+    }
+}
+
 /// A number scrubbed by dragging sideways, with step arrows at its sides
 /// while hovered; 0.1 per 2 pixels, 0.01 with Shift. Sizes follow `zoom`.
 #[derive(IntoElement)]
@@ -140,6 +176,7 @@ pub struct Scrub {
     min: Option<f64>,
     max: Option<f64>,
     readonly: bool,
+    stack: Stack,
     on_change: Option<OnNumber>,
 }
 
@@ -153,8 +190,14 @@ impl Scrub {
             min: None,
             max: None,
             readonly: false,
+            stack: Stack::Single,
             on_change: None,
         }
+    }
+
+    pub fn stack(mut self, stack: Stack) -> Self {
+        self.stack = stack;
+        self
     }
 
     pub fn integer(mut self, integer: bool) -> Self {
@@ -271,7 +314,10 @@ impl RenderOnce for Scrub {
             .flex_1()
             .min_w_0()
             .overflow_hidden()
-            .rounded(px(4.0 * z))
+            .when(self.stack.rounds_top() && self.stack.rounds_bottom(), |d| d.rounded(px(4.0 * z)))
+            .when(self.stack.rounds_top() && !self.stack.rounds_bottom(), |d| d.rounded_t(px(4.0 * z)))
+            .when(!self.stack.rounds_top() && self.stack.rounds_bottom(), |d| d.rounded_b(px(4.0 * z)))
+            .when(self.stack.separated(), |d| d.border_t(px(z)).border_color(colors.border))
             .bg(fg.opacity(if scrubbing || pressed { 0.1 } else { 0.05 }))
             .text_size(px(12.0 * z))
             .text_color(fg)
@@ -404,7 +450,7 @@ pub fn picker(
         .items_center()
         .justify_between()
         .rounded(px(4.0 * zoom))
-        .border(px(1.0))
+        .border(px(zoom))
         .border_color(colors.input)
         .text_size(px(12.0 * zoom))
         .text_color(fg)
@@ -419,7 +465,40 @@ pub fn picker(
             }
         })
         .child(div().truncate().child(label.into()))
-        .child(div().text_color(colors.muted_foreground).child("⌄"))
+        .child(Icon::new(IconName::CaretDown).size(px(10.0 * zoom)).color(colors.muted_foreground))
+}
+
+/// A checkbox drawn at `zoom`, so it scales with the card around it.
+pub fn checkbox(
+    id: impl Into<ElementId>,
+    checked: bool,
+    zoom: f32,
+    disabled: bool,
+    cx: &App,
+    on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    let (fill, line) = if checked { (colors.primary, colors.primary) } else { (colors.background, colors.input) };
+    div()
+        .id(id.into())
+        .flex_none()
+        .size(px(16.0 * zoom))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0 * zoom))
+        .border(px(zoom))
+        .border_color(line)
+        .bg(fill)
+        .when(disabled, |d| d.opacity(0.5))
+        .when(!disabled, |d| d.cursor_pointer())
+        .when(checked, |d| d.child(Icon::new(IconName::Check).size(px(12.0 * zoom)).color(colors.primary_foreground)))
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            cx.stop_propagation();
+            if !disabled {
+                on_change(!checked, window, cx);
+            }
+        })
 }
 
 #[cfg(test)]

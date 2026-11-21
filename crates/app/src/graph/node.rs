@@ -18,11 +18,9 @@ use shader_graph::types::{
 };
 use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
 use shader_graph::color::{ColorSpace as DisplayGamut, Rgb};
-use gpui_component::Disableable as _;
-use gpui_component::checkbox::Checkbox;
 use theme::{ActiveTheme as _, ColorWheels, linear_to_hsla};
 
-use super::fields::{Edit, Scrub, picker};
+use super::fields::{Edit, Scrub, Stack, checkbox, picker};
 use super::frames::{self, FrameView};
 use super::socket::{SocketSpec, socket};
 use super::type_picker::TypePicker;
@@ -320,17 +318,19 @@ fn value_control(
                         .flex()
                         .items_center()
                         .gap(px(4.0 * z))
-                        .child(
-                            Checkbox::new(SharedString::from(format!("t-{node}-{handle}-{i}")))
-                                .checked(on)
-                                .disabled(readonly)
-                                .on_change(move |value, _, cx| {
-                                    ed.update(cx, |e, cx| {
-                                        e.set_component(&node, &handle, ty, i, f64::from(u8::from(*value)), Edit::Commit, cx);
-                                    })
-                                    .ok();
-                                }),
-                        )
+                        .child(checkbox(
+                            SharedString::from(format!("t-{node}-{handle}-{i}")),
+                            on,
+                            z,
+                            readonly,
+                            cx,
+                            move |checked, _, cx| {
+                                ed.update(cx, |e, cx| {
+                                    e.set_component(&node, &handle, ty, i, f64::from(u8::from(checked)), Edit::Commit, cx);
+                                })
+                                .ok();
+                            },
+                        ))
                         .children((n > 1).then(|| label_text(["x", "y", "z", "w"][i].to_owned(), z, cx)))
                 }))
                 .into_any_element()
@@ -348,6 +348,7 @@ fn value_control(
                     let value = input.value.as_ref().map_or(0.0, |v| v.component(i));
                     let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
                     Scrub::new(SharedString::from(format!("n-{node}-{handle}-{i}")), value, z)
+                        .stack(Stack::of(i, n))
                         .integer(integer)
                         .range(min, max)
                         .readonly(readonly)
@@ -371,7 +372,7 @@ fn value_control(
                 .w_full()
                 .overflow_hidden()
                 .rounded(px(4.0 * z))
-                .border(px(1.0))
+                .border(px(z))
                 .border_color(cx.theme().colors.border)
                 .when(readonly, |d| d.opacity(0.5))
                 .when(!readonly, |d| d.cursor_pointer())
@@ -429,7 +430,7 @@ fn reroute(props: &NodeProps, view: &NodeView, cx: &App) -> AnyElement {
         .relative()
         .size(px(18.0 * z))
         .rounded_full()
-        .when(props.selected, |d| d.border(px(1.0)).border_color(theme.colors.primary))
+        .when(props.selected, |d| d.border(px(z)).border_color(theme.colors.primary))
         .child(mk(HandleType::Target, Position::Left))
         .child(mk(HandleType::Source, Position::Right))
         .into_any_element()
@@ -469,7 +470,7 @@ pub fn render_node(
         .px(s(PAD))
         .pt(s(PAD))
         .pb(s(8.0))
-        .border_b(px(1.0))
+        .border_b(s(1.0))
         .border_color(c.border)
         .child(
             div()
@@ -508,7 +509,8 @@ pub fn render_node(
                         .justify_center()
                         .size(s(20.0))
                         .rounded(s(4.0))
-                        .text_size(s(13.0))
+                        .text_size(s(16.0))
+                        .line_height(s(20.0))
                         .text_color(c.muted_foreground)
                         .cursor_pointer()
                         .hover(|st| st.bg(c.muted).text_color(c.foreground))
@@ -723,7 +725,7 @@ pub fn render_node(
             .top(gpui::relative(0.5))
             .mt(px(-4.0 * z))
             .rounded_full()
-            .border(px(1.0))
+            .border(s(1.0))
             .border_color(c.muted_foreground);
         let handle = if kind == HandleType::Target { handle.left(px(-(PAD + 4.0) * z)) } else { handle.right(px(-(PAD + 4.0) * z)) };
         row()
@@ -763,11 +765,13 @@ pub fn render_node(
         )
     };
 
+    let card_id = view.id.clone();
     div()
         .relative()
+        .debug_selector(move || format!("node-card {card_id}"))
         .w(px(node_width(&view.node_type) * z))
         .rounded(s(4.0))
-        .border(px(1.0))
+        .border(s(1.0))
         .border_color(if props.selected { c.primary } else { c.border })
         .bg(c.card)
         .text_color(c.card_foreground)
