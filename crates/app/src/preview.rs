@@ -503,6 +503,7 @@ impl Render for PreviewToolbar {
                 .gap_1()
                 .child(
                     Button::new("resolution")
+                        .debug_selector(|| "preview-resolution".into())
                         .ghost()
                         .xsmall()
                         .label(format!("{} × {}", resolution.width, resolution.height))
@@ -512,6 +513,7 @@ impl Render for PreviewToolbar {
                 )
                 .child(
                     Button::new("zoom")
+                        .debug_selector(|| "preview-zoom".into())
                         .ghost()
                         .xsmall()
                         .label(format!("{}%", (zoom * 100.0).round()))
@@ -522,6 +524,7 @@ impl Render for PreviewToolbar {
                 )
                 .child(
                     Button::new("export")
+                        .debug_selector(|| "preview-export".into())
                         .ghost()
                         .xsmall()
                         .icon(IconName::DownloadSimple)
@@ -606,5 +609,60 @@ mod tests {
         });
         redraw(cx);
         assert_eq!(size(cx), stored);
+    }
+
+    /// The toolbar in a header row laid out as the screen lays it out.
+    struct ToolbarHeader {
+        toolbar: Entity<PreviewToolbar>,
+    }
+
+    impl Render for ToolbarHeader {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .debug_selector(|| "header".into())
+                .flex()
+                .items_center()
+                .w(px(600.0))
+                .h(px(screen::HEADER_HEIGHT))
+                .px(px(6.0))
+                .child(screen::toolbar_slot(self.toolbar.clone().into()))
+        }
+    }
+
+    #[gpui::test]
+    fn toolbar_controls_are_right_aligned_and_centred_in_the_header(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let (_, cx) = cx.add_window_view(|_, cx| {
+            let playback = cx.new(|_| Playback::new());
+            let (_, toolbar) = new_area(&playback, cx);
+            ToolbarHeader { toolbar }
+        });
+        redraw(cx);
+
+        let header = cx.debug_bounds("header").expect("the header is drawn");
+        let centre = header.origin.y + header.size.height / 2.0;
+        let controls = ["preview-resolution", "preview-zoom", "preview-export"];
+        let bounds: Vec<_> = controls
+            .iter()
+            .map(|name| cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn")))
+            .collect();
+        for (name, b) in controls.iter().zip(&bounds) {
+            assert!(b.size.height > px(0.0), "{name} has no height: {b:?}");
+            let mid = b.origin.y + b.size.height / 2.0;
+            assert!(
+                (mid - centre).abs() <= px(1.0),
+                "{name} isn't vertically centred: {b:?} in {header:?}"
+            );
+        }
+        let export = bounds[2];
+        assert!(
+            export.right() >= header.right() - px(6.0) - px(1.0),
+            "the export button isn't at the right end: {export:?} in {header:?}"
+        );
+        let resolution = bounds[0];
+        assert!(
+            resolution.origin.x > header.origin.x + header.size.width / 2.0,
+            "the controls are still at the left: {resolution:?} in {header:?}"
+        );
     }
 }
