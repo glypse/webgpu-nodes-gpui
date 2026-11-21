@@ -2,7 +2,7 @@ use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
     Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _,
     Pixels, Point, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    anchored, deferred, div, hsla, point, prelude::FluentBuilder as _, px,
+    anchored, deferred, div, hsla, prelude::FluentBuilder as _, px,
 };
 use gpui_flow::{
     ControlsOptions, Edge as FlowEdge, Flow, FlowEvent, HandleType, Id, Node as FlowNode, NodeProps,
