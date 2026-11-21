@@ -537,7 +537,7 @@ impl GroupListener for Context<'_, SettingsDialog> {
 }
 
 impl Render for SettingsDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("settings", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let settings = self.editor.read(cx).settings();
@@ -655,6 +655,7 @@ impl Render for SettingsDialog {
                 .child(card),
         )
         .with_priority(10)
+    })
     }
 }
 

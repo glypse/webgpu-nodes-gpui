@@ -1345,7 +1345,7 @@ fn to_model(c: &FlowConnection) -> Connection {
 }
 
 impl Render for Editor {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("graph editor", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let sheet = self.render_sheet(window, cx);
@@ -1368,6 +1368,7 @@ impl Render for Editor {
             .children(sheet)
             .children(self.add_menu.clone())
             .children(self.render_popup(cx))
+    })
     }
 }
 

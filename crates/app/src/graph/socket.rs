@@ -111,10 +111,10 @@ pub fn socket(props: &NodeProps, spec: &SocketSpec, theme: &Theme) -> Handle {
     handle.child(
         canvas(
             |_, _, _| {},
-            move |bounds, _, window, _| {
+            move |bounds, _, window, _| { guard::guard("socket canvas", || {
                 let color = if active { hover } else { fill };
                 paint_socket(window, bounds, kind, color, outline, z);
-            },
+            }); },
         )
         .absolute()
         .size_full(),

@@ -121,7 +121,7 @@ fn highlighted(text: &str, ranges: &[(usize, usize)], muted: gpui::Hsla, strong:
 }
 
 impl Render for AddMenu {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("add menu", || {
         if !self.focused {
             self.focused = true;
             self.input.read(cx).focus(window);
@@ -268,6 +268,7 @@ impl Render for AddMenu {
                     .child(div().px_1().pb_1().border_b_1().border_color(c.border).child(self.input.clone()))
                     .child(div().pt_1().child(body)),
             )
+    })
     }
 }
 

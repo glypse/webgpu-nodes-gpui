@@ -243,7 +243,7 @@ impl Flow {
         let (mw, mh) = (opts.width, opts.height);
         let paint = canvas(
             |_, _, _| {},
-            move |bounds: Bounds<gpui::Pixels>, _, window, _| {
+            move |bounds: Bounds<gpui::Pixels>, _, window, _| { guard::guard("panels canvas", || {
                 let to_px = |p: Xy| {
                     point(
                         bounds.origin.x + px((p.x - view.view_box.x) / view.scale),
@@ -274,7 +274,7 @@ impl Flow {
                 for r in [top, bottom, left, right] {
                     fill(window, r, theme.minimap_mask);
                 }
-            },
+            }); },
         )
         .absolute()
         .size_full();

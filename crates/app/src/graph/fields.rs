@@ -200,7 +200,7 @@ pub fn format_number(value: f64, integer: bool) -> SharedString {
 }
 
 impl RenderOnce for Scrub {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement { guard::render("number field", || {
         let colors = cx.theme().colors.clone();
         let z = self.zoom;
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| ScrubState::default());
@@ -303,7 +303,7 @@ impl RenderOnce for Scrub {
                 d.child(
                     canvas(
                         |_, _, _| {},
-                        move |_, _, window, _| {
+                        move |_, _, window, _| { guard::guard("fields canvas", || {
                             let on_move = state.clone();
                             let changed = on_change.clone();
                             window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
@@ -354,12 +354,13 @@ impl RenderOnce for Scrub {
                                     f(last, Edit::Commit, window, cx);
                                 }
                             });
-                        },
+                        }); },
                     )
                     .absolute()
                     .size_0(),
                 )
             })
+    })
     }
 }
 
@@ -507,6 +508,22 @@ mod tests {
         type_into_field(cx, "7", "escape");
         type_into_field(cx, "abc", "enter");
         assert!(changes.borrow().is_empty());
+    }
+
+    struct Panicking;
+
+    impl Render for Panicking {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            guard::render("panicking view", || -> gpui::Div { panic!("render failed") })
+        }
+    }
+
+    #[gpui::test]
+    fn a_view_whose_render_panics_leaves_the_window_alive(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| Panicking);
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
     }
 
     #[test]

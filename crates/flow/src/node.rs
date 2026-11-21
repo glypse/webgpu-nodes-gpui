@@ -210,7 +210,7 @@ impl ParentElement for Handle {
 }
 
 impl RenderOnce for Handle {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement { guard::render("flow handle", || {
         let z = self.zoom;
         let size = px(self.size * z);
         let half = px(-self.size * z / 2.0);
@@ -246,7 +246,7 @@ impl RenderOnce for Handle {
         let flow = self.flow.clone();
         let (measure_key, measure_node) = (key.clone(), node.clone());
         let measurer = canvas(
-            move |bounds, _, cx| {
+            move |bounds, _, cx| { guard::guard("node measure", || {
                 let mut m = measure.borrow_mut();
                 let Some(entry) = m.nodes.get_mut(&measure_node) else {
                     return;
@@ -284,8 +284,8 @@ impl RenderOnce for Handle {
                 if moved {
                     flow.update(cx, |_, cx| cx.notify()).ok();
                 }
-            },
-            |_, _, _, _| {},
+            }); },
+            |_, _, _, _| { guard::guard("node canvas", || {}); },
         )
         .absolute()
         .size_full();
@@ -306,5 +306,6 @@ impl RenderOnce for Handle {
                 .ok();
         })
         .child(measurer)
+    })
     }
 }

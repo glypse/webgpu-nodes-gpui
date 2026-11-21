@@ -95,7 +95,7 @@ fn format_time(seconds: f64) -> String {
 }
 
 impl Render for TimelineBar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("timeline", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let playback = self.playback.read(cx);
@@ -243,5 +243,6 @@ impl Render for TimelineBar {
                     ),
             )
             .children(self.menu.map(|at| self.menu(at, cx)))
+    })
     }
 }

@@ -1679,7 +1679,7 @@ fn default_node(node: &Node, props: &NodeProps) -> AnyElement {
 }
 
 impl Render for Flow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("flow", || {
         self.rebuild_lookup(cx);
         self.rebuild_edges();
         self.tick(window, cx);
@@ -1732,7 +1732,7 @@ impl Render for Flow {
         let bounds_cell = self.bounds.clone();
         let back = canvas(
             move |b, _, _| bounds_cell.set(b),
-            move |b, _, window, cx| {
+            move |b, _, window, cx| { guard::guard("flow background", || {
                 let ctx = LayerContext { viewport: vp, bounds: b };
                 window.paint_quad(gpui::fill(b, theme.background));
                 if let Some(opts) = background {
@@ -1750,7 +1750,7 @@ impl Render for Flow {
                         paint_edge(window, b.origin, &vp, e, theme.edge_hover);
                     }
                 });
-            },
+            }); },
         )
         .absolute()
         .size_full();
@@ -1834,7 +1834,7 @@ impl Render for Flow {
             let measure_entity = entity.clone();
             let (measure_id, zoom) = (node.id.clone(), vp.zoom);
             let measurer = canvas(
-                move |bounds, _, cx| {
+                move |bounds, _, cx| { guard::guard("flow measure", || {
                     let mut m = measure.borrow_mut();
                     let changed = match m.nodes.get_mut(&measure_id) {
                         Some(entry) => {
@@ -1863,8 +1863,8 @@ impl Render for Flow {
                     if changed {
                         measure_entity.update(cx, |_, cx| cx.notify()).ok();
                     }
-                },
-                |_, _, _, _| {},
+                }); },
+                |_, _, _, _| { guard::guard("flow canvas", || {}); },
             )
             .absolute()
             .size_full();
@@ -1958,7 +1958,7 @@ impl Render for Flow {
         let on_up = entity.clone();
         let front = canvas(
             |_, _, _| {},
-            move |b, _, window, cx| {
+            move |b, _, window, cx| { guard::guard("flow canvas", || {
                 let ctx = LayerContext { viewport: vp, bounds: b };
                 window.with_content_mask(Some(gpui::ContentMask { bounds: b }), |window| {
                     for layer in &front_layers {
@@ -2008,7 +2008,7 @@ impl Render for Flow {
                         on_up.update(cx, |this, cx| guard::guard("flow mouse up", || this.mouse_up(e, cx))).ok();
                     }
                 });
-            },
+            }); },
         )
         .absolute()
         .size_full();
@@ -2042,5 +2042,6 @@ impl Render for Flow {
             .children(front_portals)
             .child(front)
             .children(panels)
+    })
     }
 }

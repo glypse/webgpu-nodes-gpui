@@ -426,7 +426,7 @@ fn dirs_home() -> Option<PathBuf> {
 }
 
 impl Render for Shell {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("shell", || {
         preferences::apply(window, cx);
         let theme = cx.theme();
         div()
@@ -473,5 +473,6 @@ impl Render for Shell {
             }))
             .child(self.screen.clone())
             .children(self.settings.clone())
+    })
     }
 }

@@ -23,7 +23,7 @@ impl CodeView {
 }
 
 impl Render for CodeView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("code view", || {
         let theme = cx.theme();
         let c = &theme.colors;
         let code = self.playback.read(cx).code.clone();
@@ -50,6 +50,7 @@ impl Render for CodeView {
                     )
                     .child(line.to_string())
             }))
+    })
     }
 }
 

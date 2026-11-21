@@ -735,7 +735,7 @@ impl<E: Editor> ScreenView<E> {
 }
 
 impl<E: Editor> Render for ScreenView<E> {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("screen", || {
         let theme = cx.theme().clone();
         let (background, border) = (theme.colors.background, theme.colors.border);
         let view = cx.entity();
@@ -843,15 +843,15 @@ impl<E: Editor> Render for ScreenView<E> {
             .text_color(theme.colors.foreground)
             .child(
                 canvas(
-                    move |bounds, _, cx| {
+                    move |bounds, _, cx| { guard::guard("view measure", || {
                         view.update(cx, |this, cx| {
                             if this.bounds != bounds {
                                 this.bounds = bounds;
                                 cx.notify();
                             }
                         });
-                    },
-                    |_, _, _, _| {},
+                    }); },
+                    |_, _, _, _| { guard::guard("view canvas", || {}); },
                 )
                 .absolute()
                 .size_full(),
@@ -867,6 +867,7 @@ impl<E: Editor> Render for ScreenView<E> {
             ))
             .children(self.render_menu(cx))
             .children(self.render_edge_menu(cx))
+    })
     }
 }
 
