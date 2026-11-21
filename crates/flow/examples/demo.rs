@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, AppContext as _, Application, Bounds, Context, Entity, IntoElement,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, IntoElement,
     ParentElement as _, Render, Styled as _, Window, WindowBounds, WindowOptions, div, px, size,
 };
 use gpui_flow::{
@@ -129,7 +129,7 @@ impl Render for Demo {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    gpui_platform::application().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1000.0), px(700.0)), cx);
         cx.open_window(
             WindowOptions {

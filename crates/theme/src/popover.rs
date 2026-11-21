@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Corner, Div, InteractiveElement as _, IntoElement, ParentElement, Pixels,
+    Anchor, AnyElement, App, Div, InteractiveElement as _, IntoElement, ParentElement, Pixels,
     Point, RenderOnce, Styled as _, Window, anchored, deferred, div, px,
 };
 
@@ -15,7 +15,7 @@ type Dismiss = Box<dyn Fn(&mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct Popover {
     at: Option<Point<Pixels>>,
-    anchor: Corner,
+    anchor: Anchor,
     width: Option<Pixels>,
     on_dismiss: Option<Dismiss>,
     children: Vec<AnyElement>,
@@ -25,7 +25,7 @@ impl Popover {
     pub fn new() -> Self {
         Self {
             at: None,
-            anchor: Corner::TopLeft,
+            anchor: Anchor::TopLeft,
             width: None,
             on_dismiss: None,
             children: Vec::new(),
@@ -38,7 +38,7 @@ impl Popover {
     }
 
     /// Which corner of the panel sits at the opening point.
-    pub fn anchor(mut self, anchor: Corner) -> Self {
+    pub fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
         self
     }

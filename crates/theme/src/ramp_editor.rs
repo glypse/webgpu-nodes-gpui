@@ -283,7 +283,7 @@ impl RampEditor {
         if self.disabled {
             return;
         }
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         let x = self.local_x(event.position);
         let width = self.width();
         let near = self.nearest(x).cloned();
@@ -354,7 +354,7 @@ impl RampEditor {
                 let next = move_ramp_stop(&self.stops, &selected.id, selected.position + step);
                 self.send(next, BTreeMap::new(), cx);
             }
-            "escape" => window.blur(),
+            "escape" => window.blur(cx),
             _ => return,
         }
         cx.stop_propagation();
@@ -698,11 +698,12 @@ mod tests {
         (editor, changes, cx)
     }
 
-    /// A position of the ramp, in window coordinates, at the middle of the bar.
+    /// A position of the ramp, in window coordinates, at the middle of the bar. Bounds exclude
+    /// their right edge, so the end of the ramp is sampled half a pixel inside it.
     fn at(cx: &mut VisualTestContext, position: f64) -> Point<Pixels> {
         let lane = cx.debug_bounds("ramp-lane").expect("the lane is drawn");
         point(
-            lane.left() + lane.size.width * position as f32,
+            (lane.left() + lane.size.width * position as f32).min(lane.right() - px(0.5)),
             lane.top() + px(10.0),
         )
     }

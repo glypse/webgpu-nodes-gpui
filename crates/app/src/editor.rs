@@ -245,7 +245,7 @@ impl Editor {
             guard::guard("flow event", || this.on_flow_event(event.clone(), cx));
         })
         .detach();
-        window.focus(&flow.focus_handle(cx));
+        window.focus(&flow.focus_handle(cx), cx);
         model.register(cx.entity().downgrade());
         let mut editor = Self {
             model,

@@ -174,7 +174,7 @@ impl NumberField {
         self.input.update(cx, |input, cx| {
             input.set_value(text, cx);
             input.select_all_text(cx);
-            input.focus(window);
+            input.focus(window, cx);
         });
         cx.notify();
     }

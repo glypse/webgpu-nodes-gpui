@@ -267,7 +267,8 @@ impl Shell {
         let dialog = cx.new(|cx| SettingsDialog::new(editor, window, cx));
         cx.subscribe_in(&dialog, window, |this, _, SettingsEvent::Close, window, cx| {
             this.settings = None;
-            window.focus(&this.editor.read(cx).focus_handle(cx));
+            let editor_focus = this.editor.read(cx).focus_handle(cx);
+            window.focus(&editor_focus, cx);
             cx.notify();
         })
         .detach();

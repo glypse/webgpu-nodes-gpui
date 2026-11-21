@@ -202,11 +202,12 @@ fn scrolling_zooms(cx: &mut TestAppContext) {
     let (flow, cx) = setup(cx, false);
     let before = guard::recovered();
     let zoom = cx.read(|cx| flow.read(cx).viewport().zoom);
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: point(px(600.0), px(400.0)),
         delta: ScrollDelta::Lines(point(0.0, -2.0)),
         modifiers: Modifiers::default(),
         touch_phase: gpui::TouchPhase::Moved,
+        source: gpui::ScrollSource::Pointer,
     });
     settle(cx);
     assert_eq!(guard::recovered(), before);

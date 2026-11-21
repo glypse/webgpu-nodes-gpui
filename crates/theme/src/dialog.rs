@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Corner, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
+    Anchor, AnyElement, App, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
     MouseButton, ParentElement, Pixels, RenderOnce, SharedString, Styled as _, Window, actions,
     anchored, deferred, div, point, prelude::FluentBuilder as _, px,
 };
@@ -251,7 +251,7 @@ impl RenderOnce for Dialog {
             deferred(
                 anchored()
                     .position(point(px(0.0), px(0.0)))
-                    .anchor(Corner::TopLeft)
+                    .anchor(Anchor::TopLeft)
                     .child(backdrop),
             )
             .with_priority(3)
@@ -324,7 +324,7 @@ mod tests {
         });
         cx.update(|window, cx| {
             let focus = host.read(cx).focus.clone();
-            window.focus(&focus);
+            window.focus(&focus, cx);
         });
         cx.run_until_parked();
         (dismissals, cx)

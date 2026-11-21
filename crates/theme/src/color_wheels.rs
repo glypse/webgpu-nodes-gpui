@@ -460,6 +460,7 @@ impl Render for ColorWheels {
                             window
                                 .paint_image(
                                     bounds,
+                                    bounds,
                                     Corners::all(bounds.size.width / 2.0),
                                     image,
                                     0,
@@ -524,7 +525,14 @@ impl Render for ColorWheels {
                         guard::guard("color wheels paint", || {
                             if let Some(image) = image {
                                 window
-                                    .paint_image(bounds, Corners::all(px(2.0)), image, 0, false)
+                                    .paint_image(
+                                        bounds,
+                                        bounds,
+                                        Corners::all(px(2.0)),
+                                        image,
+                                        0,
+                                        false,
+                                    )
                                     .ok();
                             }
                         });

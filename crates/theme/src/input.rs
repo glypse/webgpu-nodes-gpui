@@ -131,8 +131,8 @@ impl TextInput {
         cx.notify();
     }
 
-    pub fn focus(&self, window: &mut Window) {
-        window.focus(&self.focus_handle);
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus_handle, cx);
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -454,14 +454,6 @@ struct Prepaint {
     scroll: Pixels,
 }
 
-impl IntoElement for TextElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for TextElement {
     type RequestLayoutState = ();
     type PrepaintState = Prepaint;
@@ -617,7 +609,7 @@ impl Element for TextElement {
             let origin = point(bounds.left() - prepaint.scroll, bounds.top());
             prepaint
                 .line
-                .paint(origin, window.line_height(), window, cx)
+                .paint(origin, window.line_height(), gpui::TextAlign::Left, None, window, cx)
                 .ok();
             if focus_handle.is_focused(window)
                 && let Some(cursor) = prepaint.cursor.take()

@@ -369,7 +369,7 @@ impl CurveEditor {
         if self.disabled {
             return;
         }
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         let m = self.local(position);
         let plane = self.plane();
         let mut next = None;

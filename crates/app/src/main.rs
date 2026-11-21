@@ -11,7 +11,7 @@ mod shell;
 mod timeline;
 
 use gpui::{
-    AppContext as _, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
+    AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
     WindowBounds, WindowOptions, actions, px, size,
 };
 
@@ -23,6 +23,7 @@ fn menus() -> Vec<Menu> {
     vec![
         Menu {
             name: "webgpu-nodes".into(),
+            disabled: false,
             items: vec![
                 MenuItem::action("Settings...", OpenSettings),
                 MenuItem::separator(),
@@ -31,6 +32,7 @@ fn menus() -> Vec<Menu> {
         },
         Menu {
             name: "File".into(),
+            disabled: false,
             items: vec![
                 MenuItem::action("New", NewProject),
                 MenuItem::action("Open...", OpenProject),
@@ -41,6 +43,7 @@ fn menus() -> Vec<Menu> {
         },
         Menu {
             name: "Edit".into(),
+            disabled: false,
             items: vec![MenuItem::action("Undo", Undo), MenuItem::action("Redo", Redo)],
         },
     ]
@@ -49,7 +52,7 @@ fn menus() -> Vec<Menu> {
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     guard::install_panic_hook();
-    Application::new().with_assets(theme::Assets).run(|cx| {
+    gpui_platform::application().with_assets(theme::Assets).run(|cx| {
         theme::init(cx);
         preferences::init(cx);
         shell::init(cx);
@@ -70,7 +73,7 @@ fn main() {
             log::error!("failed to open the window: {e:#}");
             cx.quit();
         }
-        cx.on_window_closed(|cx| cx.quit()).detach();
+        cx.on_window_closed(|cx, _| cx.quit()).detach();
         cx.activate(true);
     });
 }

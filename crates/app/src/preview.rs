@@ -1,7 +1,7 @@
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
-    Render, ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    Render, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
     canvas, div, img, point, prelude::FluentBuilder as _, px, size,
 };
 use guard::SafeListener as _;
@@ -197,8 +197,8 @@ impl Render for PreviewArea {
                         .w(rect.size.width)
                         .h(rect.size.height)
                 }))
-                .on_scroll_wheel(
-                    cx.safe_listener(move |this, event: &ScrollWheelEvent, _, cx| {
+                .on_scroll(
+                    cx.safe_listener(move |this, event: &ScrollEvent, _, cx| {
                         let delta = event.delta.pixel_delta(px(20.0)).y;
                         let boost = if event.modifiers.control { 10.0 } else { 1.0 };
                         let factor = 2f32.powf(f32::from(delta) * WHEEL_SPEED * boost);

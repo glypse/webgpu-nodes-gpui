@@ -157,7 +157,7 @@ impl SettingsDialog {
             }),
         ];
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        window.focus(&focus, cx);
         Self {
             editor,
             page: Page::Canvas,

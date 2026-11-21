@@ -226,7 +226,7 @@ impl<E: Editor> ScreenView<E> {
     /// Takes the keyboard for the gesture, so Escape cancels it.
     fn begin_gesture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.previous_focus = window.focused(cx);
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -234,7 +234,7 @@ impl<E: Editor> ScreenView<E> {
         self.corner = None;
         self.splitting = None;
         if let Some(previous) = self.previous_focus.take() {
-            window.focus(&previous);
+            window.focus(&previous, cx);
         }
         cx.notify();
     }

@@ -8,7 +8,8 @@ use gpui::{
     AnyElement, App, Bounds, Context, CursorStyle, DispatchPhase, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    ScrollDelta, ScrollWheelEvent, Styled as _, WeakEntity, Window, canvas, div, point, prelude::FluentBuilder as _, px, size,
+    ScrollDelta, ScrollEvent, Styled as _, WeakEntity, Window, canvas, div, point,
+    prelude::FluentBuilder as _, px, size,
 };
 
 use crate::background::BackgroundOptions;
@@ -957,9 +958,9 @@ impl Flow {
         cx.notify();
     }
 
-    fn focus_flow(&self, window: &mut Window, cx: &App) {
+    fn focus_flow(&self, window: &mut Window, cx: &mut App) {
         if !self.focus.contains_focused(window, cx) {
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
     }
 
@@ -1529,7 +1530,7 @@ impl Flow {
         self.apply_selection(|n| picked.contains(n), |e| edges.contains(e), cx);
     }
 
-    fn scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
         let local = self.local(event.position);
         let ctrl = event.modifiers.control || event.modifiers.platform;
         // Browsers report a notch as about three lines.
@@ -1695,7 +1696,7 @@ fn paint_tag(window: &mut Window, cx: &mut App, origin: Point<Pixels>, vp: &View
     let s = vp.to_screen(at);
     let height = size * 1.3;
     let position = point(origin.x + px(s.x) - line.width, origin.y + px(s.y) - height / 2.0);
-    line.paint(position, height, window, cx).ok();
+    line.paint(position, height, gpui::TextAlign::Left, None, window, cx).ok();
 }
 
 fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &PaintEdge, hover: gpui::Hsla) {
@@ -2176,7 +2177,7 @@ impl Render for Flow {
             .on_mouse_down(MouseButton::Left, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
             .on_mouse_down(MouseButton::Middle, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
             .on_mouse_down(MouseButton::Right, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_scroll_wheel(cx.safe_listener(|this, e, _, cx| this.scroll(e, cx)))
+            .on_scroll(cx.safe_listener(|this, e, _, cx| this.scroll(e, cx)))
             .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
             .child(back)
             .children(back_portals)

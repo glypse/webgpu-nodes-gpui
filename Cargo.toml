@@ -7,7 +7,8 @@ edition = "2024"
 license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
-gpui = "0.2.2"
+gpui = { package = "gpui-fast", version = "0.1.17" }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.17", features = ["font-kit"] }
 wgpu = "30"
 anyhow = "1"
 thiserror = "2"

@@ -124,7 +124,7 @@ impl Render for AddMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("add menu", || {
         if !self.focused {
             self.focused = true;
-            self.input.read(cx).focus(window);
+            self.input.update(cx, |input, cx| input.focus(window, cx));
         }
         let theme = cx.theme().clone();
         let c = &theme.colors;

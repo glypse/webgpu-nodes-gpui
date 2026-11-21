@@ -123,8 +123,8 @@ impl Select {
         cx.notify();
     }
 
-    pub fn focus(&self, window: &mut Window) {
-        window.focus(&self.focus);
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus, cx);
     }
 
     fn open(&mut self, cx: &mut Context<Self>) {
@@ -403,7 +403,7 @@ mod tests {
     #[gpui::test]
     fn the_keys_open_the_list_move_through_it_and_choose(cx: &mut TestAppContext) {
         let (select, events, cx) = setup(cx, false);
-        cx.update(|window, cx| select.update(cx, |s, _| s.focus(window)));
+        cx.update(|window, cx| select.update(cx, |s, cx| s.focus(window, cx)));
         press(cx, "down");
         assert!(cx.read(|cx| select.read(cx).is_open()));
         press(cx, "down down enter");
@@ -419,7 +419,7 @@ mod tests {
     #[gpui::test]
     fn escape_closes_the_list_without_choosing(cx: &mut TestAppContext) {
         let (select, events, cx) = setup(cx, false);
-        cx.update(|window, cx| select.update(cx, |s, _| s.focus(window)));
+        cx.update(|window, cx| select.update(cx, |s, cx| s.focus(window, cx)));
         press(cx, "enter down escape");
         assert!(!cx.read(|cx| select.read(cx).is_open()));
         assert!(events.borrow().is_empty());

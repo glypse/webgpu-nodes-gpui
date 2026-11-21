@@ -122,7 +122,7 @@ impl Menu {
         self
     }
 
-    pub fn anchor(mut self, anchor: gpui::Corner) -> Self {
+    pub fn anchor(mut self, anchor: gpui::Anchor) -> Self {
         self.popover = self.popover.anchor(anchor);
         self
     }
@@ -197,7 +197,7 @@ impl RenderOnce for Menu {
             if !navigation.read(cx).focused {
                 navigation.update(cx, |nav, _| nav.focused = true);
                 let focus = focus.clone();
-                window.defer(cx, move |window, _| window.focus(&focus));
+                window.defer(cx, move |window, cx| window.focus(&focus, cx));
             }
             let highlighted = navigation.read(cx).highlighted;
             let enabled: Rc<Vec<(usize, Option<Select>)>> = Rc::new(

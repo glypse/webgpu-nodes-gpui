@@ -43,12 +43,12 @@ impl EntryState {
                 guard::guard("number entry", || match event {
                     InputEvent::Submit => {
                         this.commit(window, cx);
-                        this.restore_focus(window);
+                        this.restore_focus(window, cx);
                     }
                     InputEvent::Blur => this.commit(window, cx),
                     InputEvent::Cancel => {
                         this.finish(cx);
-                        this.restore_focus(window);
+                        this.restore_focus(window, cx);
                     }
                     InputEvent::Change => {}
                 });
@@ -73,7 +73,7 @@ impl EntryState {
         self.input.update(cx, |input, cx| {
             input.set_value(text, cx);
             input.select_all_text(cx);
-            input.focus(window);
+            input.focus(window, cx);
         });
         cx.notify();
     }
@@ -85,9 +85,9 @@ impl EntryState {
         }
     }
 
-    fn restore_focus(&mut self, window: &mut Window) {
+    fn restore_focus(&mut self, window: &mut Window, cx: &mut App) {
         if let Some(handle) = self.previous_focus.take() {
-            window.focus(&handle);
+            window.focus(&handle, cx);
         }
     }
 

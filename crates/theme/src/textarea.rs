@@ -111,8 +111,8 @@ impl Textarea {
         cx.notify();
     }
 
-    pub fn focus(&self, window: &mut Window) {
-        window.focus(&self.focus_handle);
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus_handle, cx);
     }
 
     #[cfg(test)]
@@ -610,14 +610,6 @@ fn shape_lines(
     lines
 }
 
-impl IntoElement for TextareaElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl gpui::Element for TextareaElement {
     type RequestLayoutState = ();
     type PrepaintState = Prepaint;
@@ -887,7 +879,7 @@ mod tests {
                 log.borrow_mut().push(event.clone())
             })
             .detach();
-            area.read(cx).focus(window);
+            area.update(cx, |a, cx| a.focus(window, cx));
         });
         cx.run_until_parked();
         (area, events, cx)
@@ -992,7 +984,7 @@ mod tests {
         cx.update(|window, cx| {
             area.update(cx, |a, cx| {
                 a.set_value("alpha beta gamma delta epsilon zeta eta theta", cx);
-                a.focus(window);
+                a.focus(window, cx);
             })
         });
         cx.run_until_parked();
