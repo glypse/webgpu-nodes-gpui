@@ -1,5 +1,6 @@
 //! Headless shader graph: document model, type inference and WGSL codegen.
 
+pub mod catalog;
 pub mod codegen;
 pub mod enums;
 pub mod graph;
