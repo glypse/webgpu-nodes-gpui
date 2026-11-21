@@ -7,7 +7,8 @@ use gpui::{
     canvas, div, point, prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::{Sizable as _, Selectable as _, button::{Button, ButtonVariants as _}};
-use theme::{ActiveTheme as _, IconName, Menu, MenuItem};
+use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use theme::{ActiveTheme as _, IconName, popup};
 
 use crate::gestures::{self, Outcome, Pixels as ScreenPixels};
 use crate::{Area, AreaId, Axis, EdgeSelection, MinSize, Part, Screen};
@@ -54,6 +55,7 @@ struct OpenMenu {
     area: AreaId,
     kind: MenuKind,
     at: Point<Pixels>,
+    popup: Option<popup::Open>,
 }
 
 /// A drag from an area's corner.
@@ -80,6 +82,7 @@ struct EdgeMenu<E> {
     /// The screen once the area before the edge grew over the one after it, if it can.
     forward: Option<Screen<E>>,
     backward: Option<Screen<E>>,
+    popup: Option<popup::Open>,
 }
 
 type RenderArea<E> = Box<dyn Fn(AreaId, &E, &mut Window, &mut App) -> AreaContent>;
@@ -342,6 +345,7 @@ impl<E: Editor> ScreenView<E> {
             after: after.id,
             forward: self.screen.join(before.id, after.id, min),
             backward: self.screen.join(after.id, before.id, min),
+            popup: None,
         });
         cx.notify();
     }
@@ -380,6 +384,7 @@ impl<E: Editor> ScreenView<E> {
                 area: id,
                 kind: MenuKind::Type,
                 at: event.position() + point(px(0.0), px(4.0)),
+                popup: None,
             });
             cx.notify();
         };
@@ -407,6 +412,7 @@ impl<E: Editor> ScreenView<E> {
                         area: id,
                         kind: MenuKind::Area,
                         at: event.position,
+                        popup: None,
                     });
                     cx.notify();
                 }),
@@ -427,152 +433,142 @@ impl<E: Editor> ScreenView<E> {
             .into_any_element()
     }
 
-    fn render_edge_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_edge_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.edge_menu.as_ref()?;
-        let view = cx.entity();
-        let axis = open.axis;
-        let dismiss = {
-            let view = view.clone();
-            move |_: &mut Window, cx: &mut App| {
-                view.update(cx, |this, cx| {
-                    this.edge_menu = None;
-                    cx.notify();
-                });
-            }
-        };
-        let split = |split_axis: Axis| {
-            let view = view.clone();
-            move |window: &mut Window, cx: &mut App| {
-                guard::guard("split from an edge", || {
-                    view.update(cx, |this, cx| {
-                        this.splitting = Some(Splitting { axis: split_axis, area: None, at: 0.0 });
-                        this.update_split();
-                        this.begin_gesture(window, cx);
-                    });
-                });
-            }
-        };
-        let join = |forward: bool| {
-            let view = view.clone();
-            move |_: &mut Window, cx: &mut App| {
-                guard::guard("join from an edge", || {
-                    view.update(cx, |this, cx| {
-                        let next = this.edge_menu.as_ref().and_then(|m| {
-                            if forward { m.forward.clone() } else { m.backward.clone() }
+        if open.popup.is_none() {
+            let axis = open.axis;
+            let (forward, backward) = (open.forward.is_some(), open.backward.is_some());
+            let view = cx.entity();
+            let split = |split_axis: Axis| {
+                let view = view.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    guard::guard("split from an edge", || {
+                        view.update(cx, |this, cx| {
+                            this.splitting = Some(Splitting { axis: split_axis, area: None, at: 0.0 });
+                            this.update_split();
+                            this.begin_gesture(window, cx);
                         });
-                        if let Some(screen) = next {
-                            this.set_screen(screen, cx);
-                        }
                     });
-                });
-            }
-        };
-        let swap = {
-            let view = view.clone();
-            move |_: &mut Window, cx: &mut App| {
-                guard::guard("swap from an edge", || {
-                    view.update(cx, |this, cx| {
-                        let next = this
-                            .edge_menu
-                            .as_ref()
-                            .and_then(|m| this.screen.swap(m.before, m.after));
-                        if let Some(screen) = next {
-                            this.set_screen(screen, cx);
-                        }
+                }
+            };
+            let join = |forward: bool| {
+                let view = view.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    guard::guard("join from an edge", || {
+                        view.update(cx, |this, cx| {
+                            let next = this.edge_menu.as_ref().and_then(|m| {
+                                if forward { m.forward.clone() } else { m.backward.clone() }
+                            });
+                            if let Some(screen) = next {
+                                this.set_screen(screen, cx);
+                            }
+                        });
                     });
-                });
+                }
+            };
+            let swap = {
+                let view = view.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    guard::guard("swap from an edge", || {
+                        view.update(cx, |this, cx| {
+                            let next = this
+                                .edge_menu
+                                .as_ref()
+                                .and_then(|m| this.screen.swap(m.before, m.after));
+                            if let Some(screen) = next {
+                                this.set_screen(screen, cx);
+                            }
+                        });
+                    });
+                }
+            };
+            let (forward_icon, backward_icon, swap_icon, forward_label, backward_label) = match axis {
+                Axis::X => (IconName::ArrowLineRight, IconName::ArrowLineLeft, IconName::ArrowsLeftRight, "Join right", "Join left"),
+                Axis::Y => (IconName::ArrowLineDown, IconName::ArrowLineUp, IconName::ArrowsDownUp, "Join down", "Join up"),
+            };
+            let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+                menu.min_w(px(208.0))
+                    .label("Area edge options")
+                    .separator()
+                    .item(PopupMenuItem::new("Vertical split").icon(IconName::SquareSplitHorizontal).on_click(popup::on_select(split(Axis::X))))
+                    .item(PopupMenuItem::new("Horizontal split").icon(IconName::SquareSplitVertical).on_click(popup::on_select(split(Axis::Y))))
+                    .separator()
+                    .item(PopupMenuItem::new(forward_label).icon(forward_icon).disabled(!forward).on_click(popup::on_select(join(true))))
+                    .item(PopupMenuItem::new(backward_label).icon(backward_icon).disabled(!backward).on_click(popup::on_select(join(false))))
+                    .separator()
+                    .item(PopupMenuItem::new("Swap areas").icon(swap_icon).on_click(popup::on_select(swap)))
+            });
+            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
+                this.edge_menu = None;
+                cx.notify();
+            });
+            if let Some(open) = self.edge_menu.as_mut() {
+                open.popup = Some(opened);
             }
-        };
-        let (forward_icon, backward_icon, swap_icon, forward_label, backward_label) = match axis {
-            Axis::X => (IconName::ArrowLineRight, IconName::ArrowLineLeft, IconName::ArrowsLeftRight, "Join right", "Join left"),
-            Axis::Y => (IconName::ArrowLineDown, IconName::ArrowLineUp, IconName::ArrowsDownUp, "Join down", "Join up"),
-        };
-        Some(
-            Menu::new("edge-menu")
-                .at(open.at)
-                .width(px(208.0))
-                .on_dismiss(dismiss)
-                .label("Area edge options")
-                .separator()
-                .item(MenuItem::new("Vertical split").icon(IconName::SquareSplitHorizontal).on_select(split(Axis::X)))
-                .item(MenuItem::new("Horizontal split").icon(IconName::SquareSplitVertical).on_select(split(Axis::Y)))
-                .separator()
-                .item(MenuItem::new(forward_label).icon(forward_icon).disabled(open.forward.is_none()).on_select(join(true)))
-                .item(MenuItem::new(backward_label).icon(backward_icon).disabled(open.backward.is_none()).on_select(join(false)))
-                .separator()
-                .item(MenuItem::new("Swap areas").icon(swap_icon).on_select(swap))
-                .into_any_element(),
-        )
+        }
+        let open = self.edge_menu.as_ref()?;
+        Some(open.popup.as_ref()?.draw(window, open.at).into_any_element())
     }
 
-    fn render_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.menu.as_ref()?;
-        let area = self.screen.area(open.area)?;
-        let id = open.area;
-        let view = cx.entity();
-        let dismiss = {
-            let view = view.clone();
-            move |_: &mut Window, cx: &mut App| {
-                view.update(cx, |this, cx| {
-                    this.menu = None;
-                    cx.notify();
-                });
-            }
-        };
-        let act = |f: fn(&mut Self, AreaId, &mut Context<Self>)| {
-            let view = view.clone();
-            move |_: &mut Window, cx: &mut App| view.update(cx, |this, cx| f(this, id, cx))
-        };
-        let menu = Menu::new("area-menu").at(open.at).on_dismiss(dismiss);
-        Some(
-            match open.kind {
-                MenuKind::Type => E::all().iter().fold(menu, |menu, editor| {
-                    let view = view.clone();
-                    let editor = editor.clone();
-                    menu.item(
-                        MenuItem::new(editor.label())
-                            .icon(editor.icon())
-                            .checked(editor == area.editor)
-                            .on_select(move |_, cx| {
-                                let editor = editor.clone();
-                                view.update(cx, |this, cx| {
-                                    let mut screen = this.screen.clone();
-                                    screen.set_editor(id, editor);
-                                    this.set_screen(screen, cx);
-                                });
-                            }),
-                    )
-                }),
-                MenuKind::Area => {
-                    let maximized = self.maximized == Some(id);
-                    menu.width(px(208.0))
-                        .item(
-                            MenuItem::new("Vertical split")
-                                .on_select(act(|this, id, cx| this.split(id, Axis::X, cx))),
-                        )
-                        .item(
-                            MenuItem::new("Horizontal split")
-                                .on_select(act(|this, id, cx| this.split(id, Axis::Y, cx))),
-                        )
-                        .separator()
-                        .item(
-                            MenuItem::new(if maximized {
-                                "Restore area"
-                            } else {
-                                "Maximize area"
-                            })
-                            .on_select(act(Self::toggle_maximized)),
-                        )
-                        .separator()
-                        .item(
-                            MenuItem::new("Close area")
-                                .disabled(self.screen.areas().len() < 2)
-                                .on_select(act(Self::close)),
-                        )
+        if open.popup.is_none() {
+            let (id, kind) = (open.area, open.kind);
+            let current = self.screen.area(id)?.editor.clone();
+            let maximized = self.maximized == Some(id);
+            let can_close = self.screen.areas().len() >= 2;
+            let view = cx.entity();
+            let act = |f: fn(&mut Self, AreaId, &mut Context<Self>)| {
+                let view = view.clone();
+                move |_: &mut Window, cx: &mut App| view.update(cx, |this, cx| f(this, id, cx))
+            };
+            let menu = match kind {
+                MenuKind::Type => {
+                    let items: Vec<PopupMenuItem> = E::all()
+                        .iter()
+                        .map(|editor| {
+                            let view = view.clone();
+                            let editor_value = editor.clone();
+                            PopupMenuItem::new(editor.label())
+                                .icon(editor.icon())
+                                .checked(*editor == current)
+                                .on_click(popup::on_select(move |_, cx| {
+                                    let editor = editor_value.clone();
+                                    view.update(cx, |this, cx| {
+                                        let mut screen = this.screen.clone();
+                                        screen.set_editor(id, editor);
+                                        this.set_screen(screen, cx);
+                                    });
+                                }))
+                        })
+                        .collect();
+                    PopupMenu::build(window, cx, move |menu, _, _| {
+                        items.into_iter().fold(menu.min_w(px(176.0)), |menu, item| menu.item(item))
+                    })
                 }
+                MenuKind::Area => PopupMenu::build(window, cx, move |menu, _, _| {
+                    menu.min_w(px(208.0))
+                        .item(PopupMenuItem::new("Vertical split").on_click(popup::on_select(act(|this, id, cx| this.split(id, Axis::X, cx)))))
+                        .item(PopupMenuItem::new("Horizontal split").on_click(popup::on_select(act(|this, id, cx| this.split(id, Axis::Y, cx)))))
+                        .separator()
+                        .item(
+                            PopupMenuItem::new(if maximized { "Restore area" } else { "Maximize area" })
+                                .on_click(popup::on_select(act(Self::toggle_maximized))),
+                        )
+                        .separator()
+                        .item(PopupMenuItem::new("Close area").disabled(!can_close).on_click(popup::on_select(act(Self::close))))
+                }),
+            };
+            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
+                this.menu = None;
+                cx.notify();
+            });
+            if let Some(open) = self.menu.as_mut() {
+                open.popup = Some(opened);
             }
-            .into_any_element(),
-        )
+        }
+        let open = self.menu.as_ref()?;
+        Some(open.popup.as_ref()?.draw(window, open.at).into_any_element())
     }
 
     /// Handles in an area's corners: drag into the area to split it, out to join or dock, with Ctrl to swap.
@@ -874,8 +870,8 @@ impl<E: Editor> Render for ScreenView<E> {
                     this.drag_edge(event.event.position, cx);
                 },
             ))
-            .children(self.render_menu(cx))
-            .children(self.render_edge_menu(cx))
+            .children(self.render_menu(window, cx))
+            .children(self.render_edge_menu(window, cx))
     })
     }
 }

@@ -6,8 +6,8 @@ use gpui::{
 };
 use guard::SafeListener as _;
 use runtime::Size;
-use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
-use theme::{ActiveTheme as _, IconName, Menu, MenuItem};
+use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}, menu::{PopupMenu, PopupMenuItem}};
+use theme::{ActiveTheme as _, IconName, popup};
 
 use crate::playback::{Playback, Shown, device_size};
 
@@ -346,11 +346,18 @@ enum Open {
     Export,
 }
 
+/// A toolbar menu that is shown, and its popup once built.
+struct OpenMenu {
+    kind: Open,
+    at: Point<Pixels>,
+    popup: Option<popup::Open>,
+}
+
 /// The preview area's header controls: canvas size, zoom and export.
 pub struct PreviewToolbar {
     area: Entity<PreviewArea>,
     playback: Entity<Playback>,
-    open: Option<(Open, Point<Pixels>)>,
+    open: Option<OpenMenu>,
     _observe: [Subscription; 2],
 }
 
@@ -372,34 +379,27 @@ impl PreviewToolbar {
         }
     }
 
-    fn menu(&self, kind: Open, at: Point<Pixels>, cx: &mut Context<Self>) -> Menu {
-        let this = cx.entity();
+    fn menu(&self, kind: Open, window: &mut Window, cx: &mut Context<Self>) -> Entity<PopupMenu> {
         let area = self.area.clone();
         let playback = self.playback.clone();
-        let dismiss = move |_: &mut Window, cx: &mut App| {
-            this.update(cx, |this, cx| {
-                this.open = None;
-                cx.notify();
-            });
-        };
-        let menu = Menu::new("preview-menu").at(at).on_dismiss(dismiss);
         match kind {
             Open::Resolution => {
                 // While following, the stored size has no effect, so it can't be picked.
                 let following = playback.read(cx).following();
-                RESOLUTIONS.iter().fold(menu, |menu, &(width, height)| {
-                    let playback = playback.clone();
-                    let current = playback.read(cx).resolution == Size::new(width, height);
-                    menu.item(
-                        MenuItem::new(format!("{width} × {height}"))
-                            .checked(current)
-                            .disabled(following)
-                            .on_select(move |window, cx| {
-                                playback.update(cx, |p, cx| {
-                                    p.set_resolution(Size::new(width, height), window, cx)
-                                });
-                            }),
-                    )
+                let current = playback.read(cx).resolution;
+                PopupMenu::build(window, cx, move |menu, _, _| {
+                    RESOLUTIONS.iter().fold(menu.min_w(px(176.0)), |menu, &(width, height)| {
+                        let playback = playback.clone();
+                        let size = Size::new(width, height);
+                        menu.item(
+                            PopupMenuItem::new(format!("{width} × {height}"))
+                                .checked(current == size)
+                                .disabled(following)
+                                .on_click(popup::on_select(move |window, cx| {
+                                    playback.update(cx, |p, cx| p.set_resolution(size, window, cx));
+                                })),
+                        )
+                    })
                 })
             }
             Open::Zoom => {
@@ -407,43 +407,38 @@ impl PreviewToolbar {
                     let area = area.clone();
                     move |_: &mut Window, cx: &mut App| area.update(cx, f)
                 };
-                let menu = menu
-                    .item(
-                        MenuItem::new("Zoom in")
-                            .shortcut("+")
-                            .on_select(act(|a, cx| a.zoom_by(ZOOM_STEP, None, cx))),
-                    )
-                    .item(
-                        MenuItem::new("Zoom out")
-                            .shortcut("−")
-                            .on_select(act(|a, cx| a.zoom_by(1.0 / ZOOM_STEP, None, cx))),
-                    )
-                    .separator()
-                    .item(
-                        MenuItem::new("Fit view")
-                            .shortcut("0")
-                            .on_select(act(PreviewArea::fit)),
-                    )
-                    .item(
-                        MenuItem::new("Actual size")
-                            .shortcut("1")
-                            .on_select(act(PreviewArea::actual_size)),
-                    )
-                    .separator();
-                PERCENTAGES.iter().fold(menu, |menu, &zoom| {
-                    let area = area.clone();
-                    menu.item(MenuItem::new(format!("{}%", zoom * 100.0)).on_select(
-                        move |_, cx| {
+                let zoom_in = act(|a, cx| a.zoom_by(ZOOM_STEP, None, cx));
+                let zoom_out = act(|a, cx| a.zoom_by(1.0 / ZOOM_STEP, None, cx));
+                let fit = act(PreviewArea::fit);
+                let actual = act(PreviewArea::actual_size);
+                let percentages: Vec<(f32, _)> = PERCENTAGES
+                    .iter()
+                    .map(|&zoom| {
+                        let area = area.clone();
+                        (zoom, move |_: &mut Window, cx: &mut App| {
                             area.update(cx, |a, cx| a.zoom_to(zoom, None, cx));
-                        },
-                    ))
+                        })
+                    })
+                    .collect();
+                PopupMenu::build(window, cx, move |menu, _, _| {
+                    let menu = menu
+                        .min_w(px(176.0))
+                        .item(popup::row("Zoom in", Some("+".into()), false).on_click(popup::on_select(zoom_in)))
+                        .item(popup::row("Zoom out", Some("−".into()), false).on_click(popup::on_select(zoom_out)))
+                        .separator()
+                        .item(popup::row("Fit view", Some("0".into()), false).on_click(popup::on_select(fit)))
+                        .item(popup::row("Actual size", Some("1".into()), false).on_click(popup::on_select(actual)))
+                        .separator();
+                    percentages.into_iter().fold(menu, |menu, (zoom, select)| {
+                        menu.item(PopupMenuItem::new(format!("{}%", zoom * 100.0)).on_click(popup::on_select(select)))
+                    })
                 })
             }
-            Open::Export => menu.item(MenuItem::new("Export frame as PNG").on_select(
-                move |window, cx| {
+            Open::Export => PopupMenu::build(window, cx, move |menu, _, _| {
+                menu.min_w(px(176.0)).item(PopupMenuItem::new("Export frame as PNG").on_click(popup::on_select(move |window, cx| {
                     export_png(&playback, window, cx);
-                },
-            )),
+                })))
+            }),
         }
     }
 }
@@ -470,7 +465,17 @@ fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
 }
 
 impl Render for PreviewToolbar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(kind) = self.open.as_ref().filter(|m| m.popup.is_none()).map(|m| m.kind) {
+            let menu = self.menu(kind, window, cx);
+            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
+                this.open = None;
+                cx.notify();
+            });
+            if let Some(open) = self.open.as_mut() {
+                open.popup = Some(opened);
+            }
+        }
         guard::render("PreviewToolbar", || {
             let resolution = self.playback.read(cx).render_size();
             let zoom = self.area.read(cx).zoom(cx);
@@ -479,15 +484,16 @@ impl Render for PreviewToolbar {
                 let this = this.clone();
                 move |event: &ClickEvent, _: &mut Window, cx: &mut App| {
                     this.update(cx, |this, cx| {
-                        this.open = Some((kind, event.position() + point(px(0.0), px(8.0))));
+                        this.open = Some(OpenMenu { kind, at: event.position() + point(px(0.0), px(8.0)), popup: None });
                         cx.notify();
                     });
                 }
             };
-            let is_open = |kind| self.open.is_some_and(|(k, _)| k == kind);
+            let is_open = |kind| self.open.as_ref().is_some_and(|m| m.kind == kind);
             let menu: Option<AnyElement> = self
                 .open
-                .map(|(kind, at)| self.menu(kind, at, cx).into_any_element());
+                .as_ref()
+                .and_then(|m| Some(m.popup.as_ref()?.draw(window, m.at).into_any_element()));
             div()
                 .flex()
                 .flex_1()

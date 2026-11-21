@@ -6,7 +6,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use shader_graph::catalog::{AddMenuEntry, SearchResult, group_by_heading, search_entries};
-use theme::{ActiveTheme as _, InputEvent, Popover, TextInput};
+use theme::{ActiveTheme as _, InputEvent, TextInput, popup};
 
 pub enum AddMenuEvent {
     Picked(Box<AddMenuEntry>),
@@ -258,29 +258,19 @@ impl Render for AddMenu {
                 .into_any_element()
         };
 
-        Popover::new()
-            .at(self.at)
-            .width(if self.searching() { px(340.0) } else { px(330.0) })
-            .on_dismiss(cx.listener_dismiss())
-            .child(
-                div()
-                    .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
-                    .child(div().px_1().pb_1().border_b_1().border_color(c.border).child(self.input.clone()))
-                    .child(div().pt_1().child(body)),
-            )
+        let width = if self.searching() { px(340.0) } else { px(330.0) };
+        let this = cx.entity().downgrade();
+        let dismiss = move |_: &mut Window, cx: &mut App| {
+            this.update(cx, |_, cx| cx.emit(AddMenuEvent::Dismissed)).ok();
+        };
+        let content = div()
+            .w(width)
+            .p_1()
+            .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
+            .child(div().px_1().pb_1().border_b_1().border_color(c.border).child(self.input.clone()))
+            .child(div().pt_1().child(body));
+        popup::panel(cx, self.at, dismiss, content)
     })
     }
 }
 
-trait DismissExt {
-    fn listener_dismiss(&mut self) -> impl Fn(&mut Window, &mut App) + 'static;
-}
-
-impl DismissExt for Context<'_, AddMenu> {
-    fn listener_dismiss(&mut self) -> impl Fn(&mut Window, &mut App) + 'static {
-        let this = self.entity().downgrade();
-        move |_, cx| {
-            this.update(cx, |_, cx| cx.emit(AddMenuEvent::Dismissed)).ok();
-        }
-    }
-}

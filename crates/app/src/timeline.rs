@@ -6,7 +6,8 @@ use gpui::{
 };
 use runtime::Timing;
 use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
-use theme::{ActiveTheme as _, IconName, Menu, MenuItem, NumberEvent, NumberField};
+use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use theme::{ActiveTheme as _, IconName, NumberEvent, NumberField, popup};
 
 use crate::playback::{Playback, PlaybackEvent};
 
@@ -95,10 +96,16 @@ impl TimelineReadout {
     }
 }
 
+/// The timing menu while it is shown, and its popup once built.
+struct OpenMenu {
+    at: Point<Pixels>,
+    popup: Option<popup::Open>,
+}
+
 /// The timing button, showing the rate the frames are drawn at, and the menu it opens.
 struct TimingControl {
     playback: Entity<Playback>,
-    menu: Option<Point<Pixels>>,
+    menu: Option<OpenMenu>,
     _observe: Subscription,
 }
 
@@ -112,39 +119,29 @@ impl TimingControl {
         }
     }
 
-    fn menu(&self, at: Point<Pixels>, cx: &mut Context<Self>) -> Menu {
-        let this = cx.entity();
+    fn menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Entity<PopupMenu> {
         let timing = self.playback.read(cx).timing();
-        let menu = Menu::new("timing-menu").at(at).on_dismiss(move |_, cx| {
-            this.update(cx, |this, cx| {
-                this.menu = None;
-                cx.notify();
-            });
-        });
-        let set = |playback: &Entity<Playback>, timing: Timing| {
+        let playback = self.playback.clone();
+        let set = |timing: Timing| {
             let playback = playback.clone();
-            move |window: &mut Window, cx: &mut App| {
+            popup::on_select(move |window: &mut Window, cx: &mut App| {
                 playback.update(cx, |p, cx| p.set_timing(timing, window, cx));
-            }
+            })
         };
-        let menu = FRAME_RATES.iter().fold(menu, |menu, &fps| {
-            menu.item(
-                MenuItem::new(format!("{fps} fps"))
-                    .checked(timing.fps == fps)
-                    .on_select(set(&self.playback, Timing { fps, ..timing })),
+        PopupMenu::build(window, cx, move |menu, _, _| {
+            let menu = FRAME_RATES.iter().fold(menu.min_w(px(176.0)), |menu, &fps| {
+                menu.item(
+                    PopupMenuItem::new(format!("{fps} fps"))
+                        .checked(timing.fps == fps)
+                        .on_click(set(Timing { fps, ..timing })),
+                )
+            });
+            menu.separator().item(
+                PopupMenuItem::new("Real time")
+                    .checked(timing.realtime)
+                    .on_click(set(Timing { realtime: !timing.realtime, ..timing })),
             )
-        });
-        menu.separator().item(
-            MenuItem::new("Real time")
-                .checked(timing.realtime)
-                .on_select(set(
-                    &self.playback,
-                    Timing {
-                        realtime: !timing.realtime,
-                        ..timing
-                    },
-                )),
-        )
+        })
     }
 }
 
@@ -252,7 +249,18 @@ impl Render for TimelineReadout {
 }
 
 impl Render for TimingControl {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("timing control", || {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.menu.as_ref().is_some_and(|m| m.popup.is_none()) {
+            let menu = self.menu(window, cx);
+            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
+                this.menu = None;
+                cx.notify();
+            });
+            if let Some(m) = self.menu.as_mut() {
+                m.popup = Some(opened);
+            }
+        }
+        guard::render("timing control", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let playback = self.playback.read(cx);
@@ -318,7 +326,7 @@ impl Render for TimingControl {
                     .tooltip(hint.join("\n"))
                     .selected(self.menu.is_some())
                     .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
-                        this.menu = Some(event.position() + point(px(0.0), px(8.0)));
+                        this.menu = Some(OpenMenu { at: event.position() + point(px(0.0), px(8.0)), popup: None });
                         cx.notify();
                     }))
                     .child(
@@ -332,7 +340,7 @@ impl Render for TimingControl {
                             .when(timing.realtime, |d| d.child("· real time")),
                     ),
             )
-            .children(self.menu.map(|at| self.menu(at, cx)))
+            .children(self.menu.as_ref().and_then(|m| Some(m.popup.as_ref()?.draw(window, m.at).into_any_element())))
     })
     }
 }

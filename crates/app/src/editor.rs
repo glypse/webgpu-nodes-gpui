@@ -26,7 +26,8 @@ use shader_graph::graph::{
 };
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
-use theme::{ActiveTheme as _, Menu, MenuItem};
+use gpui_component::menu::PopupMenu;
+use theme::{ActiveTheme as _, popup};
 
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
@@ -124,6 +125,8 @@ struct Popup {
     items: Vec<ListItem>,
     /// Which list this is: a selection can open another, which the first's dismissal mustn't close.
     serial: u64,
+    /// Built from `items` on the first draw, which is when a window is at hand.
+    menu: Option<popup::Open>,
 }
 
 pub struct Editor {
@@ -865,7 +868,7 @@ impl Editor {
 
     pub(crate) fn open_list(&mut self, at: Point<Pixels>, items: Vec<ListItem>, cx: &mut Context<Self>) {
         self.popup_serial += 1;
-        self.popup = Some(Popup { at, items, serial: self.popup_serial });
+        self.popup = Some(Popup { at, items, serial: self.popup_serial, menu: None });
         cx.notify();
     }
 
@@ -1479,39 +1482,34 @@ impl Editor {
             .when(locked, |d| d.child(div().ml_2().text_size(theme.text.xs).text_color(c.muted_foreground).child("locked")))
     }
 
-    fn render_popup(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let popup = self.popup.as_ref()?;
-        let weak = cx.entity().downgrade();
-        let serial = popup.serial;
-        let mut menu = Menu::new(SharedString::from(format!("editor-list-{serial}"))).at(popup.at).on_dismiss(move |_, cx| {
-            weak.update(cx, |e, cx| {
+    fn render_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let popup = self.popup.as_mut()?;
+        if popup.menu.is_none() {
+            let serial = popup.serial;
+            let items = std::mem::take(&mut popup.items);
+            let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+                items.into_iter().fold(menu.min_w(px(176.0)), |menu, item| {
+                    let on_select = item.on_select;
+                    let entry = popup::row(item.label, item.detail, item.destructive)
+                        .checked(item.checked.unwrap_or(false))
+                        .disabled(item.disabled)
+                        .on_click(popup::on_select(move |window, cx| on_select(window, cx)));
+                    let menu = if item.separated { menu.separator() } else { menu };
+                    menu.item(entry)
+                })
+            });
+            let opened = popup::open(window, cx, menu, move |e: &mut Editor, cx| {
                 if e.popup.as_ref().is_some_and(|p| p.serial == serial) {
                     e.popup = None;
                     cx.notify();
                 }
-            })
-            .ok();
-        });
-        for item in &popup.items {
-            let on_select = item.on_select.clone();
-            let mut entry = MenuItem::new(item.label.clone())
-                .disabled(item.disabled)
-                .on_select(move |w, cx| on_select(w, cx));
-            if let Some(checked) = item.checked {
-                entry = entry.checked(checked);
+            });
+            if let Some(popup) = self.popup.as_mut() {
+                popup.menu = Some(opened);
             }
-            if let Some(detail) = &item.detail {
-                entry = entry.shortcut(detail.clone());
-            }
-            if item.destructive {
-                entry = entry.destructive();
-            }
-            if item.separated {
-                menu = menu.separator();
-            }
-            menu = menu.item(entry);
         }
-        Some(menu.into_any_element())
+        let popup = self.popup.as_ref()?;
+        Some(popup.menu.as_ref()?.draw(window, popup.at).into_any_element())
     }
 }
 
@@ -1556,7 +1554,7 @@ impl Render for Editor {
             )
             .children(sheet)
             .children(self.add_menu.clone())
-            .children(self.render_popup(cx))
+            .children(self.render_popup(window, cx))
             .children(popovers::render_color(self, cx))
             .children(popovers::render_sockets(self, window, cx))
     })

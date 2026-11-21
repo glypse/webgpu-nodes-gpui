@@ -7,15 +7,12 @@ mod color;
 mod color_picker;
 mod color_wheels;
 mod curve_editor;
-mod dialog;
 mod gamut_image;
 mod icon;
 mod input;
-mod menu;
 mod number_field;
-mod popover;
 mod ramp_editor;
-mod select;
+pub mod popup;
 mod textarea;
 mod theme;
 
@@ -29,31 +26,24 @@ pub use color_wheels::{
     ColorWheels, ColorWheelsEvent, oklch_max_chroma, wheel_cursor, wheel_polar,
 };
 pub use curve_editor::{CurveEditor, CurveEditorEvent, PathStep, curve_path};
-pub use dialog::{Dialog, DialogSide};
 pub use icon::{Assets, Icon, IconName};
 pub use input::{InputEvent, TextInput};
-pub use menu::{Menu, MenuItem};
 pub use number_field::{NumberEvent, NumberField};
-pub use popover::Popover;
 pub use ramp_editor::{RampEditor, RampEditorEvent};
-pub use select::{Select, SelectEvent};
 pub use textarea::Textarea;
 pub use theme::{ActiveTheme, Appearance, Colors, INTERFACE_FONT, Radii, TextSizes, Theme};
 
 const INTERFACE_FONT_DATA: &[u8] = include_bytes!("../assets/fonts/AtkinsonHyperlegibleNext.ttf");
 
-/// Registers the interface font and the key bindings of the text inputs, dialog and select, and sets
-/// the theme to the system appearance.
+/// Registers the interface font and the key bindings of the text inputs and textarea, and sets the
+/// theme to the system appearance.
 pub fn init(cx: &mut App) {
     gpui_component::init(cx);
     cx.text_system()
         .add_fonts(vec![Cow::Borrowed(INTERFACE_FONT_DATA)])
         .expect("the bundled font is valid");
     input::bind_keys(cx);
-    dialog::bind_keys(cx);
     textarea::bind_keys(cx);
-    select::bind_keys(cx);
-    menu::bind_keys(cx);
     cx.set_global(Theme::new(Appearance::Dark));
     sync_component_theme(Appearance::Dark, cx);
 }

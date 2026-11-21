@@ -10,7 +10,7 @@ use gpui::{
 };
 use shader_graph::nodes::custom_sockets;
 use shader_graph::types::{HandleDef, WgslType};
-use theme::{ActiveTheme as _, ColorPicker, Popover};
+use theme::{ActiveTheme as _, ColorPicker, popup};
 
 use super::sheet::{Commit, boxed, field, heading, hint};
 use super::type_picker::TypePicker;
@@ -33,17 +33,19 @@ pub fn render_color(editor: &Editor, cx: &mut Context<Editor>) -> Option<AnyElem
     let popup = editor.color_popup.as_ref()?;
     let weak = cx.entity().downgrade();
     Some(
-        Popover::new()
-            .at(popup.at)
-            .on_dismiss(move |_, cx| {
+        popup::panel(
+            cx,
+            popup.at,
+            move |_, cx| {
                 weak.update(cx, |e, cx| {
                     e.color_popup = None;
                     cx.notify();
                 })
                 .ok();
-            })
-            .child(popup.picker.clone())
-            .into_any_element(),
+            },
+            popup.picker.clone(),
+        )
+        .into_any_element(),
     )
 }
 
@@ -123,17 +125,19 @@ pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context
         );
     }
     Some(
-        Popover::new()
-            .at(at)
-            .on_dismiss(move |_, cx| {
+        popup::panel(
+            cx,
+            at,
+            move |_, cx| {
                 weak.update(cx, |e, cx| {
                     e.sockets = None;
                     cx.notify();
                 })
                 .ok();
-            })
-            .child(panel)
-            .into_any_element(),
+            },
+            panel,
+        )
+        .into_any_element(),
     )
 }
 
