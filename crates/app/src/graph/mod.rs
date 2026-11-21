@@ -1,6 +1,7 @@
 pub mod add_menu;
 pub mod fields;
 pub mod frames;
+pub mod handle_details;
 pub mod item_widgets;
 pub mod node;
 pub mod popovers;

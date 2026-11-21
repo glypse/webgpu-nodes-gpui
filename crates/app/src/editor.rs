@@ -1477,6 +1477,11 @@ impl Editor {
         self.edit(cx, f);
     }
 
+    #[cfg(test)]
+    fn sheet_fields_expand(&mut self, ids: Vec<String>) {
+        self.sheet_fields.expanded.extend(ids);
+    }
+
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         self.sheet = None;
         cx.notify();
@@ -1592,6 +1597,31 @@ mod tests {
             render_frame(cx);
             assert!(scene.editor.read_with(cx, |e, _| e.sheet.is_some()));
         }
+    }
+
+    #[gpui::test]
+    fn group_input_details_open_for_every_kind_of_input(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let group = scene.editor.update(cx, |e, cx| {
+            let mut model = e.model_mut();
+            let member = model.add_node("sin", GraphPoint::new(300.0, 300.0)).expect("adds");
+            let group = model.group_selection(&[member]).expect("groups");
+            let reference = model.node(&group).and_then(|n| n.definition_ref().map(str::to_owned)).expect("ref");
+            let enum_variants = vec![shader_graph::types::EnumVariant::new(0, "A"), shader_graph::types::EnumVariant::new(1, "B")];
+            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::U32), Some(enum_variants), None);
+            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::Bool), Some(shader_graph::types::toggle_variants()), None);
+            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::Vec3f), None, None);
+            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::I32), None, None);
+            let ids: Vec<String> = model.project().document(&reference).map(|d| d.inputs.iter().map(|h| h.id.clone()).collect()).unwrap_or_default();
+            drop(model);
+            e.sheet_fields_expand(ids);
+            e.after_edit(cx);
+            e.sheet = Some(group.clone());
+            cx.notify();
+            group
+        });
+        render_frame(cx);
+        assert_eq!(scene.editor.read_with(cx, |e, _| e.sheet.clone()), Some(group));
     }
 
     #[gpui::test]

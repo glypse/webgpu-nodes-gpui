@@ -18,7 +18,7 @@ use shader_graph::graph::{
 use shader_graph::passes::{ItemSizeMode, TextureFormat};
 use shader_graph::types::{HandleType, SOCKET_TYPES, TypeVariable, WgslType, type_set_of};
 use shader_graph::zones::{DEFAULT_MAX_ITERATIONS, MAX_ITERATIONS, is_zone_node_type, zone_max_iterations};
-use theme::{ActiveTheme as _, InputEvent, NumberEvent, NumberField, TextInput};
+use theme::{ActiveTheme as _, InputEvent, NumberEvent, NumberField, TextInput, Textarea};
 
 use super::frames::tint_color;
 use super::type_picker::{TypePicker, on_editor};
@@ -27,11 +27,14 @@ use crate::editor::{Editor, ListItem};
 
 #[derive(Default)]
 pub struct Fields {
-    inputs: HashMap<String, Entity<TextInput>>,
-    numbers: HashMap<String, Entity<NumberField>>,
+    pub(super) inputs: HashMap<String, Entity<TextInput>>,
+    pub(super) numbers: HashMap<String, Entity<NumberField>>,
+    areas: HashMap<String, Entity<Textarea>>,
+    /// Input handles whose details are shown.
+    pub(crate) expanded: std::collections::HashSet<String>,
 }
 
-type NumberCommit = Rc<dyn Fn(&mut Editor, f64, &mut Context<Editor>)>;
+pub(super) type NumberCommit = Rc<dyn Fn(&mut Editor, f64, &mut Context<Editor>)>;
 pub(super) type Commit = Rc<dyn Fn(&mut Editor, String, &mut Context<Editor>)>;
 
 /// A text field kept across frames under `key`, showing `value` unless it's being edited.
@@ -68,8 +71,42 @@ pub(super) fn field(
     input
 }
 
+/// Like `field`, for text over several lines.
+fn text_area(
+    editor: &mut Editor,
+    key: String,
+    value: &str,
+    placeholder: &str,
+    window: &mut Window,
+    cx: &mut Context<Editor>,
+    commit: Commit,
+) -> Entity<Textarea> {
+    if let Some(existing) = editor.sheet_fields.areas.get(&key).cloned() {
+        let focused = existing.read(cx).focus_handle(cx).is_focused(window);
+        if !focused && existing.read(cx).value().as_ref() != value {
+            existing.update(cx, |i, cx| i.set_value(value.to_owned(), cx));
+        }
+        return existing;
+    }
+    let placeholder = placeholder.to_owned();
+    let area = cx.new(|cx| {
+        let mut area = Textarea::new(cx).placeholder(placeholder);
+        area.set_value(value.to_owned(), cx);
+        area
+    });
+    cx.subscribe(&area, move |this, area, event: &InputEvent, cx| {
+        if matches!(event, InputEvent::Submit | InputEvent::Blur) {
+            let text = area.read(cx).value().to_string();
+            commit(this, text, cx);
+        }
+    })
+    .detach();
+    editor.sheet_fields.areas.insert(key, area.clone());
+    area
+}
+
 /// A number field kept across frames under `key`.
-fn number(
+pub(super) fn number(
     editor: &mut Editor,
     key: String,
     value: f64,
@@ -102,7 +139,7 @@ fn type_label(ty: &HandleType, variables: &[TypeVariable]) -> String {
     }
 }
 
-fn button(
+pub(super) fn button(
     id: impl Into<gpui::ElementId>,
     label: &'static str,
     cx: &Context<Editor>,
@@ -127,7 +164,7 @@ fn button(
 }
 
 /// A bordered text button.
-fn outline_button(
+pub(super) fn outline_button(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
     disabled: bool,
@@ -193,6 +230,7 @@ struct GroupSubject {
     inputs: Vec<shader_graph::types::GroupHandleDef>,
     outputs: Vec<shader_graph::types::GroupHandleDef>,
     variables: Vec<TypeVariable>,
+    defaults: std::collections::BTreeMap<String, shader_graph::types::InputValue>,
 }
 
 fn subject(model: &GraphModel, node_id: &str) -> Option<Subject> {
@@ -217,6 +255,7 @@ fn subject(model: &GraphModel, node_id: &str) -> Option<Subject> {
             inputs: doc.inputs.clone(),
             outputs: doc.outputs.clone(),
             variables: doc.type_variables.clone(),
+            defaults: doc.defaults.clone(),
             reference,
         })
     });
@@ -346,9 +385,9 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                 });
             })
         };
-        let input = field(editor, format!("note-{node_id}"), &note, "What this part of the graph does…", window, cx, commit);
+        let input = text_area(editor, format!("note-{node_id}"), &note, "What this part of the graph does…", window, cx, commit);
         body = body
-            .child(div().flex().flex_col().gap_1p5().child(heading("Note", cx)).child(boxed(input, cx)))
+            .child(div().flex().flex_col().gap_1p5().child(heading("Note", cx)).child(div().p_1().border_1().border_color(c.input).rounded(theme.radius.md).child(input)))
             .child(
                 div().flex().flex_col().gap_1p5().child(heading("Colour", cx)).child(
                     div().flex().flex_wrap().gap_1p5().children(
@@ -531,6 +570,11 @@ fn group_settings(
     ] {
         let mut section = div().flex().flex_col().gap_1p5().child(heading(title, cx));
         for handle in handles {
+            let detailed = side == GroupSide::Input && !handle.ty.is_inferred() && !matches!(handle.ty, HandleType::Fixed(t) if t.is_texture());
+            let open = editor.sheet_fields.expanded.contains(&handle.id);
+            let toggle_id = handle.id.clone();
+            let details = (detailed && open)
+                .then(|| super::handle_details::details(editor, window, &reference, &handle, &group.defaults, &group.variables, locked, cx));
             let commit: Commit = {
                 let (reference, id) = (reference.clone(), handle.id.clone());
                 Rc::new(move |this, text, cx| {
@@ -599,13 +643,21 @@ fn group_settings(
             let (r1, h1) = (reference.clone(), handle.id.clone());
             let (r2, h2) = (reference.clone(), handle.id.clone());
             let (r3, h3) = (reference.clone(), handle.id.clone());
-            section = section.child(
+            let handle_row =
                 div()
                     .flex()
                     .items_center()
                     .gap_1()
                     .child(div().flex_1().min_w_0().child(boxed(input, cx)))
                     .child(div().w(px(96.0)).flex_none().flex().child(type_button))
+                    .when(detailed, |d| {
+                        d.child(button(SharedString::from(format!("expand-{}", handle.id)), if open { "▾" } else { "▸" }, cx, move |this, cx| {
+                            if !this.sheet_fields.expanded.remove(&toggle_id) {
+                                this.sheet_fields.expanded.insert(toggle_id.clone());
+                            }
+                            cx.notify();
+                        }))
+                    })
                     .when(!locked, |d| {
                         d.child(button(SharedString::from(format!("up-{}", handle.id)), "↑", cx, move |this, cx| {
                             let (r, h) = (r1.clone(), h1.clone());
@@ -619,8 +671,8 @@ fn group_settings(
                             let (r, h) = (r3.clone(), h3.clone());
                             this.edit_model(cx, move |m| m.remove_handle(&r, side, &h));
                         }))
-                    })
-            );
+                    });
+            section = section.child(handle_row).children(details);
         }
         if !locked {
             let (w, r) = (weak.clone(), reference.clone());
@@ -631,7 +683,26 @@ fn group_settings(
                 cx,
                 move |this, at, cx| {
                     let (r, r2) = (r.clone(), r.clone());
-                    let extra: Vec<ListItem> = (side == GroupSide::Output)
+                    let mut extra: Vec<ListItem> = Vec::new();
+                    if side == GroupSide::Input {
+                        for (label, ty, variants) in [
+                            ("Enum", WgslType::U32, vec![shader_graph::types::EnumVariant::new(0, "Option 1"), shader_graph::types::EnumVariant::new(1, "Option 2")]),
+                            ("Checkbox", WgslType::Bool, GraphModel::toggle_variants()),
+                        ] {
+                            let r = r.clone();
+                            extra.push(ListItem::new(
+                                label,
+                                None,
+                                on_editor(&w, move |e, cx| {
+                                    let (r, variants) = (r.clone(), variants.clone());
+                                    e.edit_model(cx, move |m| {
+                                        m.add_handle(&r, side, HandleType::Fixed(ty), Some(variants), None);
+                                    });
+                                }),
+                            ));
+                        }
+                    }
+                    let output_extra: Vec<ListItem> = (side == GroupSide::Output)
                         .then(|| {
                             ListItem::new(
                                 "Inferred",
@@ -647,6 +718,7 @@ fn group_settings(
                         })
                         .into_iter()
                         .collect();
+                    extra.extend(output_extra);
                     this.open_type_picker(
                         at,
                         TypePicker {
