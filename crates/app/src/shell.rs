@@ -126,12 +126,16 @@ pub struct Shell {
 }
 
 impl Shell {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Starts playback, as `--play` asks for at launch.
+    pub fn play(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.playback.update(cx, |playback, cx| playback.toggle(window, cx));
+    }
+
+    pub fn new(requested: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let playback = cx.new(|_| Playback::new());
         let editor = cx.new(|cx| Editor::new(window, cx));
         let mut path = None;
         let mut layout = None;
-        let requested = std::env::args_os().nth(1).map(PathBuf::from);
         if let Some(last) = requested.or_else(project::last) {
             match project::read(&last) {
                 Ok(Loaded { project: loaded, files }) => {

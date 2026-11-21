@@ -24,6 +24,7 @@ Loops of repeated waits are the most common way agents waste a session. Follow t
 - Comments only explain why / non-obvious constraints. Never restate code, duplicate docs, hard-code facts owned by other code, or reference other modules' or the UI's behaviour; no banners repeating the file name. Fix or delete comments your change invalidates.
 
 ## Tests
+- Screenshots, profiles and benchmark scenes: see `docs/probing.md`.
 - Port the original's tests for what you port, plus regression tests for bugs you hit.
 - Generated WGSL must validate with naga. GPU tests run on the real device.
 - UI behaviour: `TestAppContext` (see `crates/flow/tests/pointer.rs`); layout can be checked with `debug_selector`/`debug_bounds`.

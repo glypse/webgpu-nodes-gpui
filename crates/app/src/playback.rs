@@ -404,6 +404,7 @@ impl Playback {
     }
 
     fn animation_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let _tick = tracing::info_span!("playback tick").entered();
         let timestamp = self.epoch.elapsed().as_secs_f64();
         if self.player.playing()
             && let Some(rate) = self.refresh_meter.record(timestamp)
@@ -440,6 +441,7 @@ impl Playback {
 
     /// Starts drawing a frame; it is shown once the GPU has finished with it.
     fn submit(&mut self, inputs: runtime::FrameInputs) -> bool {
+        let _span = tracing::info_span!("submit").entered();
         let size = self.render_size();
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else {
             return false;
@@ -468,6 +470,7 @@ impl Playback {
     }
 
     fn present(&mut self, presented: Presented, window: &mut Window) {
+        let _span = tracing::info_span!("present").entered();
         let started = Instant::now();
         let (shown, gpu_time) = match presented {
             #[cfg(target_os = "macos")]
@@ -487,6 +490,9 @@ impl Playback {
             && let Err(error) = window.drop_image(old)
         {
             log::warn!("dropping the previous frame failed: {error:#}");
+        }
+        if let Some(seconds) = gpu_time {
+            tracing::debug!(target: "probe::gpu", seconds);
         }
         if let Some(seconds) = gpu_time
             && self.player.playing()
