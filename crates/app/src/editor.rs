@@ -1157,8 +1157,15 @@ impl Editor {
                     self.enter_group(&id, cx);
                 }
             }
-            FlowEvent::PaneContextMenu { window, flow } => self.open_context_menu(window, flow, false, cx),
-            FlowEvent::NodeContextMenu { window, flow, .. } => self.open_context_menu(window, flow, true, cx),
+            FlowEvent::NodeClick { id, modifiers } => {
+                if modifiers.shift && (modifiers.platform || modifiers.control) {
+                    self.preview_node(id.as_ref(), cx);
+                }
+            }
+            FlowEvent::PaneContextMenu { window, flow } => self.open_context_menu(window, flow, None, cx),
+            FlowEvent::NodeContextMenu { id, window, flow } => {
+                self.open_context_menu(window, flow, Some(id.to_string()), cx)
+            }
             FlowEvent::EdgeContextMenu { id, window, .. } => {
                 let weak = cx.entity().downgrade();
                 let id = id.to_string();
@@ -1274,7 +1281,7 @@ impl Editor {
     }
 
     /// The context menu: on a node, or on the canvas, with what applies to the selection.
-    fn open_context_menu(&mut self, at: Point<Pixels>, flow: Xy, on_node: bool, cx: &mut Context<Self>) {
+    fn open_context_menu(&mut self, at: Point<Pixels>, flow: Xy, on_node: Option<String>, cx: &mut Context<Self>) {
         let weak = cx.entity().downgrade();
         let selected = self.selected();
         let (locked, reroutes, all_hidden, all_links_hidden, in_frame, ungroupable, single) = {
@@ -1311,7 +1318,7 @@ impl Editor {
             }
             items.push(item);
         };
-        if !on_node {
+        if on_node.is_none() {
             push("Add…", Some("⇧A"), locked, Rc::new(move |e, cx| e.open_add_menu(at, Some(flow), None, cx)));
         }
         if let Some(id) = single.clone() {
@@ -1359,7 +1366,7 @@ impl Editor {
             }
         }
         items.extend(separated);
-        if !on_node {
+        if on_node.is_none() {
             let w = weak.clone();
             items.push(
                 ListItem::new("Fit view", None, Rc::new(move |_, cx| {
@@ -1372,6 +1379,15 @@ impl Editor {
                 items.push(ListItem::new("Exit group", None, Rc::new(move |_, cx| {
                     w.update(cx, |e, cx| e.exit_group(cx)).ok();
                 })).detail("⇥"));
+            }
+        }
+        if let Some(node) = on_node {
+            let preview = ListItem::new("Preview", None, run(Rc::new(move |e, cx| e.preview_node(&node, cx))))
+                .detail("⇧⌘Click")
+                .disabled(locked);
+            items.insert(0, preview);
+            if let Some(next) = items.get_mut(1) {
+                next.separated = true;
             }
         }
         self.open_list(at, items, cx);
@@ -1387,6 +1403,16 @@ impl Editor {
         self.model_mut().set_selected_node_ids(ids.clone());
         let flow_ids: Vec<Id> = ids.into_iter().map(Id::from).collect();
         self.flow.update(cx, |f, cx| f.set_selection(&flow_ids, &[], cx));
+    }
+
+    /// Previews a node and selects it, as the original does. Previewing it again
+    /// moves the preview to its next output.
+    pub(crate) fn preview_node(&mut self, node: &str, cx: &mut Context<Self>) {
+        let previewed = self.model_mut().preview_node(node);
+        if previewed {
+            self.after_edit(cx);
+            self.select(vec![node.to_owned()], cx);
+        }
     }
 
     fn delete_selection(&mut self, cx: &mut Context<Self>) {
@@ -1952,23 +1978,61 @@ mod tests {
     #[gpui::test]
     fn the_context_menu_lists_what_applies(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
-        let labels = |cx: &mut gpui::VisualTestContext, on_node: bool| {
+        let labels = |cx: &mut gpui::VisualTestContext, on_node: Option<String>| {
             scene.editor.update(cx, |e, cx| {
                 e.open_context_menu(point(px(10.0), px(10.0)), Xy::new(0.0, 0.0), on_node, cx);
                 e.popup.as_ref().map(|p| p.items.iter().map(|i| i.label.to_string()).collect::<Vec<_>>()).unwrap_or_default()
             })
         };
         scene.editor.update(cx, |e, cx| e.select(Vec::new(), cx));
-        let canvas = labels(cx, false);
+        let canvas = labels(cx, None);
         assert!(canvas.contains(&"Add…".to_owned()) && canvas.contains(&"Paste".to_owned()));
         assert!(!canvas.contains(&"Cut".to_owned()), "{canvas:?}");
+        assert!(!canvas.contains(&"Preview".to_owned()), "{canvas:?}");
         scene.editor.update(cx, |e, cx| e.select(vec![scene.member.clone()], cx));
-        let on_member = labels(cx, true);
+        let on_member = labels(cx, Some(scene.member.clone()));
+        assert_eq!(on_member.first().map(String::as_str), Some("Preview"), "{on_member:?}");
         for wanted in ["Cut", "Copy", "Move", "Duplicate", "Delete", "Dissolve", "Frame selected", "Remove from frame"] {
             assert!(on_member.contains(&wanted.to_owned()), "{wanted} in {on_member:?}");
         }
         assert!(!on_member.contains(&"Group selected".to_owned()));
         render_frame(cx);
+    }
+
+    /// The node whose output feeds the fragment output, if any.
+    fn previewed(editor: &Editor) -> Option<String> {
+        let model = editor.model();
+        let root = model.root();
+        let frag = root.nodes.iter().find(|n| n.is(FRAG_OUTPUT))?.id.clone();
+        root.edges.iter().find(|e| e.target == frag).map(|e| e.source.clone())
+    }
+
+    #[gpui::test]
+    fn shift_command_click_previews_the_node(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        render_frame(cx);
+        let member = scene.member.clone();
+        let at = scene.editor.read_with(cx, |e, cx| {
+            let flow = e.flow.read(cx);
+            let r = flow.node_rect(&Id::from(member.clone())).expect("the node is measured");
+            flow.flow_to_screen(Xy::new(r.x + r.width / 2.0, r.y + r.height / 2.0))
+        });
+        let shader = |cx: &mut gpui::VisualTestContext| {
+            scene.editor.read_with(cx, |e, _| e.shader().clone().map(|p| p.program.code))
+        };
+        let before = shader(cx);
+        let source = scene.editor.read_with(cx, |e, _| previewed(e));
+
+        cx.simulate_click(at, gpui::Modifiers::default());
+        assert_eq!(scene.editor.read_with(cx, |e, _| previewed(e)), source);
+        assert_eq!(shader(cx), before);
+
+        let preview = gpui::Modifiers { shift: true, platform: true, ..Default::default() };
+        cx.simulate_click(at, preview);
+        render_frame(cx);
+        assert_eq!(scene.editor.read_with(cx, |e, _| previewed(e)), Some(member.clone()));
+        assert_ne!(shader(cx), before, "the emitted program follows the preview");
+        assert_eq!(scene.editor.read_with(cx, |e, _| e.selected()), vec![member]);
     }
 
     #[gpui::test]
