@@ -9,6 +9,8 @@ graph-math = { path = "../graph-math" }
 # Without it parsed floats can differ in the last digit, which changes library versions.
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
+sha2 = "0.10"
+zip = { version = "9.8.1", default-features = false, features = ["deflate"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

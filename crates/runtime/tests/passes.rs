@@ -43,7 +43,7 @@ impl Scene {
     }
 
     fn compile(&mut self) -> Program {
-        let program = self.model.generate().expect("generates");
+        let program = self.model.generate_hoisted().expect("generates");
         let compiled = self
             .renderer
             .compile(&program.plan)
@@ -465,4 +465,64 @@ fn frames_before_the_first_can_be_simulated_without_drawing() {
     scene.renderer.simulate(&program, frames, size).expect("simulates");
     let pixels = scene.draw(&program, size, 5);
     assert_eq!(pixel(&pixels, 2, 0, 0)[0], srgb(0.6), "the sixth step");
+}
+
+/// `time * 0.5` drawn as the red channel: a frame value, written for the pass.
+#[test]
+fn a_frame_value_is_computed_on_the_cpu_and_read_by_the_shader() {
+    let mut scene = Scene::new();
+    let time = scene.add("time");
+    let half = scene.constant(0.5);
+    let scaled = scene.add("mul");
+    scene.link((&time, "seconds"), (&scaled, "operands"));
+    scene.link((&half, "value"), (&scaled, "operands"));
+    let declare = scene.add("declare");
+    scene.model.set_node_type(&declare, Some(WgslType::Vec4f));
+    scene.link((&scaled, "result"), (&declare, "x"));
+    let out = scene.output();
+    scene.link((&declare, "value"), (&out, "color"));
+    let program = scene.compile();
+    assert!(!program.source().code.contains("runtime_frame.time"), "the shader reads the hoisted value");
+    for (frame, expected) in [(0, 0.0), (60, 0.5), (90, 0.75)] {
+        let pixels = scene.draw(&program, Size::new(2, 2), frame);
+        assert_eq!(pixel(&pixels, 2, 0, 0)[0], srgb(expected), "frame {frame}");
+    }
+}
+
+/// A Render Texture 4 pixels wide plus the frame index, sampled closest: the
+/// texels' widths on the canvas show its size.
+#[test]
+fn a_size_made_of_frame_values_follows_them() {
+    let mut scene = Scene::new();
+    let uv = scene.add("uv");
+    let texture = scene.add("render-texture");
+    scene.model.update_node_data(&texture, |d| {
+        d.settings.insert("mode".to_owned(), "pixels".to_owned());
+    });
+    let item = scene.model.render_items_of(&texture)[0].id.clone();
+    let time = scene.add("time");
+    let four = scene.add("declare");
+    scene.model.set_node_type(&four, Some(WgslType::U32));
+    scene.model.set_input_value(&four, "x", Some(InputValue::from(4.0)));
+    let side = scene.add("add");
+    scene.model.set_node_type(&side, Some(WgslType::U32));
+    scene.link((&time, "frame"), (&side, "operands"));
+    scene.link((&four, "value"), (&side, "operands"));
+    scene.link((&side, "result"), (&texture, "pixels"));
+    scene.link((&uv, "uv"), (&texture, &item));
+    let sample = scene.add("sample-texture");
+    scene.model.set_input_value(&sample, "interpolation", Some(InputValue::from(1.0)));
+    scene.link((&texture, &item), (&sample, "texture"));
+    let out = scene.output();
+    scene.link((&sample, "color"), (&out, "color"));
+    let program = scene.compile();
+    let size = Size::new(12, 12);
+    let red = |pixels: &[u8], x| pixel(pixels, 12, x, 6)[0];
+    let pixels = scene.draw(&program, size, 0);
+    assert_eq!((red(&pixels, 0), red(&pixels, 2)), (red(&pixels, 1), red(&pixels, 1)), "three pixels per texel");
+    assert_ne!(red(&pixels, 2), red(&pixels, 3));
+    let pixels = scene.draw(&program, size, 2);
+    assert_eq!(red(&pixels, 0), red(&pixels, 1), "two pixels per texel");
+    assert_ne!(red(&pixels, 1), red(&pixels, 2));
+    assert_eq!(red(&pixels, 2), red(&pixels, 3));
 }

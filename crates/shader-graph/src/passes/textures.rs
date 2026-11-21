@@ -1,5 +1,6 @@
 //! Texture formats and sizes: what a pass draws into and what shaders read.
 
+use crate::frame::FrameRef;
 use crate::types::ScalarKind;
 
 /// The formats a texture of a program can have.
@@ -164,15 +165,29 @@ pub enum SizeBase {
     Resource(String),
 }
 
+/// A frame value as plans carry it: a literal, or a value of the plan's frame program.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FrameArg {
+    Literal(f64),
+    Frame(FrameRef),
+}
+
+impl From<f64> for FrameArg {
+    fn from(n: f64) -> Self {
+        Self::Literal(n)
+    }
+}
+
 /// A size: a scale of the canvas or of another resource, or pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextureSize {
-    Scale { scale: f64, of: SizeBase },
-    Pixels { width: f64, height: f64 },
+    Scale { scale: FrameArg, of: SizeBase },
+    Pixels { width: FrameArg, height: FrameArg },
 }
 
 /// The canvas' own size.
-pub const CANVAS_SIZE: TextureSize = TextureSize::Scale { scale: 1.0, of: SizeBase::Canvas };
+pub const CANVAS_SIZE: TextureSize =
+    TextureSize::Scale { scale: FrameArg::Literal(1.0), of: SizeBase::Canvas };
 
 /// How many levels a full mip chain of a texture of this size has.
 pub fn mip_level_count(size: Size) -> u32 {
@@ -180,14 +195,14 @@ pub fn mip_level_count(size: Size) -> u32 {
 }
 
 /// Whether two sizes are provably the same. Only equality it can see: the
-/// same base with the same scale, or the same pixels.
+/// same base with the same literal scale or value of the frame program, or the same pixels.
 pub fn same_size(a: &TextureSize, b: &TextureSize) -> bool {
     a == b
 }
 
 /// Whether `size` is the canvas' own.
 pub fn is_canvas_size(size: &TextureSize) -> bool {
-    *size == CANVAS_SIZE
+    matches!(size, TextureSize::Scale { scale: FrameArg::Literal(s), of: SizeBase::Canvas } if *s == 1.0)
 }
 
 /// Rounds up, ignoring the error of products like `1000 * 0.1`.
@@ -203,17 +218,26 @@ pub struct SizeEnv<'a> {
     pub resource: &'a dyn Fn(&str) -> Option<Size>,
     /// The device's `maxTextureDimension2D`.
     pub max_dimension: u32,
+    /// The value of a frame program's output, which sizes made of frame values need.
+    pub frame: Option<&'a dyn Fn(&FrameRef) -> f64>,
 }
 
 /// The size in pixels: `max(1, ceil(dimension * scale))`, so every texel is
 /// covered (a 1001-pixel side has 126 blocks of 8), clamped to the device's
 /// limit. A size relative to a resource that isn't known is the canvas'.
 pub fn resolve_size(size: &TextureSize, env: &SizeEnv) -> Size {
+    let arg = |value: &FrameArg| match (value, env.frame) {
+        (FrameArg::Literal(n), _) => *n,
+        (FrameArg::Frame(frame), Some(read)) => read(frame),
+        // Without the program's values a size is unknown: the smallest.
+        (FrameArg::Frame(_), None) => f64::NAN,
+    };
     match size {
         TextureSize::Pixels { width, height } => {
-            Size::new(pixels(*width, env.max_dimension), pixels(*height, env.max_dimension))
+            Size::new(pixels(arg(width), env.max_dimension), pixels(arg(height), env.max_dimension))
         }
         TextureSize::Scale { scale, of } => {
+            let scale = arg(scale);
             let base = match of {
                 SizeBase::Canvas => env.canvas,
                 SizeBase::Resource(id) => (env.resource)(id).unwrap_or(env.canvas),
@@ -230,25 +254,26 @@ pub fn resolve_size(size: &TextureSize, env: &SizeEnv) -> Size {
 mod tests {
     use super::*;
 
-    const ENV: SizeEnv = SizeEnv { canvas: Size::new(1001, 500), resource: &|_| None, max_dimension: 8192 };
+    const ENV: SizeEnv =
+        SizeEnv { canvas: Size::new(1001, 500), resource: &|_| None, max_dimension: 8192, frame: None };
 
     #[test]
     fn scales_round_up() {
-        let half = TextureSize::Scale { scale: 0.5, of: SizeBase::Canvas };
+        let half = TextureSize::Scale { scale: 0.5.into(), of: SizeBase::Canvas };
         assert_eq!(resolve_size(&half, &ENV), Size::new(501, 250));
-        let tenth = TextureSize::Scale { scale: 0.1, of: SizeBase::Canvas };
+        let tenth = TextureSize::Scale { scale: 0.1.into(), of: SizeBase::Canvas };
         assert_eq!(resolve_size(&tenth, &SizeEnv { canvas: Size::new(1000, 10), ..ENV }), Size::new(100, 1));
     }
 
     #[test]
     fn sizes_are_clamped_to_the_device() {
-        let huge = TextureSize::Pixels { width: 100_000.0, height: 0.0 };
+        let huge = TextureSize::Pixels { width: 100_000.0.into(), height: 0.0.into() };
         assert_eq!(resolve_size(&huge, &ENV), Size::new(8192, 1));
     }
 
     #[test]
     fn scales_follow_resources() {
-        let size = TextureSize::Scale { scale: 2.0, of: SizeBase::Resource("a".into()) };
+        let size = TextureSize::Scale { scale: 2.0.into(), of: SizeBase::Resource("a".into()) };
         let env = SizeEnv { resource: &|id| (id == "a").then_some(Size::new(10, 20)), ..ENV };
         assert_eq!(resolve_size(&size, &env), Size::new(20, 40));
     }

@@ -99,9 +99,9 @@ pub fn stored_size(data: &NodeData, handles: &SizeHandles, mode: ItemSizeMode, b
     };
     match mode {
         ItemSizeMode::Pixels => TextureSize::Pixels {
-            width: number(&handles.pixels, 0, DEFAULT_SIZE_PIXELS),
-            height: number(&handles.pixels, 1, DEFAULT_SIZE_PIXELS),
+            width: number(&handles.pixels, 0, DEFAULT_SIZE_PIXELS).into(),
+            height: number(&handles.pixels, 1, DEFAULT_SIZE_PIXELS).into(),
         },
-        ItemSizeMode::Scale => TextureSize::Scale { scale: number(&handles.scale, 0, 1.0), of: base },
+        ItemSizeMode::Scale => TextureSize::Scale { scale: number(&handles.scale, 0, 1.0).into(), of: base },
     }
 }

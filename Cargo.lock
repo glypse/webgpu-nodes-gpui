@@ -5395,8 +5395,10 @@ dependencies = [
  "runtime",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
  "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -6779,6 +6781,7 @@ dependencies = [
  "pollster 0.4.0",
  "runtime",
  "screen",
+ "serde",
  "serde_json",
  "shader-graph",
  "smallvec",

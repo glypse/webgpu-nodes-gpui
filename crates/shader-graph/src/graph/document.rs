@@ -273,6 +273,9 @@ pub struct GraphProject {
     /// ships its own.
     #[serde(serialize_with = "serialize_user_definitions")]
     pub definitions: BTreeMap<String, GraphDocument>,
+    /// The files the project uses; only their metadata is here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<crate::assets::Asset>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -288,6 +291,7 @@ impl Default for GraphProject {
         };
         let mut project = Self {
             definitions: BTreeMap::from([(ROOT_ID.to_owned(), root)]),
+            assets: Vec::new(),
             extra: BTreeMap::new(),
             index: HashMap::new(),
         };
@@ -298,7 +302,7 @@ impl Default for GraphProject {
 
 impl GraphProject {
     pub fn from_definitions(definitions: BTreeMap<String, GraphDocument>) -> Self {
-        let mut project = Self { definitions, extra: BTreeMap::new(), index: HashMap::new() };
+        let mut project = Self { definitions, assets: Vec::new(), extra: BTreeMap::new(), index: HashMap::new() };
         project.reindex();
         project
     }

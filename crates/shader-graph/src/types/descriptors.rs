@@ -233,6 +233,8 @@ pub enum NodeWidget {
     Items,
     /// A colour wheel and value ramp editing the values of a colour group's inputs.
     Color(crate::graph::GroupWidget),
+    /// A choice of the project's assets of a kind, which the node reads.
+    Asset(crate::assets::AssetKind),
 }
 
 /// Shader helper functions nodes may request through `WgslCtx::helper`.
@@ -306,6 +308,7 @@ pub(crate) trait CtxEnv {
     fn texture(&mut self, id: &str) -> String;
     fn texture_format(&self, id: &str) -> TextureFormat;
     fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String;
+    fn asset(&self) -> Option<crate::assets::Asset>;
 }
 
 impl WgslCtx<'_> {
@@ -359,6 +362,11 @@ impl WgslCtx<'_> {
     /// A sampler of the shader filtering and addressing as asked.
     pub fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String {
         self.env.sampler(filter, address)
+    }
+
+    /// The project asset the node reads (`NodeData::asset`), if it exists.
+    pub fn asset(&self) -> Option<crate::assets::Asset> {
+        self.env.asset()
     }
 
     pub fn input_type(&self, id: &str) -> WgslType {

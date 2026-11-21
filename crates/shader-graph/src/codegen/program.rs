@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::literals::UniformValue;
+use crate::frame::FrameRef;
 use crate::passes::{TextureSampleType, TextureSource};
 use crate::types::{SamplerAddress, SamplerFilter, WgslType};
 
@@ -13,6 +14,8 @@ pub const DISPLAY_P3_FIELD: &str = "display_p3";
 pub const SIMULATION_DELTA_FIELD: &str = "simulation_delta";
 /// The struct a fragment drawing several textures returns, a field per colour attachment.
 pub const TARGETS_STRUCT: &str = "RuntimeTargets";
+/// The struct holding the frame values pixel computations read (see `FrameValueUse`).
+pub const FRAME_VALUES_VAR: &str = "runtime_frame_values";
 /// The struct holding the values of uniform inputs.
 pub const UNIFORMS_VAR: &str = "runtime_uniforms";
 /// Per-fragment values readable from any function, unlike `frag()`'s own parameters.
@@ -43,6 +46,15 @@ pub struct UniformBlock {
     pub fields: BTreeMap<String, UniformField>,
 }
 
+/// A frame value a shader reads: the field of its block, and the value of the plan's frame program written there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameValueUse {
+    pub name: String,
+    pub reference: FrameRef,
+    pub scalar: UniformScalar,
+    pub components: u32,
+}
+
 /// A complete WGSL module drawing the graph over a fullscreen triangle, and
 /// the buffers it reads. The fragment entry returns a linear, straight-alpha
 /// colour.
@@ -56,6 +68,10 @@ pub struct ShaderProgram {
     pub frame: UniformBlock,
     /// Fields named after the uniforms the shader reads.
     pub uniforms: UniformBlock,
+    /// Frame values hoisted out of the pixel computation, written by the runtime before each pass.
+    pub frame_values: UniformBlock,
+    /// The value of the plan's frame program each field of `frame_values` is written from.
+    pub frame_value_refs: BTreeMap<String, FrameRef>,
     /// The textures it reads at `@group(0) @binding(binding)`: linear,
     /// straight-alpha float images, or state items' values.
     pub textures: Vec<ProgramTexture>,
@@ -100,6 +116,7 @@ pub struct ProgramParts<'a> {
     pub textures: &'a [TextureBinding],
     pub samplers: &'a [SamplerBinding],
     pub targets: Option<&'a [WgslType]>,
+    pub frame_values: &'a [FrameValueUse],
 }
 
 /// A frame field: its name, scalar type and component count.
@@ -119,8 +136,8 @@ pub const FRAME_FIELDS: [FieldDecl; 6] = [
     FieldDecl { name: SIMULATION_DELTA_FIELD, scalar: UniformScalar::F32, components: 1 },
 ];
 
-/// Textures and samplers are bound after the frame and uniform blocks.
-const FIRST_RESOURCE_BINDING: u32 = 2;
+/// Textures and samplers are bound after the frame, uniform and frame value blocks.
+const FIRST_RESOURCE_BINDING: u32 = 3;
 
 struct Decl {
     name: String,
@@ -192,12 +209,21 @@ pub fn build_program(
     if uniform_decls.is_empty() {
         uniform_decls.push(Decl { name: "unused".to_owned(), scalar: UniformScalar::F32, components: 4 });
     }
+    let mut value_decls: Vec<Decl> = parts
+        .frame_values
+        .iter()
+        .map(|f| Decl { name: f.name.clone(), scalar: f.scalar, components: f.components })
+        .collect();
+    if value_decls.is_empty() {
+        value_decls.push(Decl { name: "unused".to_owned(), scalar: UniformScalar::F32, components: 4 });
+    }
     let frame_decls: Vec<Decl> = FRAME_FIELDS
         .iter()
         .map(|f| Decl { name: f.name.to_owned(), scalar: f.scalar, components: f.components })
         .collect();
     let frame = layout(0, &frame_decls);
     let uniform_block = layout(1, &uniform_decls);
+    let values_block = layout(2, &value_decls);
     let textures: Vec<ProgramTexture> = parts
         .textures
         .iter()
@@ -245,12 +271,14 @@ pub fn build_program(
     let code = format!(
         "{targets_struct}{frame_struct}
 {uniform_struct}
+{values_struct}
 struct RuntimeFragment {{
 	uv: vec2f,
 	position: vec2f,
 }};
 @group(0) @binding({fb}) var<uniform> {FRAME_VAR}: RuntimeFrame;
 @group(0) @binding({ub}) var<uniform> {UNIFORMS_VAR}: RuntimeUniforms;
+@group(0) @binding({vb}) var<uniform> {FRAME_VALUES_VAR}: RuntimeFrameValues;
 {resources}var<private> {FRAGMENT_VAR}: RuntimeFragment;
 
 {fragment}
@@ -277,6 +305,8 @@ fn runtime_fragment_main(in: RuntimeVarying) -> {output} {{
         uniform_struct = struct_source("RuntimeUniforms", &uniform_decls),
         fb = frame.binding,
         ub = uniform_block.binding,
+        vb = values_block.binding,
+        values_struct = struct_source("RuntimeFrameValues", &value_decls),
     );
     ShaderProgram {
         code,
@@ -284,6 +314,8 @@ fn runtime_fragment_main(in: RuntimeVarying) -> {output} {{
         fragment_entry: "runtime_fragment_main".to_owned(),
         frame,
         uniforms: uniform_block,
+        frame_values: values_block,
+        frame_value_refs: parts.frame_values.iter().map(|f| (f.name.clone(), f.reference.clone())).collect(),
         textures,
         samplers,
         targets: parts.targets.map(<[WgslType]>::to_vec),

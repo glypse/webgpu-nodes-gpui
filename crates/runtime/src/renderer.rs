@@ -1,11 +1,13 @@
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context as _, Result};
 use shader_graph::ShaderProgram;
-use shader_graph::codegen::{PLAN_TARGET, PassDecl, RenderPlan, ResourceDecl, SimulationStage};
-use shader_graph::passes::{
-    SizeBase, SizeEnv, TextureFormat, TextureSize, mip_level_count, resolve_size,
+use shader_graph::codegen::{
+    PLAN_TARGET, PassDecl, RenderPlan, ResourceDecl, SimulationStage, UniformValue,
 };
+use shader_graph::frame::{FrameEnv, FrameRef, FrameValues, evaluate_frame};
+use shader_graph::passes::{SizeEnv, TextureFormat, mip_level_count, resolve_size};
 use shader_graph::types::{SamplerAddress, SamplerFilter};
 
 use crate::clock::FrameInputs;
@@ -45,6 +47,7 @@ struct CompiledPass {
     layout: wgpu::BindGroupLayout,
     frame_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
+    frame_values_buffer: wgpu::Buffer,
 }
 
 /// A compiled plan: its passes in order, each drawing textures of its own
@@ -53,6 +56,8 @@ struct CompiledPass {
 pub struct Program {
     passes: Vec<CompiledPass>,
     plan: RenderPlan,
+    /// The values of the uniform inputs, which the frame values read.
+    uniforms: std::sync::Mutex<Vec<(String, UniformValue)>>,
 }
 
 impl Program {
@@ -122,45 +127,95 @@ struct Readback {
     timing: wgpu::Buffer,
 }
 
+/// What a frame is drawn with: its inputs, and the canvas' size.
+#[derive(Clone, Copy)]
+struct FrameContext<'a> {
+    inputs: FrameInputs,
+    canvas: Size,
+    uniforms: &'a [(String, UniformValue)],
+}
+
 /// The sizes of a plan's resources for a canvas, found as asked for: a size
-/// may be relative to another resource's.
+/// may be relative to another resource's, or made of frame values, which may
+/// read the size of a texture an earlier pass made.
 struct Sizes<'a> {
     plan: &'a RenderPlan,
-    canvas: Size,
+    context: FrameContext<'a>,
     max_dimension: u32,
     /// The size of each media resource's image.
     media: HashMap<String, Size>,
-    known: HashMap<String, Size>,
-    resolving: HashSet<String>,
+    known: RefCell<HashMap<String, Size>>,
+    resolving: RefCell<HashSet<String>>,
 }
 
 impl Sizes<'_> {
-    fn get(&mut self, id: &str) -> Size {
-        if let Some(known) = self.known.get(id) {
+    fn canvas(&self) -> Size {
+        self.context.canvas
+    }
+
+    /// The plan's frame values, for a pass of `pass_size`.
+    fn frame_values(&self, pass_size: Size) -> FrameValues {
+        let texture_size = |id: &str| {
+            let size = self.get_known(id)?;
+            let levels = match self.plan.resource(id) {
+                Some(ResourceDecl::Transient { mips: true, .. }) => mip_level_count(size),
+                _ => 1,
+            };
+            Some((size, Some(levels)))
+        };
+        let FrameInputs { time, delta, frame } = self.context.inputs;
+        evaluate_frame(
+            &self.plan.frame,
+            &FrameEnv {
+                time,
+                delta,
+                frame: frame as f64,
+                canvas: self.canvas(),
+                pass_size,
+                iteration: None,
+                texture_size: Some(&texture_size),
+                uniforms: self.context.uniforms,
+            },
+        )
+    }
+
+    /// A resource's size, when it has one.
+    fn get_known(&self, id: &str) -> Option<Size> {
+        self.plan.resource(id).map(|_| self.get(id))
+    }
+
+    fn get(&self, id: &str) -> Size {
+        if let Some(known) = self.known.borrow().get(id) {
             return *known;
         }
+        let canvas = self.canvas();
         let size = match self.plan.resource(id) {
             Some(ResourceDecl::Transient { size, .. } | ResourceDecl::State { size, .. }) => {
                 // A size that depends on itself has nothing to start from.
-                if !self.resolving.insert(id.to_owned()) {
-                    return self.canvas;
+                if !self.resolving.borrow_mut().insert(id.to_owned()) {
+                    return canvas;
                 }
-                let base = match size {
-                    TextureSize::Scale { of: SizeBase::Resource(of), .. } => Some((of.clone(), self.get(of))),
-                    _ => None,
+                let values = OnceCell::new();
+                let frame = |reference: &FrameRef| {
+                    values.get_or_init(|| self.frame_values(canvas)).value(reference).first().copied().unwrap_or(0.0)
                 };
-                self.resolving.remove(id);
-                let env = SizeEnv {
-                    canvas: self.canvas,
-                    resource: &|of| base.as_ref().filter(|(r, _)| r == of).map(|(_, s)| *s),
-                    max_dimension: self.max_dimension,
-                };
-                resolve_size(size, &env)
+                let resource = |of: &str| Some(self.get(of));
+                let resolved = resolve_size(
+                    size,
+                    &SizeEnv {
+                        canvas,
+                        resource: &resource,
+                        max_dimension: self.max_dimension,
+                        frame: Some(&frame),
+                    },
+                );
+                self.resolving.borrow_mut().remove(id);
+                resolved
             }
             Some(ResourceDecl::Media { id, .. }) => self.media.get(id).copied().unwrap_or(Size::new(1, 1)),
             Some(ResourceDecl::Empty { .. }) | None => Size::new(1, 1),
         };
-        self.known.insert(id.to_owned(), size);
+        self.known.borrow_mut().insert(id.to_owned(), size);
         size
     }
 }
@@ -269,7 +324,7 @@ impl Renderer {
                 code: String::new(),
             });
         }
-        Ok(Program { passes, plan: plan.clone() })
+        Ok(Program { passes, plan: plan.clone(), uniforms: std::sync::Mutex::new(plan.uniforms.clone()) })
     }
 
     fn compile_pass(
@@ -313,7 +368,11 @@ impl Renderer {
             },
             count: None,
         };
-        let mut layout_entries = vec![buffer_entry(&source.frame), buffer_entry(&source.uniforms)];
+        let mut layout_entries = vec![
+            buffer_entry(&source.frame),
+            buffer_entry(&source.uniforms),
+            buffer_entry(&source.frame_values),
+        ];
         layout_entries.extend(source.textures.iter().map(|t| wgpu::BindGroupLayoutEntry {
             binding: t.binding,
             visibility,
@@ -372,14 +431,25 @@ impl Renderer {
         };
         let frame_buffer = buffer("frame", &source.frame);
         let uniform_buffer = buffer("uniforms", &source.uniforms);
+        let frame_values_buffer = buffer("frame values", &source.frame_values);
         if let Some(error) = pollster::block_on(scope.pop()) {
             return Err(fail(error.to_string(), None));
         }
-        Ok(CompiledPass { decl: decl.clone(), pipeline, layout, frame_buffer, uniform_buffer })
+        Ok(CompiledPass { decl: decl.clone(), pipeline, layout, frame_buffer, uniform_buffer, frame_values_buffer })
     }
 
     /// Writes the values of a program's uniform blocks, e.g. after an edit that doesn't change its code.
     pub fn set_uniforms(&self, program: &Program, values: &BTreeMap<String, Vec<f64>>) {
+        {
+            let mut held = program.uniforms.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            for (name, value) in values {
+                let value = UniformValue(value.iter().map(|c| *c as f32).collect());
+                match held.iter_mut().find(|(n, _)| n == name) {
+                    Some((_, existing)) => *existing = value,
+                    None => held.push((name.clone(), value)),
+                }
+            }
+        }
         for pass in &program.passes {
             let block = &pass.decl.program.uniforms;
             if block.size == 0 {
@@ -473,33 +543,14 @@ impl Renderer {
         texture
     }
 
-    /// The texture of every resource of `plan` for a frame at `canvas` size,
-    /// by id, and how each simulation steps.
+    /// The texture of every resource of the plan `sizes` is of, by id, and
+    /// how each simulation steps.
     fn resolve_resources(
         &mut self,
-        plan: &RenderPlan,
+        sizes: &Sizes<'_>,
         inputs: FrameInputs,
-        canvas: Size,
     ) -> (HashMap<String, wgpu::Texture>, HashMap<String, Step>) {
-        let media = plan
-            .resources
-            .iter()
-            .filter_map(|r| match r {
-                ResourceDecl::Media { id, asset } => {
-                    let texture = self.media.get(asset)?;
-                    Some((id.clone(), Size::new(texture.width(), texture.height())))
-                }
-                _ => None,
-            })
-            .collect();
-        let mut sizes = Sizes {
-            plan,
-            canvas,
-            max_dimension: self.device.limits().max_texture_dimension_2d,
-            media,
-            known: HashMap::new(),
-            resolving: HashSet::new(),
-        };
+        let plan = sizes.plan;
         // State is sized like any other texture, so it's kept once sizes can be resolved.
         let steps = self.simulation.advance(&self.device, plan, inputs, &mut |id| sizes.get(id));
         let mut textures = HashMap::new();
@@ -529,7 +580,28 @@ impl Renderer {
         target: &wgpu::Texture,
     ) {
         let canvas = Size::new(target.width(), target.height());
-        let (textures, steps) = self.resolve_resources(&program.plan, inputs, canvas);
+        let uniforms = program.uniforms.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let media = program
+            .plan
+            .resources
+            .iter()
+            .filter_map(|r| match r {
+                ResourceDecl::Media { id, asset, .. } => {
+                    let texture = self.media.get(asset)?;
+                    Some((id.clone(), Size::new(texture.width(), texture.height())))
+                }
+                _ => None,
+            })
+            .collect();
+        let sizes = Sizes {
+            plan: &program.plan,
+            context: FrameContext { inputs, canvas, uniforms: &uniforms },
+            max_dimension: self.device.limits().max_texture_dimension_2d,
+            media,
+            known: RefCell::default(),
+            resolving: RefCell::default(),
+        };
+        let (textures, steps) = self.resolve_resources(&sizes, inputs);
         // A simulation's start only draws on the frames it starts.
         let drawn: Vec<&CompiledPass> = program
             .passes
@@ -556,6 +628,7 @@ impl Renderer {
                 .and_then(|s| steps.get(&s.id))
                 .map_or(0.0, |s| s.delta);
             self.write_frame_block(pass, inputs, first, delta);
+            self.write_frame_values(pass, &sizes, first);
             let views: Vec<wgpu::TextureView> = targets
                 .iter()
                 .map(|t| {
@@ -586,6 +659,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: program_source.uniforms.binding,
                     resource: pass.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: program_source.frame_values.binding,
+                    resource: pass.frame_values_buffer.as_entire_binding(),
                 },
             ];
             entries.extend(program_source.textures.iter().zip(&read_views).map(|(t, view)| {
@@ -640,6 +717,24 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// Writes the frame values a pass's program reads, computed for its size.
+    fn write_frame_values(&self, pass: &CompiledPass, sizes: &Sizes<'_>, first: Option<&wgpu::Texture>) {
+        let program = &pass.decl.program;
+        if program.frame_value_refs.is_empty() {
+            return;
+        }
+        let (width, height) = first.map_or((0, 0), |t| (t.width(), t.height()));
+        let computed = sizes.frame_values(Size::new(width, height));
+        let values: BTreeMap<String, Vec<f64>> = program
+            .frame_value_refs
+            .iter()
+            .map(|(name, reference)| (name.clone(), computed.value(reference)))
+            .collect();
+        let mut bytes = vec![0u8; program.frame_values.size as usize];
+        pack_block(&program.frame_values, &values, &mut bytes);
+        self.queue.write_buffer(&pass.frame_values_buffer, 0, &bytes);
     }
 
     fn write_frame_block(
@@ -861,6 +956,8 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
                 ]),
             },
             uniforms: UniformBlock { binding: 1, size: 0, fields: BTreeMap::new() },
+            frame_values: UniformBlock { binding: 2, size: 0, fields: BTreeMap::new() },
+            frame_value_refs: BTreeMap::new(),
             textures: Vec::new(),
             samplers: Vec::new(),
             targets: None,
@@ -876,6 +973,7 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
                 simulation: None,
             }],
             uniforms: Vec::new(),
+            frame: Default::default(),
         }
     }
 

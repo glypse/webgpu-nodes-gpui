@@ -70,7 +70,7 @@ fn a_texture_linked_to_a_value_is_sampled_at_the_pixel() {
     let out = g.output();
     g.link((&texture, &item), (&out, "color"));
     assert_eq!(analysis_link(&g, &texture, &out), Some(TextureLink::Sample));
-    let plan = g.program().plan;
+    let plan = g.literal_program().plan;
     assert_eq!(plan.passes.len(), 2);
     // The pass made for the canvas' size is read exactly, at the pixel.
     assert!(plan.passes[1].program.code.contains("textureLoad(runtime_texture_0, vec2i(runtime_fragment.position), 0)"));
@@ -244,12 +244,12 @@ fn a_state_item_takes_the_format_and_size_it_is_given() {
     g.model.update_node_data(&input.id, |d| {
         d.values.insert(format!("pixels:{item}"), InputValue::vector(&[64.0, 32.0]));
     });
-    let plan = g.program().plan;
+    let plan = g.literal_program().plan;
     let state = plan.resources.iter().find_map(|r| match r {
         ResourceDecl::State { format, size, .. } => Some((*format, size.clone())),
         _ => None,
     });
-    assert_eq!(state, Some((TextureFormat::Rg16Float, TextureSize::Pixels { width: 64.0, height: 32.0 })));
+    assert_eq!(state, Some((TextureFormat::Rg16Float, TextureSize::Pixels { width: 64.0.into(), height: 32.0.into() })));
     assert_eq!(plan.passes[0].program.targets.as_deref(), Some(&[WgslType::Vec4f][..]));
 
     g.model.set_zone_item_size(&sim, &item, None);
@@ -398,12 +398,12 @@ fn a_render_textures_scale_follows_the_texture_it_is_like() {
     g.link((&base, &base_item), (&scaled, "like"));
     let sample = sample_into_output(&mut g, (&scaled, &item));
     let _ = sample;
-    let plan = g.program().plan;
+    let plan = g.literal_program().plan;
     let size = plan.resources.iter().find_map(|r| match r {
         ResourceDecl::Transient { id, size, .. } if *id == format!("render:{scaled}:{item}") => Some(size.clone()),
         _ => None,
     });
-    assert_eq!(size, Some(TextureSize::Scale { scale: 0.5, of: SizeBase::Resource(format!("render:{base}:{base_item}")) }));
+    assert_eq!(size, Some(TextureSize::Scale { scale: 0.5.into(), of: SizeBase::Resource(format!("render:{base}:{base_item}")) }));
     assert!(plan.resource(&format!("render:{base}:{base_item}")).is_some(), "the texture it is like is in the plan");
     validate_all(&g);
 }

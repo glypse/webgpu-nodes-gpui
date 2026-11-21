@@ -3,13 +3,17 @@
 //! drawing the frame.
 
 use std::collections::{BTreeMap, HashSet};
+use std::rc::Rc;
 use std::ops::Range;
 
 use super::generate::{CodegenError, CodegenGraph, ShaderOptions, generate_shader_with};
 use super::literals::UniformValue;
 use super::program::{ProgramParts, ShaderProgram, build_program};
 use super::target::{RenderTextureTarget, ShaderTarget, SimulationStage, SimulationTarget};
+use crate::assets::VideoPlayback;
+use crate::frame::{FrameCompiler, FrameCompilerOptions, FrameProgram};
 use crate::passes::{
+    FrameArg,
     CANVAS_SIZE, SimulationRef, StateItem, StateRead, TextureFormat, TextureSize, TextureSource,
     TextureSources, attachment_groups, state_read_id, state_source,
 };
@@ -28,8 +32,9 @@ pub enum ResourceDecl {
         /// Whether it has a full chain of mip levels, made after its pass.
         mips: bool,
     },
-    /// A project asset's image, which the runtime is given.
-    Media { id: String, asset: String },
+    /// A project asset's image, which the runtime is given; a video's frame at
+    /// the project's time or, with `time`, at that project time instead.
+    Media { id: String, asset: String, video: Option<VideoPlayback>, time: Option<FrameArg> },
     /// A simulation's state item, as of the previous frame or this one: one of
     /// the two textures keeping it (`texture`), which swap roles as frames go
     /// by. The simulation starts over when the size they resolve to changes.
@@ -88,6 +93,8 @@ pub struct RenderPlan {
     pub passes: Vec<PassDecl>,
     /// The uniform values of every pass: each program's block holds those it reads.
     pub uniforms: Vec<(String, UniformValue)>,
+    /// The frame values the passes' programs read, computed on the CPU for each pass.
+    pub frame: FrameProgram,
 }
 
 impl RenderPlan {
@@ -114,7 +121,12 @@ fn resource_of(source: &TextureSource) -> ResourceDecl {
             format: *format,
             mips: *mips,
         },
-        TextureSource::Media { id, asset } => ResourceDecl::Media { id: id.clone(), asset: asset.clone() },
+        TextureSource::Media { id, asset, video, time } => ResourceDecl::Media {
+            id: id.clone(),
+            asset: asset.clone(),
+            video: *video,
+            time: time.clone(),
+        },
         TextureSource::State { id, texture, read, format, size, simulation } => ResourceDecl::State {
             id: id.clone(),
             texture: texture.clone(),
@@ -131,6 +143,7 @@ struct PlanBuilder<'a, 'g> {
     graph: CodegenGraph<'g>,
     options: &'a ShaderOptions,
     sources: &'a TextureSources<'g>,
+    frame: &'a FrameCompiler<'g>,
     passes: Vec<PassDecl>,
     resources: Vec<ResourceDecl>,
     uniforms: Vec<(String, UniformValue)>,
@@ -222,6 +235,7 @@ impl PlanBuilder<'_, '_> {
             self.sources,
             target.as_ref(),
             &target_size.unwrap_or(CANVAS_SIZE),
+            self.options.hoist_frame_values.then_some(self.frame),
         );
         let generated = match generated {
             Ok(generated) => generated,
@@ -247,6 +261,7 @@ impl PlanBuilder<'_, '_> {
                 textures: &generated.textures,
                 samplers: &generated.samplers,
                 targets: generated.targets.as_deref(),
+                frame_values: &generated.frame_values,
             },
         );
         let simulation = simulation.or_else(|| generated.simulation.map(|id| PassSimulation { id, stage: None }));
@@ -291,11 +306,17 @@ pub fn generate_render_plan(
     graph: CodegenGraph<'_>,
     options: &ShaderOptions,
 ) -> Result<RenderPlan, CodegenError> {
-    let sources = TextureSources::new(graph);
+    let sources = Rc::new(TextureSources::new(graph));
+    let frame = FrameCompiler::new(
+        graph,
+        sources.clone(),
+        FrameCompilerOptions { uniform_scopes: options.uniform_scopes.clone(), texture_size: true },
+    );
     let mut builder = PlanBuilder {
         graph,
         options,
         sources: &sources,
+        frame: &frame,
         passes: Vec::new(),
         resources: Vec::new(),
         uniforms: Vec::new(),
@@ -306,5 +327,22 @@ pub fn generate_render_plan(
     if let Some(error) = builder.error {
         return Err(error);
     }
-    Ok(RenderPlan { resources: builder.resources, passes: builder.passes, uniforms: builder.uniforms })
+    // Frame values may read the size of a texture no pass reads.
+    for source in frame.sized_textures() {
+        if builder.resources.iter().all(|r| r.id() != source.id()) {
+            builder.resources.push(resource_of(&source));
+        }
+    }
+    for (name, value) in frame.uniforms() {
+        match builder.uniforms.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, existing)) => *existing = value,
+            None => builder.uniforms.push((name, value)),
+        }
+    }
+    Ok(RenderPlan {
+        resources: builder.resources,
+        passes: builder.passes,
+        uniforms: builder.uniforms,
+        frame: frame.program(),
+    })
 }

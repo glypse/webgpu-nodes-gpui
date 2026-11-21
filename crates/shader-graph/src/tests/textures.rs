@@ -17,7 +17,7 @@ fn texture_of(g: &mut TestGraph, format: TextureFormat, scale: f64) -> (String, 
 }
 
 fn frame_code(g: &TestGraph) -> String {
-    let plan = g.program().plan;
+    let plan = g.literal_program().plan;
     for pass in &plan.passes {
         validate_wgsl(&pass.program.code);
     }

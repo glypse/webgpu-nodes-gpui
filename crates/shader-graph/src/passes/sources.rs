@@ -11,7 +11,8 @@ use super::simulation::{
     Attachment, SimulationRef, SimulationState, StateItem, StateRead, attachment_groups, state_format,
     state_read_id, state_texture_id,
 };
-use super::textures::{CANVAS_SIZE, SizeBase, TextureFormat, TextureSize};
+use super::textures::{CANVAS_SIZE, FrameArg, SizeBase, TextureFormat, TextureSize};
+use crate::assets::{DEFAULT_PLAYBACK, VideoEnd, VideoPlayback};
 use crate::codegen::CodegenGraph;
 use crate::enums::{EnumDocument, MATCH, case_handle, group_constants};
 use crate::graph::{GraphDocument, GraphEdge, GraphNode, NODE_GROUP};
@@ -32,8 +33,6 @@ pub const IMPLICIT_RENDER_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 /// The id of the texture an unlinked Texture input reads: transparent black.
 pub const EMPTY_TEXTURE: &str = "empty";
 
-/// The node types reading a project's asset (`NodeData.extra["asset"]`).
-pub const IMAGE: &str = "image";
 
 /// An output of a node of the document computed at `path` (see `TextureSources::instance`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -52,9 +51,27 @@ fn path_key<'a>(parts: impl IntoIterator<Item = &'a String>) -> String {
     parts.into_iter().cloned().collect::<Vec<_>>().join("/")
 }
 
-/// The id of the texture an asset gives.
-pub fn media_texture_id(asset: &str) -> String {
-    format!("media:{asset}")
+/// The id of the texture an asset gives, played as `video` says when it's a
+/// video: one per Video node (`owner`), as each shows a time of its own.
+pub fn media_texture_id(asset: &str, video: Option<&VideoPlayback>, owner: &str) -> String {
+    match video {
+        Some(v) => format!("media:{asset}:{owner}:{}:{}:{}", v.start, v.speed, end_id(v.end)),
+        None => format!("media:{asset}"),
+    }
+}
+
+fn end_id(end: VideoEnd) -> &'static str {
+    match end {
+        VideoEnd::Loop => "loop",
+        VideoEnd::Hold => "hold",
+        VideoEnd::Transparent => "transparent",
+    }
+}
+
+/// Compiles the frame values sizes are made of. Sources have none until a
+/// plan gives them one: sizes then are the node's stored numbers.
+pub trait FrameSizing {
+    fn input_arg(&self, path: &[String], node: &str, input: &str, component: usize) -> Option<FrameArg>;
 }
 
 /// An item of a Render Texture node, as it's typed and kept.
@@ -101,8 +118,9 @@ pub struct RenderDraw {
 /// it: sockets reading the same image have the same id.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextureSource {
-    /// An asset's file, which the runtime is given.
-    Media { id: String, asset: String },
+    /// An asset's file, which the runtime is given; a video's frame at the
+    /// project's time or, with `time`, at that project time instead.
+    Media { id: String, asset: String, video: Option<VideoPlayback>, time: Option<FrameArg> },
     /// A value rendered over a texture of `size` and `format`, in a pass of its own.
     Render {
         id: String,
@@ -154,6 +172,7 @@ impl TextureSource {
 
 /// What a Texture socket reads: an image, or nothing it can read, and why.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum TextureResolution {
     Source(TextureSource),
     Invalid {
@@ -213,6 +232,8 @@ pub struct TextureSources<'g> {
     simulations: RefCell<HashMap<String, Option<Rc<SimulationState>>>>,
     building: RefCell<HashSet<String>>,
     zone_state: RefCell<HashMap<String, bool>>,
+    /// Where the sizes of Render Textures' textures read their frame values.
+    sizing: RefCell<Option<std::rc::Weak<dyn FrameSizing + 'g>>>,
 }
 
 impl<'g> TextureSources<'g> {
@@ -225,6 +246,43 @@ impl<'g> TextureSources<'g> {
             simulations: RefCell::default(),
             building: RefCell::default(),
             zone_state: RefCell::default(),
+            sizing: RefCell::default(),
+        }
+    }
+
+    pub fn set_sizing(&self, sizing: std::rc::Weak<dyn FrameSizing + 'g>) {
+        *self.sizing.borrow_mut() = Some(sizing);
+    }
+
+    fn sizing(&self) -> Option<Rc<dyn FrameSizing + 'g>> {
+        self.sizing.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+    }
+
+    /// The size the size inputs `handles` of a node give, in `mode`: the
+    /// stored numbers, or the frame values linked to them once a frame
+    /// compiler is sizing.
+    fn size_of(
+        &self,
+        path: &[String],
+        node: &GraphNode,
+        handles: &SizeHandles,
+        mode: ItemSizeMode,
+        like: Option<&TextureSource>,
+    ) -> TextureSize {
+        let base = like.map_or(SizeBase::Canvas, |l| SizeBase::Resource(l.id()));
+        let stored = stored_size(&node.data, handles, mode, base);
+        let Some(sizing) = self.sizing() else { return stored };
+        let arg = |input: &str, component: usize, fallback: FrameArg| {
+            sizing.input_arg(path, &node.id, input, component).unwrap_or(fallback)
+        };
+        match stored {
+            TextureSize::Pixels { width, height } => TextureSize::Pixels {
+                width: arg(&handles.pixels, 0, width),
+                height: arg(&handles.pixels, 1, height),
+            },
+            TextureSize::Scale { scale, of } => {
+                TextureSize::Scale { scale: arg(&handles.scale, 0, scale), of }
+            }
         }
     }
 
@@ -342,7 +400,7 @@ impl<'g> TextureSources<'g> {
         let Some(node) = instance.doc.node(node_id) else { return EMPTY };
         let project = self.graph.project;
         match node.node_type.as_str() {
-            IMAGE => self.media(node),
+            crate::nodes::IMAGE | crate::nodes::VIDEO => self.media(path, node),
             SIMULATION_INPUT => self.state(path, &instance, node_id, handle, StateRead::Previous),
             SIMULATION_OUTPUT => self.state(path, &instance, node_id, handle, StateRead::Current),
             "reroute" => self.input(path, node_id, "in"),
@@ -414,7 +472,7 @@ impl<'g> TextureSources<'g> {
         let like = self.like_of(path, instance, node, first);
         let mode =
             if renders_in_pixels(&node.data) { ItemSizeMode::Pixels } else { ItemSizeMode::Scale };
-        let size = size_of(node, &node_size_handles(), mode, like.as_ref());
+        let size = self.size_of(path, node, &node_size_handles(), mode, like.as_ref());
         let target = SocketRef { path: path.to_vec(), node: node.id.clone(), handle: handle.to_owned() };
         TextureResolution::Source(TextureSource::Render {
             id: render_texture_id(&target),
@@ -546,7 +604,7 @@ impl<'g> TextureSources<'g> {
         let like = (mode == ItemSizeMode::Scale)
             .then(|| self.linked_texture(path, instance, &input.id, &handles.like))
             .flatten();
-        (size_of(input, &handles, mode, like.as_ref()), like)
+        (self.size_of(path, input, &handles, mode, like.as_ref()), like)
     }
 
     /// A state item of the simulation computed at `path` that a boundary node gives.
@@ -564,13 +622,34 @@ impl<'g> TextureSources<'g> {
         TextureResolution::Source(state_source(&state.reference, item, read))
     }
 
-    fn media(&self, node: &GraphNode) -> TextureResolution {
-        let asset = node.data.extra.get("asset").and_then(|a| a.as_str());
-        asset.map_or(EMPTY, |asset| {
-            TextureResolution::Source(TextureSource::Media {
-                id: media_texture_id(asset),
+    fn media(&self, path: &[String], node: &GraphNode) -> TextureResolution {
+        let Some(asset) = node
+            .data
+            .asset
+            .as_deref()
+            .filter(|id| self.graph.project.assets.iter().any(|a| a.id() == *id))
+        else {
+            return EMPTY;
+        };
+        if !node.is(crate::nodes::VIDEO) {
+            return TextureResolution::Source(TextureSource::Media {
+                id: media_texture_id(asset, None, ""),
                 asset: asset.to_owned(),
-            })
+                video: None,
+                time: None,
+            });
+        }
+        let video = node.data.playback.unwrap_or(DEFAULT_PLAYBACK);
+        let owner = path.iter().map(String::as_str).chain([node.id.as_str()]).collect::<Vec<_>>().join("/");
+        // A time that isn't a frame value can't be read: the link is invalid.
+        let time = self
+            .feed(path, &node.id, crate::nodes::VIDEO_TIME)
+            .and_then(|_| self.sizing()?.input_arg(path, &node.id, crate::nodes::VIDEO_TIME, 0));
+        TextureResolution::Source(TextureSource::Media {
+            id: media_texture_id(asset, Some(&video), &owner),
+            asset: asset.to_owned(),
+            video: Some(video),
+            time,
         })
     }
 
@@ -692,12 +771,6 @@ impl<'g> TextureSources<'g> {
         self.resolved.borrow_mut().insert(key, result.clone());
         result
     }
-}
-
-/// The size the size inputs `handles` of a node give, in `mode`: the stored numbers.
-fn size_of(node: &GraphNode, handles: &SizeHandles, mode: ItemSizeMode, like: Option<&TextureSource>) -> TextureSize {
-    let base = like.map_or(SizeBase::Canvas, |l| SizeBase::Resource(l.id()));
-    stored_size(&node.data, handles, mode, base)
 }
 
 /// `resolution` reached through `edge`: an invalid one found right past it is shown on it.

@@ -397,6 +397,12 @@ pub struct NodeData {
     /// A Color Ramp's stops; their colours are its inputs' values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ramp: Option<Vec<crate::ramp::RampStop>>,
+    /// The project asset an Image or Video node reads, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+    /// How a Video node plays its asset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback: Option<crate::assets::VideoPlayback>,
     /// Only the node's linked sockets are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hide_unlinked: Option<bool>,
@@ -434,6 +440,8 @@ impl NodeData {
         data.sockets = own.sockets.or(data.sockets);
         data.hide_links = own.hide_links.or(data.hide_links);
         data.hide_unlinked = own.hide_unlinked.or(data.hide_unlinked);
+        data.asset = own.asset.or(data.asset);
+        data.playback = own.playback.or(data.playback);
         data.curve = own.curve.or(data.curve);
         data.ramp = own.ramp.or(data.ramp);
         data.values.extend(own.values);

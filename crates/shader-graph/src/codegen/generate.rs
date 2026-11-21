@@ -12,23 +12,24 @@ use super::literals::{
     UniformValue, format_wgsl_literal, ident_suffix, uniform_name, uniform_value,
 };
 use super::program::{
-    FRAGMENT_VAR, FRAME_VAR, SIMULATION_DELTA_FIELD, SamplerBinding, TextureBinding, UNIFORMS_VAR,
+    FRAGMENT_VAR, FRAME_VALUES_VAR, FRAME_VAR, FrameValueUse, UniformScalar, SIMULATION_DELTA_FIELD, SamplerBinding, TextureBinding, UNIFORMS_VAR,
 };
 use super::target::{Probe, ProbeKind, ShaderTarget, SimulationStage};
 use super::texture_read::{ReadEnv, ReadOptions, read_texture, texel_as_color};
 use crate::enums::{EnumDocument, group_constants};
+use crate::frame::{FrameCompiler, frame_value_field};
 use crate::graph::{
     FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GraphProject,
     NODE_GROUP, REROUTE, ROOT_ID,
 };
 use crate::nodes::{RENDER_TEXTURE, SAMPLE_TEXTURE, TEXTURE_SIZE, resolve_descriptor, texture_coordinates};
 use crate::passes::{
-    CANVAS_SIZE, IMAGE, SimulationRef, SimulationState, StateItem, StateRead, TextureFormat,
+    CANVAS_SIZE, SimulationRef, SimulationState, StateItem, StateRead, TextureFormat,
     TextureSize, TextureSource, TextureSources, pack_state, same_size, state_source, unpack_state,
 };
 use crate::types::{
     CtxEnv, GroupHandleDef, HelperName, InputValue, NodeDescriptor, ResolvedNodeTypes,
-    SamplerAddress, SamplerFilter, TypeBindings, TypeResolver, WgslType, ZoneItem, bound_type,
+    SamplerAddress, SamplerFilter, ScalarKind, TypeBindings, TypeResolver, WgslType, ZoneItem, bound_type,
     complete_bindings, convert_var, input_control, make_type, unavailable_edges,
 };
 use crate::zones::{
@@ -58,6 +59,9 @@ pub struct ShaderOptions {
     /// are read from uniforms rather than written into the shader: editing
     /// them then only changes the uniforms. Values of other documents stay literals.
     pub uniform_scopes: Vec<String>,
+    /// Read the root document's frame values from a block the runtime writes
+    /// (computed on the CPU, once a frame) instead of computing them per pixel.
+    pub hoist_frame_values: bool,
 }
 
 /// A generated fragment (defining `frag`) and the uniform values it reads.
@@ -75,6 +79,8 @@ pub struct ShaderSource {
     pub targets: Option<Vec<WgslType>>,
     /// The simulation it computes something of (by `SimulationRef::id`), if any.
     pub simulation: Option<String>,
+    /// The frame values it reads from the frame values block.
+    pub frame_values: Vec<FrameValueUse>,
 }
 
 // ── Graph walking ────────────────────────────────────────────────────────────
@@ -224,8 +230,19 @@ struct GroupDecl {
     param_types: BTreeMap<String, WgslType>,
 }
 
+/// An output of a node read from a field of the frame values block.
+struct HoistedValue {
+    field: String,
+    storage: WgslType,
+    ty: WgslType,
+}
+
 struct ShaderState<'s, 'g> {
     graph: CodegenGraph<'g>,
+    /// Compiles the frame values hoisted out of the shader, when the plan evaluates them.
+    frame: Option<&'s FrameCompiler<'g>>,
+    /// The frame values the shader reads, by field name.
+    frame_values: Vec<FrameValueUse>,
     helpers: HelperRegistry,
     sources: &'s TextureSources<'g>,
     target_size: TextureSize,
@@ -364,6 +381,8 @@ struct BodyEmitter {
     read_handles: HashMap<String, BTreeSet<String>>,
     /// The values a simulation target gives, once its zone is emitted.
     simulation_fields: Vec<String>,
+    /// The frame values read from the frame block rather than computed, by node id.
+    hoisted: HashMap<String, BTreeMap<String, HoistedValue>>,
 }
 
 struct ZoneNames {
@@ -613,6 +632,19 @@ impl BodyEmitter {
 
     fn emit_node(&mut self, state: &mut ShaderState, node: &GraphNode, indent: &str) {
         let project = state.graph.project;
+        if let Some(hoisted) = self.hoisted.get(&node.id) {
+            let var = var_name(&node.id);
+            let multiple = resolve_descriptor(node, project).outputs.len() > 1;
+            let lines = hoisted
+                .iter()
+                .map(|(handle, HoistedValue { field, storage, ty })| {
+                    let name = if multiple { format!("{var}_{}", ident_suffix(handle)) } else { var.clone() };
+                    format!("let {name} = {};", convert_var(&format!("{FRAME_VALUES_VAR}.{field}"), *storage, *ty))
+                })
+                .collect();
+            self.push(&node.id, lines, indent);
+            return;
+        }
         let resolved = state.graph.resolver.resolve(project, node, &self.bindings);
         // A node only textures are read from computes nothing: they're read where they're used.
         let read = self.read_handles.get(&node.id);
@@ -1041,6 +1073,11 @@ impl CtxEnv for NodeEnv<'_, '_, '_> {
         self.em.texture_source_of(self.state, self.node, &self.resolved, id).format()
     }
 
+    fn asset(&self) -> Option<crate::assets::Asset> {
+        let id = self.node.data.asset.as_deref()?;
+        self.state.graph.project.assets.iter().find(|a| a.id() == id).cloned()
+    }
+
     fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String {
         self.state.sampler_var(filter, address)
     }
@@ -1054,6 +1091,87 @@ fn input_type_in(
 ) -> Option<WgslType> {
     let ty = state.graph.resolver.resolve(state.graph.project, node, bindings).input_type(input)?;
     (!ty.is_texture()).then_some(ty)
+}
+
+/// The frame values of the root document pixel computations read, to be read
+/// from the frame block: the outputs of nodes outside zones that are frame
+/// values depending on something the runtime knows (not only literals) and
+/// that something computed per pixel reads. A node whose values are all read
+/// only by other frame values stays inside the frame program. Groups' bodies
+/// are shared by their instances, so their values aren't hoisted.
+#[allow(clippy::too_many_arguments)]
+fn hoist_frame_values(
+    state: &mut ShaderState,
+    path: &[String],
+    doc: &GraphDocument,
+    zones: &ZoneAnalysis,
+    edges: &[GraphEdge],
+    reachable: &HashSet<String>,
+    bindings: &TypeBindings,
+    seeds: &HashSet<String>,
+) -> HashMap<String, BTreeMap<String, HoistedValue>> {
+    let mut hoisted = HashMap::new();
+    let Some(frame) = state.frame.filter(|_| path.is_empty()) else { return hoisted };
+    let project = state.graph.project;
+    let mut read: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+    for e in edges {
+        read.entry(&e.source).or_default().insert(&e.source_handle);
+    }
+    // The nodes computed on the CPU, whatever reads them.
+    let mut on_cpu: Vec<&GraphNode> = Vec::new();
+    for node in doc.nodes.iter().filter(|n| reachable.contains(&n.id)) {
+        let Some(handles) = read.get(node.id.as_str()) else { continue };
+        if seeds.contains(&node.id) || zones.node_zone.get(&node.id).is_some_and(Option::is_some) {
+            continue;
+        }
+        if resolve_descriptor(node, project).cpu.is_none() {
+            continue;
+        }
+        if handles.iter().all(|h| frame.analysis.is_frame_value(path, &node.id, h)) {
+            on_cpu.push(node);
+        }
+    }
+    let cpu_ids: HashSet<&str> = on_cpu.iter().map(|n| n.id.as_str()).collect();
+    for node in on_cpu {
+        if !edges.iter().any(|e| e.source == node.id && !cpu_ids.contains(e.target.as_str())) {
+            continue;
+        }
+        let types = state.graph.resolver.resolve(project, node, bindings);
+        let handles = &read[node.id.as_str()];
+        let mut values = BTreeMap::new();
+        let mut uses = Vec::new();
+        for handle in handles {
+            let Some(reference) = frame.hoist(path, &node.id, handle) else { break };
+            let Some(output) = types.resolved_outputs.iter().find(|o| o.id == *handle) else { break };
+            if output.ty.is_texture() {
+                break;
+            }
+            let ty = output.ty;
+            let (scalar, kind) = match ty.kind() {
+                ScalarKind::F32 => (UniformScalar::F32, ScalarKind::F32),
+                ScalarKind::I32 => (UniformScalar::I32, ScalarKind::I32),
+                ScalarKind::U32 | ScalarKind::Bool => (UniformScalar::U32, ScalarKind::U32),
+            };
+            let name = frame_value_field(&node.id, handle);
+            values.insert(
+                (*handle).to_owned(),
+                HoistedValue { field: name.clone(), storage: make_type(kind, ty.components()), ty },
+            );
+            uses.push(FrameValueUse { name, reference, scalar, components: ty.components() as u32 });
+        }
+        // All of a node's values are hoisted or none, as what feeds it is dropped.
+        if values.len() != handles.len() {
+            continue;
+        }
+        hoisted.insert(node.id.clone(), values);
+        for used in uses {
+            match state.frame_values.iter_mut().find(|u| u.name == used.name) {
+                Some(existing) => *existing = used,
+                None => state.frame_values.push(used),
+            }
+        }
+    }
+    hoisted
 }
 
 /// Emit the nodes of a document needed to compute the `seed_type` nodes
@@ -1208,7 +1326,14 @@ fn emit_document_body(
             Some(SimulationMode::Opaque | SimulationMode::Start)
         )
     };
-    let needed = needed_edges(&doc.nodes, &used, seed_type, &seeds, &viewed, &computes);
+    let mut needed = needed_edges(&doc.nodes, &used, seed_type, &seeds, &viewed, &computes);
+    let hoisted =
+        hoist_frame_values(state, path, doc, &zones, &needed.edges, &needed.reachable, bindings, &seeds);
+    // What only a hoisted value read is no longer needed.
+    if !hoisted.is_empty() {
+        let pruned: Vec<GraphEdge> = used.iter().filter(|e| !hoisted.contains_key(&e.target)).cloned().collect();
+        needed = needed_edges(&doc.nodes, &pruned, seed_type, &seeds, &viewed, &computes);
+    }
     let mut incoming: HashMap<String, Vec<GraphEdge>> = HashMap::new();
     let mut read_handles: HashMap<String, BTreeSet<String>> = HashMap::new();
     for e in &needed.edges {
@@ -1236,6 +1361,7 @@ fn emit_document_body(
         simulations,
         read_handles,
         simulation_fields: Vec::new(),
+        hoisted,
     };
     for zone in emitter.zones.zones.values().filter(|z| z.kind == ZoneKind::Simulation).cloned().collect::<Vec<_>>() {
         let items = zone_items(emitter.node(&zone.output_id)).len();
@@ -1252,8 +1378,8 @@ fn emit_document_body(
 }
 
 /// Node types reading or giving textures of their own: a simulation's keep its state.
-const TEXTURE_NODE_TYPES: [&str; 5] =
-    [IMAGE, SAMPLE_TEXTURE, TEXTURE_SIZE, SIMULATION_INPUT, SIMULATION_OUTPUT];
+const TEXTURE_NODE_TYPES: [&str; 6] =
+    [crate::nodes::IMAGE, crate::nodes::VIDEO, SAMPLE_TEXTURE, TEXTURE_SIZE, SIMULATION_INPUT, SIMULATION_OUTPUT];
 
 /// Whether a definition reads textures: itself, through its sockets or the groups it nests.
 fn reads_textures(state: &mut ShaderState, definition_ref: &str) -> bool {
@@ -1515,23 +1641,29 @@ pub fn generate_shader(
     options: &ShaderOptions,
 ) -> Result<ShaderSource, CodegenError> {
     let sources = TextureSources::new(graph);
-    generate_shader_with(graph, options, &sources, None, &CANVAS_SIZE)
+    generate_shader_with(graph, options, &sources, None, &CANVAS_SIZE, None)
 }
 
 /// Emit the WGSL fragment shader source drawing `target`: a colour for a
 /// socket, or, for the texels of a simulation's items or a Render Texture's,
 /// a `RuntimeTargets` struct of them (`ShaderSource::targets` their types).
 /// The fragment output by default. The shaders of one graph state share its
-/// `sources`; `target_size` is the size of what they draw into.
+/// `sources`; `target_size` is the size of what they draw into. With a
+/// `frame` compiler, the root document's frame values are hoisted out of the
+/// pixel computation, read from a block the runtime writes (`FrameValueUse`)
+/// from the values of the compiler's program; without it, computed per pixel.
 pub fn generate_shader_with<'g>(
     graph: CodegenGraph<'g>,
     options: &ShaderOptions,
     sources: &TextureSources<'g>,
     target: Option<&ShaderTarget>,
     target_size: &TextureSize,
+    frame: Option<&FrameCompiler<'g>>,
 ) -> Result<ShaderSource, CodegenError> {
     let mut state = ShaderState {
         graph,
+        frame,
+        frame_values: Vec::new(),
         helpers: HelperRegistry::default(),
         sources,
         target_size: target_size.clone(),
@@ -1623,6 +1755,7 @@ pub fn generate_shader_with<'g>(
         samplers: state.samplers,
         targets,
         simulation: state.simulation,
+        frame_values: state.frame_values,
     })
 }
 
