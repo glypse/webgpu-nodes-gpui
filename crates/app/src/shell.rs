@@ -17,7 +17,7 @@ use theme::{ActiveTheme as _, IconName};
 
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
-use crate::layout;
+use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences;
 use crate::settings::{SettingsDialog, SettingsEvent};
@@ -107,6 +107,11 @@ struct AreaViews {
     previews: HashMap<AreaId, (Entity<PreviewArea>, Entity<PreviewToolbar>)>,
     timelines: HashMap<AreaId, Entity<TimelineBar>>,
     code: HashMap<AreaId, Entity<CodeView>>,
+    graphs: HashMap<AreaId, Entity<Editor>>,
+    /// Where the graph areas of a loaded layout were, until their editors are made.
+    pending: HashMap<AreaId, GraphView>,
+    /// Whether the shell's own editor is shown in an area: the others edit the same project through their own.
+    primary_shown: bool,
 }
 
 /// The window: the screen of areas, hosting the graph editor, the previews and the code.
@@ -114,6 +119,7 @@ pub struct Shell {
     screen: Entity<ScreenView<Panel>>,
     playback: Entity<Playback>,
     editor: Entity<Editor>,
+    views: Rc<RefCell<AreaViews>>,
     path: Option<PathBuf>,
     settings: Option<Entity<SettingsDialog>>,
 }
@@ -128,8 +134,7 @@ impl Shell {
             match project::read(&last) {
                 Ok(loaded) => {
                     layout = layout::load(&loaded);
-                    let view = layout.as_ref().map(|l| &l.graph);
-                    editor.update(cx, |e, cx| e.load_project(Some(loaded), view, cx));
+                    editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
                     path = Some(last);
                 }
                 Err(e) => log::warn!("couldn't reopen {}: {e:#}", last.display()),
@@ -163,16 +168,36 @@ impl Shell {
         .detach();
 
         let views = Rc::new(RefCell::new(AreaViews::default()));
+        if let Some(layout) = &layout {
+            views.borrow_mut().pending.extend(layout.graphs.iter().cloned());
+        }
         let screen = cx.new(|cx| {
             let playback = playback.clone();
             let editor = editor.clone();
+            let views = views.clone();
             ScreenView::new(layout.map_or_else(default_screen, |l| l.screen), move |id, panel, window, cx| {
                 let mut views = views.borrow_mut();
                 match panel {
-                    Panel::Graph => AreaContent {
-                        toolbar: None,
-                        body: editor.clone().into_any_element(),
-                    },
+                    Panel::Graph => {
+                        let area = match views.graphs.get(&id).cloned() {
+                            Some(area) => area,
+                            None => {
+                                let area = if views.primary_shown {
+                                    let share = editor.read(cx).share();
+                                    cx.new(|cx| Editor::another_area(share, window, cx))
+                                } else {
+                                    views.primary_shown = true;
+                                    editor.clone()
+                                };
+                                if let Some(view) = views.pending.remove(&id) {
+                                    area.update(cx, |e, cx| e.set_view(&view, cx));
+                                }
+                                views.graphs.insert(id, area.clone());
+                                area
+                            }
+                        };
+                        AreaContent { toolbar: None, body: area.into_any_element() }
+                    }
                     Panel::Preview => {
                         let (area, toolbar) = views
                             .previews
@@ -209,7 +234,7 @@ impl Shell {
                 }
             }, cx)
         });
-        let shell = Self { screen, playback, editor, path, settings: None };
+        let shell = Self { screen, playback, editor, views, path, settings: None };
         shell.refresh_title(window, cx);
         shell
     }
@@ -290,6 +315,17 @@ impl Shell {
         .detach();
     }
 
+    /// Replaces the areas; the graph areas get editors of their own again.
+    fn show_screen(&mut self, screen: Screen<Panel>, graphs: Vec<(AreaId, GraphView)>, cx: &mut Context<Self>) {
+        {
+            let mut views = self.views.borrow_mut();
+            views.graphs.clear();
+            views.primary_shown = false;
+            views.pending = graphs.into_iter().collect();
+        }
+        self.screen.update(cx, |s, cx| s.set_screen(screen, cx));
+    }
+
     fn adopt(&mut self, path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         project::remember(path.as_deref());
         self.path = path;
@@ -299,7 +335,7 @@ impl Shell {
     fn new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.confirm_discard(window, cx, |this, window, cx| {
             this.editor.update(cx, |e, cx| e.load_project(None, None, cx));
-            this.screen.update(cx, |s, cx| s.set_screen(default_screen(), cx));
+            this.show_screen(default_screen(), Vec::new(), cx);
             this.adopt(None, window, cx);
         });
     }
@@ -336,10 +372,9 @@ impl Shell {
         match project::read(&path) {
             Ok(loaded) => {
                 let layout = layout::load(&loaded);
-                let view = layout.as_ref().map(|l| &l.graph);
-                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), view, cx));
-                let screen = layout.map_or_else(default_screen, |l| l.screen);
-                self.screen.update(cx, |s, cx| s.set_screen(screen, cx));
+                self.editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+                let (screen, graphs) = layout.map_or_else(|| (default_screen(), Vec::new()), |l| (l.screen, l.graphs));
+                self.show_screen(screen, graphs, cx);
                 self.adopt(Some(path), window, cx);
             }
             Err(e) => {
@@ -391,7 +426,11 @@ impl Shell {
     fn save_to(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.editor.read(cx);
         let mut project = editor.project(cx);
-        layout::store(&mut project, self.screen.read(cx).screen(), &editor.view(cx));
+        {
+            let views = self.views.borrow();
+            let graph = |id: AreaId| views.graphs.get(&id).map(|e| e.read(cx).view(cx)).unwrap_or_default();
+            layout::store(&mut project, self.screen.read(cx).screen(), &graph);
+        }
         let result: Result<()> = project::write(&path, &project);
         match result {
             Ok(()) => {

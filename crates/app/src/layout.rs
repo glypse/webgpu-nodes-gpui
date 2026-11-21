@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use screen::{Rect, Screen};
+use screen::{AreaId, Rect, Screen};
 use serde_json::{Value, json};
 use shader_graph::graph::{GraphProject, Viewport};
 
@@ -24,7 +24,8 @@ pub struct GraphView {
 
 pub struct Layout {
     pub screen: Screen<Panel>,
-    pub graph: GraphView,
+    /// Where each graph area was.
+    pub graphs: Vec<(AreaId, GraphView)>,
 }
 
 fn editor_json(panel: &Panel, graph: &GraphView) -> Value {
@@ -42,8 +43,8 @@ fn editor_json(panel: &Panel, graph: &GraphView) -> Value {
     }
 }
 
-/// Stores the layout in the project, replacing what it had.
-pub fn store(project: &mut GraphProject, screen: &Screen<Panel>, graph: &GraphView) {
+/// Stores the layout in the project, replacing what it had. `graph` says where a graph area is.
+pub fn store(project: &mut GraphProject, screen: &Screen<Panel>, graph: &dyn Fn(AreaId) -> GraphView) {
     let areas: Vec<Value> = screen
         .areas()
         .iter()
@@ -56,7 +57,7 @@ pub fn store(project: &mut GraphProject, screen: &Screen<Panel>, graph: &GraphVi
                     "right": area.rect.right,
                     "bottom": area.rect.bottom,
                 },
-                "editor": editor_json(&area.editor, graph),
+                "editor": editor_json(&area.editor, &graph(area.id)),
             })
         })
         .collect();
@@ -102,7 +103,7 @@ pub fn load(project: &GraphProject) -> Option<Layout> {
         return None;
     }
     let mut ids = HashSet::new();
-    let mut graph = None;
+    let mut views = Vec::new();
     let mut parsed = Vec::new();
     for area in areas {
         let id = area.get("id")?.as_str()?;
@@ -114,9 +115,7 @@ pub fn load(project: &GraphProject) -> Option<Layout> {
             return None;
         }
         let (panel, view) = editor_from_json(area.get("editor")?)?;
-        if graph.is_none() {
-            graph = view;
-        }
+        views.push(view);
         parsed.push((rect, panel));
     }
     if ids.len() != areas.len() {
@@ -124,7 +123,8 @@ pub fn load(project: &GraphProject) -> Option<Layout> {
     }
     let screen = Screen::new(parsed);
     screen.validate().ok()?;
-    Some(Layout { screen, graph: graph.unwrap_or_default() })
+    let graphs = screen.areas().iter().zip(views).filter_map(|(area, view)| Some((area.id, view?))).collect();
+    Some(Layout { screen, graphs })
 }
 
 #[cfg(test)]
@@ -146,18 +146,37 @@ mod tests {
             path: vec!["a".into(), "b".into()],
             viewport: Some(Viewport { x: 1.0, y: -2.0, zoom: 0.5 }),
         };
-        store(&mut project, &screen(), &view);
+        let shown = view.clone();
+        store(&mut project, &screen(), &move |_| shown.clone());
         let layout = load(&project).expect("loads");
-        assert_eq!(layout.graph, view);
+        assert_eq!(layout.graphs.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>(), [view]);
         let editors: Vec<&Panel> = layout.screen.areas().iter().map(|a| &a.editor).collect();
         assert_eq!(editors, [&Panel::Preview, &Panel::Graph, &Panel::Timeline]);
         assert_eq!(layout.screen.areas()[1].rect, Rect::new(0.3, 0.0, 1.0, 0.8));
     }
 
     #[test]
+    fn each_graph_area_keeps_its_own_view() {
+        let screen = Screen::new([
+            (Rect::new(0.0, 0.0, 0.5, 1.0), Panel::Graph),
+            (Rect::new(0.5, 0.0, 1.0, 1.0), Panel::Graph),
+        ]);
+        let ids: Vec<AreaId> = screen.areas().iter().map(|a| a.id).collect();
+        let first = GraphView { path: vec!["a".into()], viewport: None };
+        let second = GraphView { path: Vec::new(), viewport: Some(Viewport { x: 3.0, y: 4.0, zoom: 2.0 }) };
+        let (f, s) = (first.clone(), second.clone());
+        let first_id = ids[0];
+        let mut project = GraphProject::default();
+        store(&mut project, &screen, &move |id| if id == first_id { f.clone() } else { s.clone() });
+        let layout = load(&project).expect("loads");
+        let views: Vec<GraphView> = layout.graphs.into_iter().map(|(_, v)| v).collect();
+        assert_eq!(views, [first, second]);
+    }
+
+    #[test]
     fn the_layout_survives_a_project_round_trip_in_the_originals_shape() {
         let mut project = GraphProject::default();
-        store(&mut project, &screen(), &GraphView::default());
+        store(&mut project, &screen(), &|_| GraphView::default());
         let json = project.to_json();
         let loaded = GraphProject::from_json(&json).expect("loads");
         let layout = loaded.extra.get("layout").expect("kept");

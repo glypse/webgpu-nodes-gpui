@@ -1,9 +1,10 @@
 use guard::SafeListener as _;
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::Ref;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use handle::{ModelHandle, ModelMut};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels,
@@ -39,7 +40,15 @@ use crate::graph::socket::socket_color;
 use crate::graph::zones::{self, Bubble};
 use crate::layout::GraphView;
 
+mod handle;
 mod widget_edits;
+
+/// What another area's editor starts from.
+pub struct Share {
+    model: ModelHandle,
+    viewports: HashMap<String, Viewport>,
+    settings: ProjectSettings,
+}
 
 /// What the shell needs from the editor.
 #[derive(Clone, Debug)]
@@ -118,7 +127,9 @@ struct Popup {
 }
 
 pub struct Editor {
-    model: Rc<RefCell<GraphModel>>,
+    model: ModelHandle,
+    /// Whether this is the editor the shell compiles for: the first area's.
+    primary: bool,
     flow: Entity<Flow>,
     code: String,
     generated: Result<Program, String>,
@@ -194,7 +205,24 @@ fn graph_point(p: Xy) -> GraphPoint {
 
 impl Editor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let model = Rc::new(RefCell::new(GraphModel::new(demo_project())));
+        Self::build(ModelHandle::new(GraphModel::new(demo_project())), true, window, cx)
+    }
+
+    /// What another area needs to edit the project this one edits.
+    pub fn share(&self) -> Share {
+        Share { model: self.model.another_view(), viewports: self.viewports.clone(), settings: self.settings }
+    }
+
+    /// An editor of another area, entered at the root.
+    pub fn another_area(share: Share, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut editor = Self::build(share.model, false, window, cx);
+        editor.viewports = share.viewports;
+        editor.settings = share.settings;
+        editor.sync_view(cx);
+        editor
+    }
+
+    fn build(model: ModelHandle, primary: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let validator = model.clone();
         let flow = cx.new(|cx| {
             let mut flow = Flow::new(cx);
@@ -218,8 +246,10 @@ impl Editor {
         })
         .detach();
         window.focus(&flow.focus_handle(cx));
+        model.register(cx.entity().downgrade());
         let mut editor = Self {
             model,
+            primary,
             flow,
             code: String::new(),
             generated: Err(String::new()),
@@ -244,8 +274,10 @@ impl Editor {
             sockets: None,
             color_popup: None,
         };
-        editor.sync(cx);
-        editor.regenerate(cx);
+        editor.sync_view(cx);
+        if primary {
+            editor.regenerate(cx);
+        }
         editor
     }
 
@@ -253,7 +285,7 @@ impl Editor {
         self.model.borrow()
     }
 
-    fn model_mut(&self) -> RefMut<'_, GraphModel> {
+    fn model_mut(&self) -> ModelMut<'_> {
         self.model.borrow_mut()
     }
 
@@ -288,6 +320,13 @@ impl Editor {
         self.code.clear();
         *self.frame_drag.borrow_mut() = None;
         self.after_edit(cx);
+        let me = cx.entity_id();
+        for area in self.model.areas() {
+            if area.entity_id() != me {
+                let viewports = self.viewports.clone();
+                area.update(cx, |other, cx| guard::guard("load project", || other.adopt_project(viewports, cx))).ok();
+            }
+        }
         let saved = self.viewports.get(&self.model.borrow().active_definition_ref()).copied();
         self.flow.update(cx, |flow, cx| {
             flow.options.fit_view_on_init = saved.is_none();
@@ -295,6 +334,40 @@ impl Editor {
                 Some(vp) => flow.set_viewport(vp, None, cx),
                 None => flow.fit_view(Default::default(), cx),
             }
+        });
+    }
+
+    /// Puts this area in the group a saved layout left it in, at the camera it had.
+    pub fn set_view(&mut self, view: &GraphView, cx: &mut Context<Self>) {
+        let path = self.model.borrow().valid_path(&view.path);
+        self.model_mut().set_path(path);
+        let key = self.model.borrow().active_definition_ref();
+        if let Some(v) = view.viewport {
+            self.viewports.insert(key.clone(), flow_viewport(v));
+        }
+        self.sync_view(cx);
+        let saved = self.viewports.get(&key).copied();
+        self.flow.update(cx, |flow, cx| match saved {
+            Some(vp) => flow.set_viewport(vp, None, cx),
+            None => flow.fit_view(Default::default(), cx),
+        });
+    }
+
+    /// Another area loaded a project: back at its root, with its cameras.
+    fn adopt_project(&mut self, viewports: HashMap<String, Viewport>, cx: &mut Context<Self>) {
+        self.model.set_path_to_root();
+        self.viewports = viewports;
+        self.popup = None;
+        self.add_menu = None;
+        self.sheet = None;
+        self.sockets = None;
+        self.color_popup = None;
+        *self.frame_drag.borrow_mut() = None;
+        self.sync_view(cx);
+        let saved = self.viewports.get(&self.model.borrow().active_definition_ref()).copied();
+        self.flow.update(cx, |flow, cx| match saved {
+            Some(vp) => flow.set_viewport(vp, None, cx),
+            None => flow.fit_view(Default::default(), cx),
         });
     }
 
@@ -339,7 +412,18 @@ impl Editor {
 
     // --- Syncing the model into the flow and the shader ---
 
+    /// Shows the model in this area and in the others.
     fn sync(&mut self, cx: &mut Context<Self>) {
+        self.sync_view(cx);
+        let me = cx.entity_id();
+        for area in self.model.areas() {
+            if area.entity_id() != me {
+                area.update(cx, |other, cx| guard::guard("sync area", || other.sync_view(cx))).ok();
+            }
+        }
+    }
+
+    fn sync_view(&mut self, cx: &mut Context<Self>) {
         let editor = cx.entity().downgrade();
         let flow_entity = self.flow.downgrade();
         let model = self.model.borrow();
@@ -637,7 +721,14 @@ impl Editor {
     }
 
     fn regenerate(&mut self, cx: &mut Context<Self>) {
-        let result = self.model.borrow().generate().map_err(|e| e.to_string());
+        if !self.primary {
+            let first = self.model.areas().into_iter().next();
+            if let Some(first) = first {
+                first.update(cx, |first, cx| first.regenerate(cx)).ok();
+            }
+            return;
+        }
+        let result = self.model.borrow().generate_hoisted().map_err(|e| e.to_string());
         match result {
             Ok(program) => {
                 if program.program.code == self.code {
@@ -1622,6 +1713,35 @@ mod tests {
         });
         render_frame(cx);
         assert_eq!(scene.editor.read_with(cx, |e, _| e.sheet.clone()), Some(group));
+    }
+
+    #[gpui::test]
+    fn areas_share_the_project_but_not_where_they_are(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let second = cx.update(|window, cx| {
+            let share = scene.editor.read(cx).share();
+            cx.new(|cx| Editor::another_area(share, window, cx))
+        });
+        let group = scene.editor.update(cx, |e, cx| {
+            let id = e.model_mut().group_selection(std::slice::from_ref(&scene.member)).expect("groups");
+            e.after_edit(cx);
+            e.enter_group(&id, cx);
+            id
+        });
+        render_frame(cx);
+        assert_eq!(scene.editor.read_with(cx, |e, _| e.model().path().to_vec()), vec![group.clone()]);
+        assert!(second.read_with(cx, |e, _| e.model().path().is_empty()));
+        // The second area still sees the root, with the group node in it.
+        assert!(second.read_with(cx, |e, _| e.model().active_document().node(&group).is_some()));
+
+        second.update(cx, |e, cx| e.select(vec![group.clone()], cx));
+        assert_eq!(second.read_with(cx, |e, _| e.selected()), vec![group.clone()]);
+        assert!(scene.editor.read_with(cx, |e, _| e.selected().is_empty()));
+
+        // An edit in one shows in the other.
+        second.update(cx, |e, cx| e.delete_selection(cx));
+        assert!(scene.editor.read_with(cx, |e, _| e.model().project().root().node(&group).is_none()));
+        assert!(scene.editor.read_with(cx, |e, _| e.model().path().is_empty()));
     }
 
     #[gpui::test]
