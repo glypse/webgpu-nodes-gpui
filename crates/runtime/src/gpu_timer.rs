@@ -2,7 +2,7 @@ const TIMESTAMP_BYTES: u64 = 8;
 /// Bytes a frame's timing takes in its readback buffer: a start and an end timestamp.
 pub(crate) const TIMING_BYTES: u64 = 2 * TIMESTAMP_BYTES;
 
-/// Times a frame's program pass on the GPU, with timestamp queries. Only
+/// Times a frame's passes, as one, on the GPU, with timestamp queries. Only
 /// exists on devices with the `TIMESTAMP_QUERY` feature.
 ///
 /// One query set serves every frame: each resolves it into its own readback
@@ -35,11 +35,13 @@ impl GpuTimer {
         })
     }
 
-    pub fn writes(&self) -> wgpu::RenderPassTimestampWrites<'_> {
+    /// The timestamps a pass writes when it's the first and/or the last of
+    /// the passes timed as one.
+    pub fn writes(&self, first: bool, last: bool) -> wgpu::RenderPassTimestampWrites<'_> {
         wgpu::RenderPassTimestampWrites {
             query_set: &self.query_set,
-            beginning_of_pass_write_index: Some(0),
-            end_of_pass_write_index: Some(1),
+            beginning_of_pass_write_index: first.then_some(0),
+            end_of_pass_write_index: last.then_some(1),
         }
     }
 

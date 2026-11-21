@@ -185,18 +185,53 @@ fn repeat_zone_generates_a_loop() {
     assert!(wgsl.contains("for (var z_"), "{wgsl}");
 }
 
-#[test]
-fn simulation_zones_are_reported_unsupported() {
-    let mut g = TestGraph::new();
+/// A simulation counting frames: its item plus one, shown as the red channel.
+fn counting_simulation(g: &mut TestGraph) -> (String, String) {
     let input = g.model.create_zone(crate::zones::ZoneKind::Simulation, Default::default()).unwrap();
     let item = g.model.zone_items_of(&input)[0].id.clone();
     let output_id = g.model.zone_nodes(&input).unwrap().output.id;
+    let add = g.add("add");
     let declare = g.add("declare");
     let out = g.output();
+    let one = g.add("declare");
+    g.force_type(&one, WgslType::F32);
+    g.set(&one, "x", 1.0);
     g.force_type(&declare, WgslType::Vec4f);
+    g.link((&input, &item), (&add, "operands"));
+    g.link((&one, "value"), (&add, "operands"));
+    g.link((&add, "result"), (&output_id, &item));
     g.link((&output_id, &item), (&declare, "x"));
     g.link((&declare, "value"), (&out, "color"));
-    assert!(g.model.generate().is_err());
+    (input, item)
+}
+
+#[test]
+fn simulation_zones_are_drawn_by_start_and_step_passes() {
+    use crate::codegen::{ResourceDecl, SimulationStage};
+    let mut g = TestGraph::new();
+    counting_simulation(&mut g);
+    let program = g.program();
+    let plan = &program.plan;
+    let stages: Vec<_> = plan.passes.iter().map(|p| p.simulation.as_ref().and_then(|s| s.stage)).collect();
+    assert_eq!(stages, [Some(SimulationStage::Start), Some(SimulationStage::Step), None]);
+    for pass in &plan.passes {
+        crate::testing::validate_wgsl(&pass.program.code);
+    }
+    let step = &plan.passes[1].program;
+    assert!(step.code.contains("simulation_delta") || step.targets.is_some(), "{}", step.code);
+    assert_eq!(step.targets.as_deref().map(<[_]>::len), Some(1));
+    assert!(plan.simulates());
+    let states = plan.resources.iter().filter(|r| matches!(r, ResourceDecl::State { .. })).count();
+    assert_eq!(states, 2, "the previous and current frame's textures");
+}
+
+#[test]
+fn a_simulation_graph_reads_its_state_in_the_frame_pass() {
+    let mut g = TestGraph::new();
+    counting_simulation(&mut g);
+    let frame = &g.program().plan.passes[2].program;
+    assert!(frame.code.contains("textureLoad(runtime_texture_0"), "{}", frame.code);
+    assert_eq!(frame.textures.len(), 1);
 }
 
 #[test]

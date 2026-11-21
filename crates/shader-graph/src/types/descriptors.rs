@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::node_data::{EnumVariant, InputValue, NodeData};
 use super::values::{ScalarKind, WgslType};
+use crate::passes::TextureFormat;
 
 /// What the add menu groups a node type under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -228,6 +229,8 @@ pub enum NodeWidget {
     Curve,
     /// A gradient editing the node's colour ramp stops and their colours.
     Ramp,
+    /// A list of the textures the node draws, edited by item.
+    Items,
     /// A colour wheel and value ramp editing the values of a colour group's inputs.
     Color(crate::graph::GroupWidget),
 }
@@ -258,6 +261,40 @@ pub struct WgslCtx<'a> {
     pub(crate) env: &'a mut dyn CtxEnv,
 }
 
+/// How a texture is filtered when sampled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SamplerFilter {
+    Linear,
+    Nearest,
+}
+
+impl SamplerFilter {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Nearest => "nearest",
+        }
+    }
+}
+
+/// What a sampler reads outside a texture's [0, 1] coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SamplerAddress {
+    Clamp,
+    Repeat,
+    Mirror,
+}
+
+impl SamplerAddress {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Clamp => "clamp",
+            Self::Repeat => "repeat",
+            Self::Mirror => "mirror",
+        }
+    }
+}
+
 /// What a `WgslCtx` asks of the code generator.
 pub(crate) trait CtxEnv {
     fn promote_input(&mut self, id: &str) -> String;
@@ -266,6 +303,9 @@ pub(crate) trait CtxEnv {
     fn constant(&self, id: &str) -> Option<i64>;
     fn param(&mut self, key: &str, value: &[f64]) -> String;
     fn define_fn(&mut self, name: &str, source: &str) -> String;
+    fn texture(&mut self, id: &str) -> String;
+    fn texture_format(&self, id: &str) -> TextureFormat;
+    fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String;
 }
 
 impl WgslCtx<'_> {
@@ -303,6 +343,22 @@ impl WgslCtx<'_> {
     /// ask for it by `name`; returns `name`.
     pub fn define_fn(&mut self, name: &str, source: &str) -> String {
         self.env.define_fn(name, source)
+    }
+
+    /// The texture a Texture socket of the node reads (an input) or gives
+    /// (an output), as a module-scope `texture_2d` of the shader.
+    pub fn texture(&mut self, id: &str) -> String {
+        self.env.texture(id)
+    }
+
+    /// The format of the texels of the texture `texture(id)` names.
+    pub fn texture_format(&self, id: &str) -> TextureFormat {
+        self.env.texture_format(id)
+    }
+
+    /// A sampler of the shader filtering and addressing as asked.
+    pub fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String {
+        self.env.sampler(filter, address)
     }
 
     pub fn input_type(&self, id: &str) -> WgslType {

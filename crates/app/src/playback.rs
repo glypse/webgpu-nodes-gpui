@@ -136,7 +136,7 @@ impl Playback {
             Ok(source) => {
                 self.code = source.program.code.clone().into();
                 if let Some(renderer) = &mut self.renderer {
-                    match renderer.compile(&source.program) {
+                    match renderer.compile(&source.plan) {
                         Ok(program) => {
                             let values = source
                                 .uniforms

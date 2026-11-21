@@ -8,13 +8,16 @@ use super::{Connection, GraphEdge, GraphNode, Point, new_id};
 use crate::nodes::{
     CUSTOM_WGSL, INDEX_SWITCH, clamp_cases, custom_sockets, is_socket_name, new_socket_label,
 };
+use crate::passes::{
+    ItemSizeMode, TextureFormat, default_size_values, item_size_handles, item_size_input_ids,
+};
 use crate::types::{
     CustomSockets, HandleDef, HandleType, NodeData, WgslType, ZoneItem,
 };
 use crate::zones::{
     DEFAULT_ITERATIONS, DEFAULT_MAX_ITERATIONS, DELTA_TIME_HANDLE, ITERATIONS_HANDLE,
     ITERATION_HANDLE, MAX_ITERATIONS, NEW_ITEM_HANDLE, REPEAT_INPUT, SKIP_HANDLE, ZoneKind,
-    inferred_item_family, is_zone_input, paired_output_id, zone_items, zone_kind_of,
+    carries_item, inferred_item_family, is_zone_input, paired_output_id, zone_items, zone_kind_of,
 };
 
 /// Distance between a new zone's input and output nodes.
@@ -89,11 +92,12 @@ impl GraphModel {
     /// items that no longer exist or no longer fit their type.
     fn set_zone_items(&mut self, zone_id: &str, items: Vec<ZoneItem>) {
         let Some(zone) = self.zone_nodes(zone_id) else { return };
-        if self.is_locked() {
+        if self.is_locked() || !items.iter().all(|i| carries_item(Some(zone.kind), i)) {
             return;
         }
         let key = self.active_definition_ref();
         let ids: HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        let sizes = item_size_input_ids(&items);
         let boundary = [zone.input.id.clone(), zone.output.id.clone()];
         let fixed = [ITERATIONS_HANDLE, ITERATION_HANDLE, DELTA_TIME_HANDLE, SKIP_HANDLE];
         {
@@ -104,7 +108,8 @@ impl GraphModel {
             doc.edges.retain(|e| {
                 let bad_target = boundary.contains(&e.target)
                     && !fixed.contains(&e.target_handle.as_str())
-                    && !ids.contains(e.target_handle.as_str());
+                    && !ids.contains(e.target_handle.as_str())
+                    && !(e.target == zone.input.id && sizes.contains(&e.target_handle));
                 let bad_source = boundary.contains(&e.source)
                     && !fixed.contains(&e.source_handle.as_str())
                     && !ids.contains(e.source_handle.as_str());
@@ -206,6 +211,54 @@ impl GraphModel {
             .map(|mut i| {
                 if i.id == item_id {
                     i.ty = ty.clone();
+                }
+                i
+            })
+            .collect();
+        self.set_zone_items(zone_id, items);
+    }
+
+    /// Set the format a simulation's item is kept in, or (`None`) the one its
+    /// type has by default. A repeat zone's items aren't kept in textures.
+    pub fn set_zone_item_format(&mut self, zone_id: &str, item_id: &str, format: Option<TextureFormat>) {
+        if self.zone_nodes(zone_id).is_none_or(|z| z.kind != ZoneKind::Simulation) {
+            return;
+        }
+        let items = self
+            .zone_items_of(zone_id)
+            .into_iter()
+            .map(|mut i| {
+                if i.id == item_id {
+                    i.format = format.map(|f| f.id().to_owned());
+                }
+                i
+            })
+            .collect();
+        self.set_zone_items(zone_id, items);
+    }
+
+    /// Set how a simulation's item is sized, or (`None`) to the canvas' size.
+    /// Its size inputs on the zone's input node follow the mode, and links to
+    /// those it no longer has are dropped.
+    pub fn set_zone_item_size(&mut self, zone_id: &str, item_id: &str, size: Option<ItemSizeMode>) {
+        let Some(zone) = self.zone_nodes(zone_id) else { return };
+        if zone.kind != ZoneKind::Simulation || self.is_locked() {
+            return;
+        }
+        if let Some(mode) = size {
+            let handles = item_size_handles(item_id);
+            let key = if mode == ItemSizeMode::Scale { &handles.scale } else { &handles.pixels };
+            if !zone.input.data.values.contains_key(key) {
+                let defaults = default_size_values(&handles, mode);
+                self.update_node_data(&zone.input.id, |data| data.values.extend(defaults));
+            }
+        }
+        let items = self
+            .zone_items_of(zone_id)
+            .into_iter()
+            .map(|mut i| {
+                if i.id == item_id {
+                    i.size = size.map(|m| m.id().to_owned());
                 }
                 i
             })

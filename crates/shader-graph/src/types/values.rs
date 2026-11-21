@@ -45,30 +45,39 @@ impl ScalarKind {
 
 macro_rules! wgsl_types {
     ($($variant:ident = $name:literal, $kind:ident, $n:literal;)*) => {
-        /// A concrete WGSL value type. `F32` comes first: the default of untyped values.
+        /// A socket's type: a WGSL value type (`F32` comes first, the default
+        /// of untyped values), or a texture.
+        ///
+        /// A texture isn't a WGSL value: every Texture socket resolves while
+        /// compiling to one image, since WGSL can't return, store or `select`
+        /// one. Where a value is wanted its colour at the pixel stands in, so
+        /// it counts as a `vec4f` when converted (see `value_type`).
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub enum WgslType {
             $(#[serde(rename = $name)] $variant,)*
+            #[serde(rename = "texture")]
+            Texture,
         }
 
         impl WgslType {
+            /// Every value type: the sockets' types but the texture.
             pub const ALL: [WgslType; 16] = [$(WgslType::$variant,)*];
 
             /// The type's identifier, as saved files spell it.
             pub const fn id(self) -> &'static str {
-                match self { $(WgslType::$variant => $name,)* }
+                match self { $(WgslType::$variant => $name,)* WgslType::Texture => "texture" }
             }
 
             pub const fn kind(self) -> ScalarKind {
-                match self { $(WgslType::$variant => ScalarKind::$kind,)* }
+                match self { $(WgslType::$variant => ScalarKind::$kind,)* WgslType::Texture => ScalarKind::F32 }
             }
 
             pub const fn components(self) -> usize {
-                match self { $(WgslType::$variant => $n,)* }
+                match self { $(WgslType::$variant => $n,)* WgslType::Texture => 4 }
             }
 
             pub fn from_id(id: &str) -> Option<WgslType> {
-                match id { $($name => Some(WgslType::$variant),)* _ => None }
+                match id { $($name => Some(WgslType::$variant),)* "texture" => Some(WgslType::Texture), _ => None }
             }
         }
     };
@@ -100,6 +109,12 @@ impl fmt::Display for WgslType {
 }
 
 use WgslType::*;
+
+/// What a socket can carry: the value types and the texture.
+pub const SOCKET_TYPES: [WgslType; 17] = [
+    F32, Vec2f, Vec3f, Vec4f, I32, Vec2i, Vec3i, Vec4i, U32, Vec2u, Vec3u, Vec4u, Bool, Vec2b,
+    Vec3b, Vec4b, Texture,
+];
 
 pub const FLOAT_TYPES: &[WgslType] = &[F32, Vec2f, Vec3f, Vec4f];
 pub const INT_TYPES: &[WgslType] = &[I32, Vec2i, Vec3i, Vec4i];
@@ -161,8 +176,20 @@ pub fn make_type(kind: ScalarKind, components: usize) -> WgslType {
 }
 
 impl WgslType {
+    pub const fn is_texture(self) -> bool {
+        matches!(self, Texture)
+    }
+
+    /// The value a socket gives where one is wanted: a texture's colour at the pixel.
+    pub const fn value_type(self) -> WgslType {
+        if self.is_texture() { Vec4f } else { self }
+    }
+
     /// The spelling in WGSL source. Bool vectors have no predeclared alias.
     pub fn wgsl_name(self) -> String {
+        if self.is_texture() {
+            return Vec4f.id().to_owned();
+        }
         if self.kind() == ScalarKind::Bool && self.components() > 1 {
             format!("vec{}<bool>", self.components())
         } else {
@@ -180,8 +207,17 @@ impl WgslType {
     }
 }
 
-/// Whether a value of `source` type may be linked to an input of `target` type.
+/// Whether `source` may be linked to an input of `target` type. Component
+/// counts may only grow. A texture links to a texture, or to a float value,
+/// which samples it at the pixel (its colour, or the components a narrower
+/// value keeps); any value links to a texture: it's rendered to one.
 pub fn is_connection_compatible(source: WgslType, target: WgslType) -> bool {
+    if target.is_texture() {
+        return true;
+    }
+    if source.is_texture() {
+        return target.kind() == ScalarKind::F32 && target != Vec2f;
+    }
     source.components() <= target.components()
 }
 
@@ -251,14 +287,23 @@ pub fn fit_type(wanted: WgslType, allowed: &[WgslType]) -> WgslType {
 }
 
 /// The type a family resolves to given its linked source types; the family's
-/// first type when there are none.
+/// first type when there are none. A family taking textures is one when
+/// every source is: mixed with values, the textures are sampled rather than
+/// the values rendered.
 pub fn highest_type(candidates: &[WgslType], allowed: &[WgslType]) -> WgslType {
     let fallback = allowed.first().copied().unwrap_or(F32);
-    match candidates.iter().copied().reduce(join_types) {
-        None => fallback,
-        Some(joined) if allowed.is_empty() => joined,
-        Some(joined) => fit_type(joined, allowed),
+    if candidates.is_empty() {
+        return fallback;
     }
+    if allowed.contains(&Texture) && candidates.iter().all(|t| t.is_texture()) {
+        return Texture;
+    }
+    let values: Vec<WgslType> = allowed.iter().copied().filter(|t| !t.is_texture()).collect();
+    if values.is_empty() && !allowed.is_empty() {
+        return fallback;
+    }
+    let joined = candidates.iter().map(|t| t.value_type()).reduce(join_types).unwrap_or(fallback);
+    if values.is_empty() { joined } else { fit_type(joined, &values) }
 }
 
 #[cfg(test)]

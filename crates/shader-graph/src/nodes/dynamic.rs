@@ -8,7 +8,7 @@ use crate::graph::{GraphDocument, GraphNode, GraphProject};
 use crate::types::{
     CustomSockets, EnumVariant, GroupHandleDef, HandleDef, HandleType, InputControl, InputValue,
     NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
-    TypeVariable, WgslType, bound_type, enum_value,
+    SOCKET_TYPES, TypeVariable, WgslType, bound_type, enum_value,
 };
 
 pub const INDEX_SWITCH: &str = "index-switch";
@@ -37,7 +37,7 @@ pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
     inputs.extend(
         variants
             .iter()
-            .map(|v| NodeInputDef::new(case_handle(v.int()), v.label.clone(), &WgslType::ALL).family(CASES_FAMILY)),
+            .map(|v| NodeInputDef::new(case_handle(v.int()), v.label.clone(), &SOCKET_TYPES).family(CASES_FAMILY)),
     );
     let mut d = NodeDescriptor::new(MATCH, "Match", NodeCategory::Logic)
         .aliases(&["Menu Switch", "Switch Case", "Case", "Enum Switch", "Index Switch"])
@@ -104,7 +104,7 @@ pub fn build_index_switch_descriptor(data: &NodeData) -> NodeDescriptor {
         cases
             .iter()
             .enumerate()
-            .map(|(i, id)| NodeInputDef::new(id.clone(), i.to_string(), &WgslType::ALL).family(CASES_FAMILY)),
+            .map(|(i, id)| NodeInputDef::new(id.clone(), i.to_string(), &SOCKET_TYPES).family(CASES_FAMILY)),
     );
     let defaults = NodeData { cases: Some(DEFAULT_CASES), ..Default::default() };
     let mut d = NodeDescriptor::new(INDEX_SWITCH, "Index Switch", NodeCategory::Logic)
@@ -247,7 +247,7 @@ pub fn build_custom_wgsl_descriptor(data: &NodeData) -> NodeDescriptor {
 fn socket_types(handle: &GroupHandleDef, variables: &[TypeVariable]) -> (Vec<WgslType>, Option<String>) {
     match &handle.ty {
         HandleType::Fixed(t) => (vec![*t], None),
-        HandleType::Inferred { .. } => (WgslType::ALL.to_vec(), Some(format!("inferred:{}", handle.id))),
+        HandleType::Inferred { .. } => (SOCKET_TYPES.to_vec(), Some(format!("inferred:{}", handle.id))),
         HandleType::Variable { variable } => {
             let types = variables
                 .iter()

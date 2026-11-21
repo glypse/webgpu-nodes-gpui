@@ -220,7 +220,11 @@ impl Env<'_> {
         let mut data = data.clone();
         data.types = types;
         let mut resolved = self.resolve_regular(descriptor, incoming, &data, bindings);
+        // A texture item's values are colours, its outputs textures.
         for output in &mut resolved.resolved_outputs {
+            if output.ty.is_texture() {
+                continue;
+            }
             if let Some(ty) = resolved.input_types.get(&output.id) {
                 output.ty = *ty;
             }
@@ -247,7 +251,7 @@ impl Env<'_> {
                 None => node.data.types.get(&variable.id).copied(),
             };
             let ty = ty
-                .filter(|t| variable.types.contains(t))
+                .filter(|t| !t.is_texture() && variable.types.contains(t))
                 .or_else(|| variable.types.first().copied())
                 .unwrap_or(WgslType::F32);
             bindings.insert(variable.id.clone(), ty);
@@ -303,6 +307,7 @@ impl Env<'_> {
             overrides
                 .get(&family.key)
                 .copied()
+                .filter(|t| !t.is_texture())
                 .or_else(|| family.types.first().copied())
                 .unwrap_or(WgslType::F32)
         });
@@ -385,22 +390,28 @@ impl Env<'_> {
             .as_deref()
             .and_then(|id| active_inputs.iter().find(|i| i.id == id))
             .or(active_inputs.first());
+        // A texture passes through as it is (reroutes, switches): only values have callbacks.
         let representative = match primary {
             Some(p) => input_types.get(&p.id).copied().unwrap_or(p.default_type()),
             None => descriptor.outputs.first().map_or(WgslType::F32, |o| o.ty),
         };
+        let value_input_types = || -> BTreeMap<String, WgslType> {
+            input_types.iter().filter(|(_, t)| !t.is_texture()).map(|(k, t)| (k.clone(), *t)).collect()
+        };
         let output_type = family_output_type.unwrap_or_else(|| {
-            descriptor
-                .resolve_output_type
-                .as_ref()
-                .map_or(representative, |resolve| resolve(representative, &input_types))
+            match &descriptor.resolve_output_type {
+                Some(resolve) if !representative.is_texture() => {
+                    resolve(representative, &value_input_types())
+                }
+                _ => representative,
+            }
         });
 
         // Phase 5: dynamic inputs and outputs. Outputs carry their concrete
         // type so downstream consumers can read per-handle types directly.
         let raw_outputs = match &descriptor.resolve_outputs {
-            Some(resolve) => resolve(representative),
-            None => descriptor.outputs.clone(),
+            Some(resolve) if !representative.is_texture() => resolve(representative),
+            _ => descriptor.outputs.clone(),
         };
         let resolved_outputs = if descriptor.static_output_types {
             raw_outputs
@@ -408,7 +419,7 @@ impl Env<'_> {
             raw_outputs.into_iter().map(|o| NodeOutputDef { ty: output_type, ..o }).collect()
         };
         let resolved_inputs = match (&descriptor.resolve_inputs, family_output_type) {
-            (Some(resolve), None) => resolve(output_type, data),
+            (Some(resolve), None) if !output_type.is_texture() => resolve(output_type, data),
             _ => active_inputs,
         };
         ResolvedNodeTypes { input_types, output_type, resolved_inputs, resolved_outputs, bindings: None }

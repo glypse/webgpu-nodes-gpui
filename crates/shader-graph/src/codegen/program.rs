@@ -1,11 +1,18 @@
 use std::collections::BTreeMap;
 
 use super::literals::UniformValue;
+use crate::passes::{TextureSampleType, TextureSource};
+use crate::types::{SamplerAddress, SamplerFilter, WgslType};
 
 /// What the generated code reads per draw: the frame's timing and the target's size and gamut.
 pub const FRAME_VAR: &str = "runtime_frame";
 /// The frame field telling whether the target is Display P3 (1) rather than sRGB (0).
 pub const DISPLAY_P3_FIELD: &str = "display_p3";
+/// The frame field holding the seconds since the previous step of the
+/// simulation a pass computes, 0 on its first.
+pub const SIMULATION_DELTA_FIELD: &str = "simulation_delta";
+/// The struct a fragment drawing several textures returns, a field per colour attachment.
+pub const TARGETS_STRUCT: &str = "RuntimeTargets";
 /// The struct holding the values of uniform inputs.
 pub const UNIFORMS_VAR: &str = "runtime_uniforms";
 /// Per-fragment values readable from any function, unlike `frag()`'s own parameters.
@@ -49,6 +56,50 @@ pub struct ShaderProgram {
     pub frame: UniformBlock,
     /// Fields named after the uniforms the shader reads.
     pub uniforms: UniformBlock,
+    /// The textures it reads at `@group(0) @binding(binding)`: linear,
+    /// straight-alpha float images, or state items' values.
+    pub textures: Vec<ProgramTexture>,
+    pub samplers: Vec<ProgramSampler>,
+    /// The types of the colour attachments it draws into, by location; a colour without.
+    pub targets: Option<Vec<WgslType>>,
+}
+
+/// A texture a program reads, and what it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgramTexture {
+    pub binding: u32,
+    pub source: TextureSource,
+    pub sample_type: TextureSampleType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgramSampler {
+    pub binding: u32,
+    pub filter: SamplerFilter,
+    pub address: SamplerAddress,
+}
+
+/// A module-scope `texture_2d` of a generated fragment, and the image it reads.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextureBinding {
+    pub name: String,
+    pub source: TextureSource,
+}
+
+/// A module-scope `sampler` of a generated fragment.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SamplerBinding {
+    pub name: String,
+    pub filter: SamplerFilter,
+    pub address: SamplerAddress,
+}
+
+/// What a fragment reads besides the frame and uniform blocks, and draws into.
+#[derive(Clone, Debug, Default)]
+pub struct ProgramParts<'a> {
+    pub textures: &'a [TextureBinding],
+    pub samplers: &'a [SamplerBinding],
+    pub targets: Option<&'a [WgslType]>,
 }
 
 /// A frame field: its name, scalar type and component count.
@@ -59,13 +110,17 @@ pub struct FieldDecl {
     pub components: u32,
 }
 
-pub const FRAME_FIELDS: [FieldDecl; 5] = [
+pub const FRAME_FIELDS: [FieldDecl; 6] = [
     FieldDecl { name: "time", scalar: UniformScalar::F32, components: 1 },
     FieldDecl { name: "delta", scalar: UniformScalar::F32, components: 1 },
     FieldDecl { name: "resolution", scalar: UniformScalar::F32, components: 2 },
     FieldDecl { name: "frame", scalar: UniformScalar::U32, components: 1 },
     FieldDecl { name: DISPLAY_P3_FIELD, scalar: UniformScalar::U32, components: 1 },
+    FieldDecl { name: SIMULATION_DELTA_FIELD, scalar: UniformScalar::F32, components: 1 },
 ];
+
+/// Textures and samplers are bound after the frame and uniform blocks.
+const FIRST_RESOURCE_BINDING: u32 = 2;
 
 struct Decl {
     name: String,
@@ -120,7 +175,11 @@ fn struct_source(name: &str, decls: &[Decl]) -> String {
 }
 
 /// Wrap a fragment from `generate_shader` (which defines `frag`) into a full program.
-pub fn build_program(fragment: &str, uniforms: &[(String, UniformValue)]) -> ShaderProgram {
+pub fn build_program(
+    fragment: &str,
+    uniforms: &[(String, UniformValue)],
+    parts: &ProgramParts<'_>,
+) -> ShaderProgram {
     let mut uniform_decls: Vec<Decl> = uniforms
         .iter()
         .map(|(name, value)| Decl {
@@ -139,9 +198,52 @@ pub fn build_program(fragment: &str, uniforms: &[(String, UniformValue)]) -> Sha
         .collect();
     let frame = layout(0, &frame_decls);
     let uniform_block = layout(1, &uniform_decls);
+    let textures: Vec<ProgramTexture> = parts
+        .textures
+        .iter()
+        .zip(FIRST_RESOURCE_BINDING..)
+        .map(|(t, binding)| ProgramTexture {
+            binding,
+            source: t.source.clone(),
+            sample_type: t.source.format().sample_type(),
+        })
+        .collect();
+    let first_sampler = FIRST_RESOURCE_BINDING + textures.len() as u32;
+    let samplers: Vec<ProgramSampler> = parts
+        .samplers
+        .iter()
+        .zip(first_sampler..)
+        .map(|(s, binding)| ProgramSampler { binding, filter: s.filter, address: s.address })
+        .collect();
+    let resources: String = textures
+        .iter()
+        .zip(parts.textures)
+        .map(|(t, decl)| {
+            format!(
+                "@group(0) @binding({}) var {}: texture_2d<{}>;\n",
+                t.binding,
+                decl.name,
+                t.sample_type.texel_scalar()
+            )
+        })
+        .chain(samplers.iter().zip(parts.samplers).map(|(s, decl)| {
+            format!("@group(0) @binding({}) var {}: sampler;\n", s.binding, decl.name)
+        }))
+        .collect();
+    let (output, targets_struct) = match parts.targets {
+        Some(targets) => {
+            let fields: Vec<String> = targets
+                .iter()
+                .enumerate()
+                .map(|(i, t)| format!("\t@location({i}) t{i}: {},", t.wgsl_name()))
+                .collect();
+            (TARGETS_STRUCT.to_owned(), format!("struct {TARGETS_STRUCT} {{\n{}\n}};\n", fields.join("\n")))
+        }
+        None => ("@location(0) vec4f".to_owned(), String::new()),
+    };
     // uv's origin is the bottom-left corner, y pointing up.
     let code = format!(
-        "{frame_struct}
+        "{targets_struct}{frame_struct}
 {uniform_struct}
 struct RuntimeFragment {{
 	uv: vec2f,
@@ -149,7 +251,7 @@ struct RuntimeFragment {{
 }};
 @group(0) @binding({fb}) var<uniform> {FRAME_VAR}: RuntimeFrame;
 @group(0) @binding({ub}) var<uniform> {UNIFORMS_VAR}: RuntimeUniforms;
-var<private> {FRAGMENT_VAR}: RuntimeFragment;
+{resources}var<private> {FRAGMENT_VAR}: RuntimeFragment;
 
 {fragment}
 
@@ -165,7 +267,7 @@ fn runtime_vertex(@builtin(vertex_index) index: u32) -> RuntimeVarying {{
 }}
 
 @fragment
-fn runtime_fragment_main(in: RuntimeVarying) -> @location(0) vec4f {{
+fn runtime_fragment_main(in: RuntimeVarying) -> {output} {{
 	{FRAGMENT_VAR}.uv = in.uv;
 	{FRAGMENT_VAR}.position = in.position.xy;
 	return frag(in.uv);
@@ -182,5 +284,8 @@ fn runtime_fragment_main(in: RuntimeVarying) -> @location(0) vec4f {{
         fragment_entry: "runtime_fragment_main".to_owned(),
         frame,
         uniforms: uniform_block,
+        textures,
+        samplers,
+        targets: parts.targets.map(<[WgslType]>::to_vec),
     }
 }

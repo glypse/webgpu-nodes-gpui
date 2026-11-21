@@ -7,7 +7,7 @@ use crate::types::{
     NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeSetting, ScalarKind, SIGNED_TYPES,
     TypeFamily, UINT_TYPES, VEC_TYPES, WgslType, make_type,
 };
-use crate::types::{FLOAT_TYPES, HelperName};
+use crate::types::{FLOAT_TYPES, HelperName, SOCKET_TYPES};
 
 use super::builders::*;
 
@@ -546,7 +546,7 @@ pub(super) fn misc_nodes() -> Vec<D> {
     // A bare handle to route links through: forwards what it receives, keeping its type.
     let reroute = D::new("reroute", "Reroute", NodeCategory::Misc)
         .aliases(&["Null", "Knot", "Dot", "Passthrough"])
-        .inputs(vec![NodeInputDef::new("in", "in", &WgslType::ALL)])
+        .inputs(vec![NodeInputDef::new("in", "in", &SOCKET_TYPES)])
         .outputs(vec![NodeOutputDef::new("out", "out", WgslType::F32)])
         .wgsl(|ctx| {
             let e = ctx.promote_input("in");

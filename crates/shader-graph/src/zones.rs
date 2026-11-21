@@ -15,15 +15,15 @@
 //! frames. Which nodes are *inside* a zone is derived from the links, never
 //! stored: anything downstream of the zone's input is computed in it.
 //!
-//! Simulation zones are modelled and analysed here, but generating code for
-//! them needs state textures and passes, which this port doesn't have.
+//! A simulation's items may be textures: WGSL can't carry one through a
+//! loop, but a texture of the previous frame is kept between frames.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::graph::{GraphEdge, GraphNode, GraphProject};
+use crate::passes::{ItemSizeMode, item_size_handles, size_inputs};
 use crate::types::{
-    HandleType, NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, TypeVariable,
-    WgslType, ZoneItem, bound_type,
+    HandleType, NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, TypeVariable, WgslType, ZoneItem, bound_type,
 };
 
 pub const REPEAT_INPUT: &str = "repeat-input";
@@ -95,9 +95,22 @@ pub fn paired_input<'a>(nodes: &'a [GraphNode], output_id: &str) -> Option<&'a G
     })
 }
 
-/// The state items declared on a zone output node.
+/// Whether a zone keeps its items in textures: a repeat zone's live in one pixel's computation.
+pub fn keeps_textures(kind: Option<ZoneKind>) -> bool {
+    kind == Some(ZoneKind::Simulation)
+}
+
+/// Whether a zone of `kind` can carry `item`: only a simulation's may be a texture.
+pub fn carries_item(kind: Option<ZoneKind>, item: &ZoneItem) -> bool {
+    keeps_textures(kind) || item.ty.fixed().is_none_or(|t| !t.is_texture())
+}
+
+/// The state items declared on a zone output node. A repeat zone has none
+/// of a texture's: those a file gives it are left out.
 pub fn zone_items(output: Option<&GraphNode>) -> Vec<ZoneItem> {
-    output.and_then(|n| n.data.items.clone()).unwrap_or_default()
+    let kind = output.and_then(|n| zone_kind_of(&n.node_type));
+    let items = output.and_then(|n| n.data.items.clone()).unwrap_or_default();
+    items.into_iter().filter(|i| carries_item(kind, i)).collect()
 }
 
 /// The safety cap applied to a zone's iteration count.
@@ -116,10 +129,13 @@ pub fn inferred_item_family(item_id: &str) -> String {
     format!("inferred:{item_id}")
 }
 
+/// An item's input: a variable's items share its family, which takes the type
+/// it's bound to; an inferred item's is in a family of its own. A texture
+/// item's values are colours, computed per pixel like any other.
 fn item_input(item: &ZoneItem, variables: &[TypeVariable]) -> NodeInputDef {
     let (id, label) = (item.id.clone(), item.label.clone());
     match &item.ty {
-        HandleType::Fixed(t) => NodeInputDef::new(id, label, &[*t]),
+        HandleType::Fixed(t) => NodeInputDef::new(id, label, &[t.value_type()]),
         HandleType::Inferred { .. } => {
             NodeInputDef::new(id.clone(), label, &WgslType::ALL).family(inferred_item_family(&id))
         }
@@ -172,8 +188,13 @@ pub fn build_zone_descriptor(
             let items = zone_items(output_node());
             let mut outputs = vec![NodeOutputDef::new(DELTA_TIME_HANDLE, "Delta Time", WgslType::F32)];
             outputs.extend(items.iter().map(|i| item_output(i, variables)));
+            let mut inputs: Vec<NodeInputDef> = items.iter().map(|i| item_input(i, variables)).collect();
+            for item in &items {
+                let mode = ItemSizeMode::parse(item.size.as_deref());
+                inputs.extend(size_inputs(&item_size_handles(&item.id), mode, Some(&item.label)));
+            }
             base(SIMULATION_INPUT, "Simulation Input")
-                .inputs(items.iter().map(|i| item_input(i, variables)).collect())
+                .inputs(inputs)
                 .outputs(outputs)
         }
         SIMULATION_OUTPUT => {

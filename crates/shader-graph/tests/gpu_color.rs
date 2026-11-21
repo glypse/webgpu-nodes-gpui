@@ -47,7 +47,7 @@ fn render(model: &mut GraphModel, node: &str, output: &str) -> Rgb {
         .generate_with(&ShaderOptions::default())
         .expect("generates");
     let mut renderer = Renderer::new().expect("a GPU");
-    let compiled = renderer.compile(&program.program).expect("compiles");
+    let compiled = renderer.compile(&program.plan).expect("compiles");
     let options = RenderOptions {
         size: Size::new(1, 1),
         format: PixelFormat::Rgba8,
@@ -148,5 +148,107 @@ fn gamut_mapping_matches_the_colour_pickers() {
             oklch_to_linear(Lch { l, c, h }, ColorSpace::Srgb),
             &format!("{l} {c} {h}"),
         );
+    }
+}
+
+mod ramp {
+    use std::collections::BTreeMap;
+
+    use shader_graph::nodes::{COLOR_RAMP, RAMP_FACTOR, RAMP_HUE, RAMP_INTERPOLATION, RAMP_SPACE};
+    use shader_graph::ramp::{
+        HUE_LONGER, HUE_SHORTER, RAMP_B_SPLINE, RAMP_CARDINAL, RAMP_CONSTANT, RAMP_EASE, RAMP_HSV,
+        RAMP_LINEAR, RAMP_OKLCH, RAMP_RGB, RAMP_SMOOTH, RampColorStop, RampModes, RampStop,
+        evaluate_ramp,
+    };
+
+    use super::*;
+
+    const COLORS: [[f64; 4]; 3] = [
+        [1.0, 0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+    ];
+    const POSITIONS: [f64; 3] = [0.0, 0.3, 1.0];
+
+    fn ramp_on_gpu(modes: RampModes, factor: f64) -> Rgb {
+        let mut model = GraphModel::default();
+        let node = model.add_node(COLOR_RAMP, Point::default()).expect("adds");
+        let stops: Vec<RampStop> = POSITIONS
+            .iter()
+            .enumerate()
+            .map(|(i, p)| RampStop {
+                id: format!("stop-{i}"),
+                position: *p,
+            })
+            .collect();
+        let colors: BTreeMap<String, InputValue> = COLORS
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (format!("stop-{i}"), InputValue::vector(c)))
+            .collect();
+        model.set_color_ramp(&node, &stops, &colors);
+        for (input, value) in [
+            (RAMP_FACTOR, factor),
+            (RAMP_INTERPOLATION, modes.interpolation as f64),
+            (RAMP_SPACE, modes.space as f64),
+            (RAMP_HUE, modes.hue as f64),
+        ] {
+            model.set_input_value(&node, input, Some(value.into()));
+        }
+        render(&mut model, &node, "color")
+    }
+
+    #[test]
+    fn the_shader_computes_what_the_cpu_does() {
+        let stops: Vec<RampColorStop> = POSITIONS
+            .iter()
+            .zip(COLORS)
+            .map(|(position, color)| RampColorStop {
+                position: *position,
+                color,
+            })
+            .collect();
+        let modes = [
+            RampModes {
+                interpolation: RAMP_LINEAR,
+                space: RAMP_RGB,
+                hue: HUE_SHORTER,
+            },
+            RampModes {
+                interpolation: RAMP_EASE,
+                space: RAMP_HSV,
+                hue: HUE_SHORTER,
+            },
+            RampModes {
+                interpolation: RAMP_SMOOTH,
+                space: RAMP_OKLCH,
+                hue: HUE_LONGER,
+            },
+            RampModes {
+                interpolation: RAMP_CARDINAL,
+                space: RAMP_RGB,
+                hue: HUE_SHORTER,
+            },
+            RampModes {
+                interpolation: RAMP_B_SPLINE,
+                space: RAMP_OKLCH,
+                hue: HUE_SHORTER,
+            },
+            RampModes {
+                interpolation: RAMP_CONSTANT,
+                space: RAMP_HSV,
+                hue: HUE_SHORTER,
+            },
+        ];
+        for modes in modes {
+            for factor in [0.0, 0.15, 0.3, 0.55, 0.9, 1.0] {
+                let [r, g, b, _] = evaluate_ramp(&stops, factor, modes);
+                expect_close(
+                    ramp_on_gpu(modes, factor),
+                    Rgb::new(r, g, b),
+                    &format!("{modes:?} at {factor}"),
+                );
+            }
+        }
     }
 }

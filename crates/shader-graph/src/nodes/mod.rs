@@ -1,16 +1,22 @@
 //! The node registry: every node type's descriptor.
 
 mod builders;
+mod color_ramp;
 mod curve;
 mod dynamic;
+mod render_texture;
 mod standard;
+mod texture;
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 pub use builders::*;
+pub use color_ramp::*;
 pub use dynamic::*;
+pub use render_texture::*;
 pub use standard::{COMPONENT_COUNT, COMPONENT_COUNT_INPUT};
+pub use texture::*;
 
 use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, WIDTH_SWITCH};
 use crate::graph::{GROUP_INPUT, GROUP_OUTPUT, GraphNode, GraphProject, NODE_GROUP};
@@ -18,7 +24,7 @@ use crate::types::{NodeData, NodeDescriptor};
 use crate::zones::{build_zone_descriptor, is_zone_node_type};
 
 /// Node types whose descriptor is built from their node, not registered.
-pub const DYNAMIC_NODE_TYPES: [&str; 9] = [
+pub const DYNAMIC_NODE_TYPES: [&str; 10] = [
     GROUP_INPUT,
     GROUP_OUTPUT,
     crate::zones::REPEAT_INPUT,
@@ -28,6 +34,7 @@ pub const DYNAMIC_NODE_TYPES: [&str; 9] = [
     NODE_GROUP,
     MATCH,
     INDEX_SWITCH,
+    RENDER_TEXTURE,
 ];
 
 struct Registry {
@@ -45,6 +52,9 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     all.extend(standard::integer_nodes());
     all.extend(standard::converter_nodes());
     all.extend(standard::color_nodes());
+    all.push(color_ramp::color_ramp_node());
+    all.extend(texture::texture_nodes());
+    all.push(build_render_texture_descriptor(&NodeData::default()));
     all.push(width_switch_node());
     all.push(build_match_descriptor(&[]));
     all.push(build_index_switch_descriptor(&NodeData::default()));
@@ -99,7 +109,9 @@ pub fn resolve_descriptor(node: &GraphNode, project: &GraphProject) -> Arc<NodeD
             Arc::new(build_zone_descriptor(node, project, variables))
         }
         CUSTOM_WGSL => Arc::new(build_custom_wgsl_descriptor(&node.data)),
+        COLOR_RAMP => Arc::new(build_color_ramp_descriptor(&node.data)),
         INDEX_SWITCH => Arc::new(build_index_switch_descriptor(&node.data)),
+        RENDER_TEXTURE => Arc::new(build_render_texture_descriptor(&node.data)),
         MATCH => {
             let variants = doc()
                 .and_then(|d| EnumDocument::of(d).enum_at(&node.id, MATCH_SELECTOR).map(<[_]>::to_vec))
