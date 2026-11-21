@@ -6,7 +6,8 @@ use gpui::{
     ParentElement as _, Pixels, Point, RenderOnce, SharedString, Styled as _, Subscription, Window,
     canvas, div, prelude::FluentBuilder as _, px,
 };
-use theme::{ActiveTheme as _, InputEvent, TextInput};
+use gpui_component::input::{Escape, InputEvent, InputState, MaskPattern, NumberInput};
+use theme::ActiveTheme as _;
 
 /// Whether a change is a step of a gesture still going on, or its end.
 /// History keeps only the ends, so a scrub is undone in one go.
@@ -23,7 +24,7 @@ const DRAG_THRESHOLD: f32 = 3.0;
 
 /// The typed entry of a number, kept beside its scrub across renders.
 struct EntryState {
-    input: Entity<TextInput>,
+    input: Entity<InputState>,
     editing: bool,
     /// Where focus was before typing began, to give it back once done.
     previous_focus: Option<FocusHandle>,
@@ -37,20 +38,21 @@ struct EntryState {
 
 impl EntryState {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(TextInput::new);
+        let input = cx.new(|cx| {
+            InputState::new(window, cx).mask_pattern(MaskPattern::Number {
+                separator: None,
+                fraction: None,
+            })
+        });
         let subscription =
             cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                 guard::guard("number entry", || match event {
-                    InputEvent::Submit => {
+                    InputEvent::PressEnter { .. } => {
                         this.commit(window, cx);
                         this.restore_focus(window, cx);
                     }
                     InputEvent::Blur => this.commit(window, cx),
-                    InputEvent::Cancel => {
-                        this.finish(cx);
-                        this.restore_focus(window, cx);
-                    }
-                    InputEvent::Change => {}
+                    _ => {}
                 });
             });
         Self {
@@ -71,8 +73,8 @@ impl EntryState {
         self.editing = true;
         let text = format_number(self.value, self.integer);
         self.input.update(cx, |input, cx| {
-            input.set_value(text, cx);
-            input.select_all_text(cx);
+            input.set_value(text, window, cx);
+            input.select_all(window, cx);
             input.focus(window, cx);
         });
         cx.notify();
@@ -96,7 +98,7 @@ impl EntryState {
         if !self.editing {
             return;
         }
-        let typed = parse_number(self.input.read(cx).value());
+        let typed = parse_number(&self.input.read(cx).value());
         self.finish(cx);
         let Some(typed) = typed else {
             return;
@@ -213,15 +215,12 @@ impl RenderOnce for Scrub {
         });
         let typing = entry.read(cx).editing;
         let input = entry.read(cx).input.clone();
-        entry.update(cx, |e, cx| {
+        entry.update(cx, |e, _| {
             e.value = value;
             e.integer = integer;
             e.min = min;
             e.max = max;
             e.on_change = self.on_change.clone();
-            e.input.update(cx, |input, cx| {
-                input.set_compact(Some((px(22.0 * z), px(12.0 * z))), cx);
-            });
         });
         let group: SharedString = format!("scrub-{:?}", self.id).into();
 
@@ -278,8 +277,28 @@ impl RenderOnce for Scrub {
             .text_color(fg)
             .when(self.readonly, |d| d.opacity(0.5))
             .when(typing, |d| {
+                let entry = entry.clone();
                 d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(input)
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .on_action(move |_: &Escape, window, cx| {
+                                cx.stop_propagation();
+                                guard::guard("number entry", || {
+                                    entry.update(cx, |e, cx| {
+                                        e.finish(cx);
+                                        e.restore_focus(window, cx);
+                                    });
+                                });
+                            })
+                            .child(
+                                NumberInput::new(&input)
+                                    .stepper(false)
+                                    .h(px(22.0 * z))
+                                    .text_size(px(12.0 * z)),
+                            ),
+                    )
             })
             .when(!self.readonly && !typing, |d| {
                 d.cursor(CursorStyle::ResizeLeftRight)

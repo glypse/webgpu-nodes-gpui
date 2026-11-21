@@ -2,11 +2,12 @@ use guard::SafeListener as _;
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels, Point, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use gpui_component::input::{Escape, Input, InputEvent, InputState};
 use shader_graph::catalog::{AddMenuEntry, SearchResult, group_by_heading, search_entries};
-use theme::{ActiveTheme as _, InputEvent, TextInput, popup};
+use theme::{ActiveTheme as _, popup};
 
 pub enum AddMenuEvent {
     Picked(Box<AddMenuEntry>),
@@ -19,7 +20,11 @@ pub enum AddMenuEvent {
 pub struct AddMenu {
     entries: Vec<AddMenuEntry>,
     at: Point<Pixels>,
-    input: Entity<TextInput>,
+    placeholder: SharedString,
+    /// Made on the first render, which is when a window is at hand to build it.
+    input: Option<Entity<InputState>>,
+    _input_subscription: Option<Subscription>,
+    focus: FocusHandle,
     query: String,
     results: Vec<SearchResult>,
     /// The result Enter picks, moved with the arrow keys.
@@ -32,8 +37,8 @@ pub struct AddMenu {
 impl EventEmitter<AddMenuEvent> for AddMenu {}
 
 impl Focusable for AddMenu {
-    fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.input.read(cx).focus_handle(cx)
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
     }
 }
 
@@ -45,24 +50,13 @@ impl AddMenu {
         accepts: Box<dyn Fn(&AddMenuEntry) -> bool>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let placeholder = placeholder.into();
-        let input = cx.new(|cx| TextInput::new(cx).placeholder(placeholder));
-        cx.subscribe(&input, |this, input, event: &InputEvent, cx| match event {
-            InputEvent::Change => {
-                this.query = input.read(cx).value().to_string();
-                this.results = search_entries(&this.entries, &this.query, &*this.accepts);
-                this.highlighted = 0;
-                cx.notify();
-            }
-            InputEvent::Submit => this.pick_highlighted(cx),
-            InputEvent::Cancel => cx.emit(AddMenuEvent::Dismissed),
-            InputEvent::Blur => {}
-        })
-        .detach();
         Self {
             entries,
             at,
-            input,
+            placeholder: placeholder.into(),
+            input: None,
+            _input_subscription: None,
+            focus: cx.focus_handle(),
             query: String::new(),
             results: Vec::new(),
             highlighted: 0,
@@ -122,9 +116,30 @@ fn highlighted(text: &str, ranges: &[(usize, usize)], muted: gpui::Hsla, strong:
 
 impl Render for AddMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("add menu", || {
+        let input = match self.input.clone() {
+            Some(input) => input,
+            None => {
+                let placeholder = self.placeholder.clone();
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+                self._input_subscription = Some(cx.subscribe_in(&input, window, |this, input, event: &InputEvent, _, cx| {
+                    match event {
+                        InputEvent::Change => {
+                            this.query = input.read(cx).value().to_string();
+                            this.results = search_entries(&this.entries, &this.query, &*this.accepts);
+                            this.highlighted = 0;
+                            cx.notify();
+                        }
+                        InputEvent::PressEnter { .. } => this.pick_highlighted(cx),
+                        _ => {}
+                    }
+                }));
+                self.input = Some(input.clone());
+                input
+            }
+        };
         if !self.focused {
             self.focused = true;
-            self.input.update(cx, |input, cx| input.focus(window, cx));
+            input.update(cx, |input, cx| input.focus(window, cx));
         }
         let theme = cx.theme().clone();
         let c = &theme.colors;
@@ -266,11 +281,103 @@ impl Render for AddMenu {
         let content = div()
             .w(width)
             .p_1()
+            .track_focus(&self.focus)
             .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
-            .child(div().px_1().pb_1().border_b_1().border_color(c.border).child(self.input.clone()))
+            .on_action(cx.safe_listener(|_, _: &Escape, _, cx| {
+                cx.stop_propagation();
+                cx.emit(AddMenuEvent::Dismissed);
+            }))
+            .child(div().px_1().pb_1().border_b_1().border_color(c.border).child(Input::new(&input)))
             .child(div().pt_1().child(body));
         popup::panel(cx, self.at, dismiss, content)
     })
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui::{Render, TestAppContext, VisualTestContext, point, px};
+    use shader_graph::catalog::EntryKind;
+
+    use super::*;
+
+    fn entry(label: &str) -> AddMenuEntry {
+        AddMenuEntry {
+            key: label.to_owned(),
+            label: label.to_owned(),
+            aliases: Vec::new(),
+            heading: "Math".to_owned(),
+            section: Vec::new(),
+            search_section: None,
+            kind: EntryKind::Node { node_type: label.to_owned() },
+            data: None,
+            choices: Vec::new(),
+            disabled: false,
+            deletable: false,
+        }
+    }
+
+    struct Host(Entity<AddMenu>);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            guard::render("add menu host", || self.0.clone())
+        }
+    }
+
+    type Events = Rc<RefCell<Vec<String>>>;
+
+    fn setup(cx: &mut TestAppContext) -> (Entity<AddMenu>, Events, &mut VisualTestContext) {
+        cx.update(theme::init);
+        let entries = vec![entry("Sine"), entry("Cosine"), entry("Add")];
+        let menu = cx.update(|cx| {
+            cx.new(|cx| {
+                AddMenu::new(entries, point(px(0.0), px(0.0)), "Search nodes…", Box::new(|_| true), cx)
+            })
+        });
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let log = events.clone();
+        cx.update(|cx| {
+            cx.subscribe(&menu, move |_, event: &AddMenuEvent, _| {
+                log.borrow_mut().push(match event {
+                    AddMenuEvent::Picked(entry) => format!("picked {}", entry.label),
+                    AddMenuEvent::DeleteGroup(key) => format!("delete {key}"),
+                    AddMenuEvent::Dismissed => "dismissed".to_owned(),
+                });
+            })
+            .detach();
+        });
+        let (_, cx) = cx.add_window_view(|_, _| Host(menu.clone()));
+        cx.run_until_parked();
+        (menu, events, cx)
+    }
+
+    #[gpui::test]
+    fn typing_searches_and_the_arrows_and_enter_pick_from_the_results(cx: &mut TestAppContext) {
+        let (menu, events, cx) = setup(cx);
+        cx.simulate_input("sin");
+        cx.run_until_parked();
+        let labels: Vec<String> =
+            cx.read(|cx| menu.read(cx).results.iter().map(|r| r.entry.label.clone()).collect());
+        assert_eq!(labels, ["Sine", "Cosine"]);
+
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        assert_eq!(cx.read(|cx| menu.read(cx).highlighted), 1);
+
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(*events.borrow(), ["picked Cosine"]);
+    }
+
+    #[gpui::test]
+    fn escape_dismisses_the_menu(cx: &mut TestAppContext) {
+        let (_, events, cx) = setup(cx);
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert_eq!(*events.borrow(), ["dismissed"]);
+    }
+}

@@ -439,7 +439,7 @@ pub fn render_node(
     view: &NodeView,
     props: &NodeProps,
     ed: &WeakEntity<Editor>,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     if view.node_type == REROUTE {
@@ -455,7 +455,7 @@ pub fn render_node(
     let theme = cx.theme().clone();
     let c = &theme.colors;
     let s = |v: f32| px(v * z);
-    let widget = view.widget.as_ref().map(|w| widgets::render(w, &view.id, z, view.locked, ed, cx));
+    let widget = view.widget.as_ref().map(|w| widgets::render(w, &view.id, z, view.locked, ed, window, cx));
     let linked_in = props.connected_handles(HandleType::Target);
     let linked_out = props.connected_handles(HandleType::Source);
     let is_linked = |set: &HashSet<Option<gpui_flow::Id>>, id: &str| set.contains(&Some(id.to_owned().into()));

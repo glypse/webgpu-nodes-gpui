@@ -44,7 +44,7 @@ actions!(
 );
 
 /// Playback keys act anywhere but while typing in a field.
-const CONTEXT: &str = "Shell && !ThemeTextInput";
+const CONTEXT: &str = "Shell && !Input";
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([

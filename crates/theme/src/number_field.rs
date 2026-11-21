@@ -4,9 +4,10 @@ use gpui::{
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use gpui_component::input::{Escape, InputEvent, InputState, MaskPattern, NumberInput};
 use guard::SafeListener as _;
 
-use crate::{ActiveTheme as _, InputEvent, TextInput};
+use crate::ActiveTheme as _;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NumberEvent {
@@ -33,23 +34,18 @@ pub struct NumberField {
     max: Option<f64>,
     soft_min: Option<f64>,
     soft_max: Option<f64>,
-    input: Entity<TextInput>,
+    /// Made on the first edit, which is when a window is at hand to build it.
+    input: Option<Entity<InputState>>,
+    _input_subscription: Option<Subscription>,
     editing: bool,
     scrub: Option<(f32, f64)>,
     moved: bool,
-    _subscription: Subscription,
 }
 
 impl EventEmitter<NumberEvent> for NumberField {}
 
 impl NumberField {
-    pub fn new(value: f64, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(TextInput::new);
-        let subscription = cx.subscribe(&input, |this, _, event: &InputEvent, cx| match event {
-            InputEvent::Submit | InputEvent::Blur => this.commit(cx),
-            InputEvent::Cancel => this.stop_editing(cx),
-            InputEvent::Change => {}
-        });
+    pub fn new(value: f64, _cx: &mut Context<Self>) -> Self {
         Self {
             label: None,
             value,
@@ -60,11 +56,11 @@ impl NumberField {
             max: None,
             soft_min: None,
             soft_max: None,
-            input,
+            input: None,
+            _input_subscription: None,
             editing: false,
             scrub: None,
             moved: false,
-            _subscription: subscription,
         }
     }
 
@@ -171,9 +167,28 @@ impl NumberField {
     fn start_editing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = true;
         let text = self.format();
-        self.input.update(cx, |input, cx| {
-            input.set_value(text, cx);
-            input.select_all_text(cx);
+        let input = match self.input.clone() {
+            Some(input) => input,
+            None => {
+                let input = cx.new(|cx| {
+                    InputState::new(window, cx).mask_pattern(MaskPattern::Number {
+                        separator: None,
+                        fraction: None,
+                    })
+                });
+                self._input_subscription =
+                    Some(cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
+                                        if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                            this.commit(cx);
+                        }
+                    }));
+                self.input = Some(input.clone());
+                input
+            }
+        };
+        input.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.select_all(window, cx);
             input.focus(window, cx);
         });
         cx.notify();
@@ -191,7 +206,11 @@ impl NumberField {
             return;
         }
         self.editing = false;
-        if let Ok(parsed) = self.input.read(cx).value().trim().parse::<f64>() {
+        let typed = self
+            .input
+            .as_ref()
+            .and_then(|input| input.read(cx).value().trim().parse::<f64>().ok());
+        if let Some(parsed) = typed {
             self.change(parsed, cx);
         }
         cx.notify();
@@ -239,8 +258,20 @@ impl Render for NumberField {
                 .min_w_0()
                 .font_family(theme.font.clone())
                 .text_size(theme.text.sm);
-            if self.editing {
-                return base.child(self.input.clone()).into_any_element();
+            if self.editing
+                && let Some(input) = self.input.clone()
+            {
+                return base
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .on_action(cx.safe_listener(|this, _: &Escape, _, cx| {
+                                this.stop_editing(cx);
+                            }))
+                            .child(NumberInput::new(&input).stepper(false)),
+                    )
+                    .into_any_element();
             }
             if self.read_only {
                 return base
@@ -316,6 +347,11 @@ impl Render for NumberField {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui::{Render, TestAppContext, VisualTestContext};
+
     use super::*;
 
     #[test]
@@ -336,5 +372,73 @@ mod tests {
     #[test]
     fn without_a_soft_range_nothing_is_held() {
         assert_eq!(soft_clamp(9.0, 0.0, None, None), 9.0);
+    }
+
+    struct Host(Entity<NumberField>);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            guard::render("number field host", || div().w(px(200.0)).child(self.0.clone()))
+        }
+    }
+
+    type Changes = Rc<RefCell<Vec<f64>>>;
+
+    fn setup(
+        cx: &mut TestAppContext,
+        make: impl FnOnce(&mut Context<NumberField>) -> NumberField,
+    ) -> (Entity<NumberField>, Changes, &mut VisualTestContext) {
+        cx.update(crate::init);
+        let field = cx.update(|cx| cx.new(make));
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let log = changes.clone();
+        let (_, cx) = cx.add_window_view(|_, _| Host(field.clone()));
+        cx.update(|_, cx| {
+            cx.subscribe(&field, move |_, event: &NumberEvent, _| {
+                let NumberEvent::Change(value) = *event;
+                log.borrow_mut().push(value);
+            })
+            .detach();
+        });
+        cx.run_until_parked();
+        (field, changes, cx)
+    }
+
+    fn edit(field: &Entity<NumberField>, cx: &mut VisualTestContext, text: &str, key: &str) {
+        cx.update(|window, cx| field.update(cx, |f, cx| f.start_editing(window, cx)));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("cmd-a");
+        cx.simulate_input(text);
+        cx.simulate_keystrokes(key);
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn typing_a_number_and_pressing_enter_commits_it(cx: &mut TestAppContext) {
+        let (field, changes, cx) = setup(cx, |cx| NumberField::new(1.0, cx));
+        edit(&field, cx, "7.5", "enter");
+        assert_eq!(*changes.borrow(), vec![7.5]);
+    }
+
+    #[gpui::test]
+    fn typed_values_are_held_to_the_range(cx: &mut TestAppContext) {
+        let (field, changes, cx) = setup(cx, |cx| NumberField::new(1.0, cx).min(0.0).max(10.0));
+        edit(&field, cx, "99", "enter");
+        assert_eq!(*changes.borrow(), vec![10.0]);
+    }
+
+    #[gpui::test]
+    fn whole_numbers_round_what_is_typed(cx: &mut TestAppContext) {
+        let (field, changes, cx) = setup(cx, |cx| NumberField::new(1.0, cx).integer());
+        edit(&field, cx, "2.6", "enter");
+        assert_eq!(*changes.borrow(), vec![3.0]);
+    }
+
+    #[gpui::test]
+    fn escape_cancels_the_edit(cx: &mut TestAppContext) {
+        let (field, changes, cx) = setup(cx, |cx| NumberField::new(1.0, cx));
+        edit(&field, cx, "7", "escape");
+        assert!(changes.borrow().is_empty());
+        assert!(!cx.read(|cx| field.read(cx).editing));
     }
 }

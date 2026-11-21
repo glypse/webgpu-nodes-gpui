@@ -1,19 +1,18 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use gpui::{
-    AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _,
     Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::input::{Escape, Input, InputEvent, InputState};
+use guard::SafeListener as _;
 use graph_math::color::{
     ColorMode, ColorSpace, Hsv, Lch, Rgb, Rgba as LinearRgba, clip_to_gamut, decode_rgb, encode_in,
     hex_to_linear, hsv_keeping_hue, hsv_to_rgb, lch_keeping_hue, linear_to_hex, oklch_to_linear,
 };
 
-use crate::{
-    ActiveTheme as _, ColorWheels, ColorWheelsEvent, InputEvent, NumberEvent, NumberField,
-    TextInput,
-};
+use crate::{ActiveTheme as _, ColorWheels, ColorWheelsEvent, NumberEvent, NumberField};
 
 /// The mode last shown, kept for the next picker opened.
 static LAST_MODE: AtomicU8 = AtomicU8::new(1);
@@ -79,7 +78,12 @@ pub struct ColorPicker {
     sent: Option<LinearRgba>,
     wheels: Entity<ColorWheels>,
     fields: [Entity<NumberField>; 4],
-    hex: Entity<TextInput>,
+    /// Made on the first render, which is when a window is at hand to build it.
+    hex: Option<Entity<InputState>>,
+    _hex_subscription: Option<Subscription>,
+    hex_text: SharedString,
+    /// Set when `hex_text` should replace what the field shows, even mid-typing.
+    hex_dirty: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -92,7 +96,6 @@ impl ColorPicker {
         let lch = lch_keeping_hue(value.rgb(), Lch::default());
         let wheels = cx.new(|_| ColorWheels::new(mode, [0.0; 3]));
         let fields = [(); 4].map(|()| cx.new(|cx| NumberField::new(0.0, cx).step(0.01)));
-        let hex = cx.new(TextInput::new);
         let mut subscriptions = vec![cx.subscribe(&wheels, |this, _, event, cx| {
             let ColorWheelsEvent::Change(components) = event;
             this.set_components(*components, cx);
@@ -103,11 +106,6 @@ impl ColorPicker {
                 this.set_field(index, *number, cx);
             }));
         }
-        subscriptions.push(cx.subscribe(&hex, |this, _, event, cx| match event {
-            InputEvent::Submit | InputEvent::Blur => this.commit_hex(cx),
-            InputEvent::Cancel => this.refresh(cx),
-            InputEvent::Change => {}
-        }));
         let mut picker = Self {
             value,
             alpha: false,
@@ -118,7 +116,10 @@ impl ColorPicker {
             sent: None,
             wheels,
             fields,
-            hex,
+            hex: None,
+            _hex_subscription: None,
+            hex_text: SharedString::default(),
+            hex_dirty: false,
             _subscriptions: subscriptions,
         };
         picker.configure_fields(cx);
@@ -229,8 +230,8 @@ impl ColorPicker {
         let mode = self.mode;
         self.wheels
             .update(cx, |wheels, cx| wheels.set_components(mode, components, cx));
-        let hex = linear_to_hex(self.value, self.alpha, self.gamut);
-        self.hex.update(cx, |input, cx| input.set_value(hex, cx));
+        self.hex_text = linear_to_hex(self.value, self.alpha, self.gamut).into();
+        self.hex_dirty = true;
         cx.notify();
     }
 
@@ -296,8 +297,16 @@ impl ColorPicker {
         self.set_components(components, cx);
     }
 
+    /// What the hex field holds now, which is what was typed until the next refresh.
+    fn typed_hex(&self, cx: &App) -> String {
+        self.hex
+            .as_ref()
+            .map(|hex| hex.read(cx).value().to_string())
+            .unwrap_or_default()
+    }
+
     fn commit_hex(&mut self, cx: &mut Context<Self>) {
-        let text = self.hex.read(cx).value().to_string();
+        let text = self.typed_hex(cx);
         if let Some(parsed) = hex_to_linear(&text, self.gamut) {
             let digits = text.trim().trim_start_matches('#').len();
             let with_alpha = self.alpha && (digits == 4 || digits == 8);
@@ -313,7 +322,24 @@ impl ColorPicker {
 }
 
 impl Render for ColorPicker {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let hex = match self.hex.clone() {
+            Some(hex) => hex,
+            None => {
+                let hex = cx.new(|cx| InputState::new(window, cx));
+                self._hex_subscription = Some(cx.subscribe_in(&hex, window, |this, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        this.commit_hex(cx);
+                    }
+                }));
+                self.hex = Some(hex.clone());
+                hex
+            }
+        };
+        if std::mem::take(&mut self.hex_dirty) {
+            let text = self.hex_text.clone();
+            hex.update(cx, |input, cx| input.set_value(text, window, cx));
+        }
         guard::render("ColorPicker", || {
             let theme = cx.theme();
             let c = &theme.colors;
@@ -366,7 +392,14 @@ impl Render for ColorPicker {
                 .border_1()
                 .border_color(gpui::black().opacity(0.2))
                 .bg(linear_to_hsla(self.value.rgb(), self.gamut));
-            let hex = div().flex_1().min_w_0().child(self.hex.clone());
+            let hex = div()
+                .flex_1()
+                .min_w_0()
+                .on_action(cx.safe_listener(|this, _: &Escape, _, cx| {
+                    cx.stop_propagation();
+                    this.refresh(cx);
+                }))
+                .child(Input::new(&hex));
             #[cfg(test)]
             let hex = gpui::InteractiveElement::debug_selector(hex, || "picker-hex".into());
             div()
@@ -456,7 +489,7 @@ mod tests {
         let (picker, changes, cx) = setup(cx, |cx| ColorPicker::new(color(1.0, 1.0, 1.0, 1.0), cx));
         type_hex(cx, "nothex");
         assert!(changes.borrow().is_empty());
-        let shown = cx.read(|cx| picker.read(cx).hex.read(cx).value().to_string());
+        let shown = cx.read(|cx| picker.read(cx).typed_hex(cx));
         assert_eq!(shown, "#FFFFFF");
     }
 

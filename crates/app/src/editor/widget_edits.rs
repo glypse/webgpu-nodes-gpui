@@ -174,14 +174,13 @@ impl Editor {
         self.edit(cx, |m| m.set_render_item_format(node, item, format));
     }
 
-    /// A name the model refuses is put back as it was stored.
-    pub(crate) fn rename_render_item(&mut self, node: &str, item: &str, name: &str, cx: &mut Context<Self>) {
+    /// Whether the model took the name; a refused one is put back by the field showing it.
+    pub(crate) fn rename_render_item(&mut self, node: &str, item: &str, name: &str, cx: &mut Context<Self>) -> bool {
         let accepted = self.model_mut().rename_render_item(node, item, name);
         if accepted {
             self.after_edit(cx);
-        } else {
-            self.widgets.reset_name(node, item, cx);
         }
+        accepted
     }
 
     pub(crate) fn code_typed(&mut self, node: &str, code: String, cx: &mut Context<Self>) {

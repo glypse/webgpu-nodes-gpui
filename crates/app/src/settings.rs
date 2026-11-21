@@ -11,7 +11,8 @@ use gpui::{
 use runtime::Size;
 use shader_graph::graph::{ColorSpace, MAX_CANVAS_SIZE, MAX_FPS, ProjectSettings};
 use gpui_component::{Disableable as _, Selectable as _, Sizable as _, button::{Button, ButtonGroup, ButtonVariants as _}};
-use theme::{ActiveTheme as _, InputEvent, NumberEvent, NumberField, TextInput};
+use gpui_component::input::{Input, InputEvent, InputState};
+use theme::{ActiveTheme as _, NumberEvent, NumberField};
 
 use crate::editor::Editor;
 use crate::playback::Playback;
@@ -97,7 +98,7 @@ pub struct SettingsDialog {
     width: Entity<NumberField>,
     height: Entity<NumberField>,
     fps: Entity<NumberField>,
-    font: Entity<TextInput>,
+    font: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -141,9 +142,10 @@ impl SettingsDialog {
         let fps = cx.new(|cx| {
             NumberField::new(settings.timing.fps, cx).label("FPS").step(1.0).min(1.0).max(MAX_FPS)
         });
+        let font_text = cx.global::<Preferences>().font.clone();
         let font = cx.new(|cx| {
-            let mut input = TextInput::new(cx).placeholder(theme::INTERFACE_FONT);
-            input.set_value(cx.global::<Preferences>().font.clone(), cx);
+            let mut input = InputState::new(window, cx).placeholder(theme::INTERFACE_FONT);
+            input.set_value(font_text, window, cx);
             input
         });
         let subscriptions = vec![
@@ -163,7 +165,7 @@ impl SettingsDialog {
                 guard::guard("frame rate", || this.update(cx, |s| s.timing.fps = *v));
             }),
             cx.subscribe_in(&font, window, |_, input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change | InputEvent::Submit | InputEvent::Blur) {
+                if matches!(event, InputEvent::Change | InputEvent::PressEnter { .. } | InputEvent::Blur) {
                     let text = input.read(cx).value().trim().to_owned();
                     guard::guard("interface font", || {
                         preferences::update(window, cx, |p| p.font = text);
@@ -453,7 +455,7 @@ impl SettingsDialog {
                         .border_1()
                         .border_color(cx.theme().colors.input)
                         .rounded(cx.theme().radius.md)
-                        .child(self.font.clone()),
+                        .child(Input::new(&self.font).appearance(false)),
                 )
                 .child(
                     Button::new("reset-font")
@@ -462,7 +464,7 @@ impl SettingsDialog {
                         .label("Reset")
                         .disabled(current.font.is_empty())
                         .on_click(cx.safe_listener(|this, _, window, cx| {
-                            this.font.update(cx, |f, cx| f.set_value(String::new(), cx));
+                            this.font.update(cx, |f, cx| f.set_value(String::new(), window, cx));
                             preferences::update(window, cx, |p| p.font.clear());
                         })),
                 ),

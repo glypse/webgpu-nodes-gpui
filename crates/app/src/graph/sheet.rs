@@ -20,7 +20,8 @@ use shader_graph::types::{HandleType, SOCKET_TYPES, TypeVariable, WgslType, type
 use shader_graph::zones::{DEFAULT_MAX_ITERATIONS, MAX_ITERATIONS, is_zone_node_type, zone_max_iterations};
 use gpui_component::Disableable as _;
 use gpui_component::checkbox::Checkbox;
-use theme::{ActiveTheme as _, InputEvent, NumberEvent, NumberField, TextInput, Textarea};
+use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use theme::{ActiveTheme as _, NumberEvent, NumberField};
 
 use super::frames::tint_color;
 use super::type_picker::{TypePicker, on_editor};
@@ -29,9 +30,9 @@ use crate::editor::{Editor, ListItem};
 
 #[derive(Default)]
 pub struct Fields {
-    pub(super) inputs: HashMap<String, Entity<TextInput>>,
+    pub(super) inputs: HashMap<String, Entity<InputState>>,
     pub(super) numbers: HashMap<String, Entity<NumberField>>,
-    areas: HashMap<String, Entity<Textarea>>,
+    areas: HashMap<String, Entity<TextareaState>>,
     /// Input handles whose details are shown.
     pub(crate) expanded: std::collections::HashSet<String>,
 }
@@ -48,22 +49,22 @@ pub(super) fn field(
     window: &mut Window,
     cx: &mut Context<Editor>,
     commit: Commit,
-) -> Entity<TextInput> {
+) -> Entity<InputState> {
     if let Some(existing) = editor.sheet_fields.inputs.get(&key).cloned() {
         let focused = existing.read(cx).focus_handle(cx).is_focused(window);
         if !focused && existing.read(cx).value().as_ref() != value {
-            existing.update(cx, |i, cx| i.set_value(value.to_owned(), cx));
+            existing.update(cx, |i, cx| i.set_value(value.to_owned(), window, cx));
         }
         return existing;
     }
     let placeholder = placeholder.to_owned();
     let input = cx.new(|cx| {
-        let mut input = TextInput::new(cx).placeholder(placeholder);
-        input.set_value(value.to_owned(), cx);
+        let mut input = InputState::new(window, cx).placeholder(placeholder);
+        input.set_value(value.to_owned(), window, cx);
         input
     });
-    cx.subscribe(&input, move |this, input, event: &InputEvent, cx| {
-        if matches!(event, InputEvent::Submit | InputEvent::Blur) {
+    cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, _, cx| {
+        if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
             let text = input.read(cx).value().to_string();
             commit(this, text, cx);
         }
@@ -82,22 +83,18 @@ fn text_area(
     window: &mut Window,
     cx: &mut Context<Editor>,
     commit: Commit,
-) -> Entity<Textarea> {
+) -> Entity<TextareaState> {
     if let Some(existing) = editor.sheet_fields.areas.get(&key).cloned() {
         let focused = existing.read(cx).focus_handle(cx).is_focused(window);
         if !focused && existing.read(cx).value().as_ref() != value {
-            existing.update(cx, |i, cx| i.set_value(value.to_owned(), cx));
+            existing.update(cx, |i, cx| i.set_value(value.to_owned(), window, cx));
         }
         return existing;
     }
-    let placeholder = placeholder.to_owned();
-    let area = cx.new(|cx| {
-        let mut area = Textarea::new(cx).placeholder(placeholder);
-        area.set_value(value.to_owned(), cx);
-        area
-    });
-    cx.subscribe(&area, move |this, area, event: &InputEvent, cx| {
-        if matches!(event, InputEvent::Submit | InputEvent::Blur) {
+    let (placeholder, value) = (placeholder.to_owned(), value.to_owned());
+    let area = cx.new(|cx| new_text_area(&placeholder, &value, window, cx));
+    cx.subscribe_in(&area, window, move |this, area, event: &InputEvent, _, cx| {
+        if matches!(event, InputEvent::PressEnter { secondary: true, .. } | InputEvent::Blur) {
             let text = area.read(cx).value().to_string();
             commit(this, text, cx);
         }
@@ -206,9 +203,29 @@ pub(super) fn hint(text: &str, cx: &Context<Editor>) -> gpui::Div {
     div().text_size(theme.text.xs).text_color(theme.colors.muted_foreground).child(text.to_owned())
 }
 
-pub(super) fn boxed(input: Entity<TextInput>, cx: &Context<Editor>) -> gpui::Div {
+pub(super) fn boxed(input: Entity<InputState>, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
-    div().px_1().border_1().border_color(theme.colors.input).rounded(theme.radius.md).child(input)
+    div()
+        .px_1()
+        .border_1()
+        .border_color(theme.colors.input)
+        .rounded(theme.radius.md)
+        .child(Input::new(&input).appearance(false))
+}
+
+/// A multi-line field that grows with its text: Enter starts a line, Cmd-Enter is the commit
+/// gesture the fields listen for.
+pub(super) fn new_text_area(
+    placeholder: &str,
+    value: &str,
+    window: &mut Window,
+    cx: &mut Context<TextareaState>,
+) -> TextareaState {
+    let mut area = TextareaState::new(window, cx)
+        .auto_grow(3, usize::MAX)
+        .placeholder(placeholder.to_owned());
+    area.set_value(value.to_owned(), window, cx);
+    area
 }
 
 /// What the sheet shows of the node, taken from the model.
@@ -392,7 +409,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
         };
         let input = text_area(editor, format!("note-{node_id}"), &note, "What this part of the graph does…", window, cx, commit);
         body = body
-            .child(div().flex().flex_col().gap_1p5().child(heading("Note", cx)).child(div().p_1().border_1().border_color(c.input).rounded(theme.radius.md).child(input)))
+            .child(div().flex().flex_col().gap_1p5().child(heading("Note", cx)).child(div().p_1().border_1().border_color(c.input).rounded(theme.radius.md).child(Textarea::new(&input).appearance(false))))
             .child(
                 div().flex().flex_col().gap_1p5().child(heading("Colour", cx)).child(
                     div().flex().flex_wrap().gap_1p5().children(
@@ -997,4 +1014,78 @@ fn zone_settings(
         }));
     }
     body.child(section)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui::{Render, TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    struct Area(Entity<TextareaState>);
+
+    impl Render for Area {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            guard::render("area host", || div().w(px(300.0)).child(Textarea::new(&self.0)))
+        }
+    }
+
+    type Events = Rc<RefCell<Vec<&'static str>>>;
+
+    fn setup(cx: &mut TestAppContext) -> (Entity<TextareaState>, Events, &mut VisualTestContext) {
+        cx.update(theme::init);
+        let (host, cx) = cx.add_window_view(|window, cx| Area(cx.new(|cx| new_text_area("", "", window, cx))));
+        let area = cx.read(|cx| host.read(cx).0.clone());
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let log = events.clone();
+        cx.update(|window, cx| {
+            cx.subscribe(&area, move |_, event: &InputEvent, _| {
+                log.borrow_mut().push(match event {
+                    InputEvent::Change => "change",
+                    InputEvent::PressEnter { secondary: true, .. } => "submit",
+                    InputEvent::PressEnter { .. } => "enter",
+                    InputEvent::Blur => "blur",
+                    InputEvent::Focus => "focus",
+                });
+            })
+            .detach();
+            area.update(cx, |a, cx| a.focus(window, cx));
+        });
+        cx.run_until_parked();
+        (area, events, cx)
+    }
+
+    fn value(area: &Entity<TextareaState>, cx: &mut VisualTestContext) -> String {
+        cx.read(|cx| area.read(cx).value().to_string())
+    }
+
+    #[gpui::test]
+    fn enter_starts_a_new_line_and_does_not_commit(cx: &mut TestAppContext) {
+        let (area, events, cx) = setup(cx);
+        cx.simulate_input("one");
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("two");
+        assert_eq!(value(&area, cx), "one\ntwo");
+        assert!(events.borrow().iter().all(|e| matches!(*e, "change" | "enter")));
+    }
+
+    #[gpui::test]
+    fn cmd_enter_is_the_commit_gesture(cx: &mut TestAppContext) {
+        let (_, events, cx) = setup(cx);
+        cx.simulate_input("a");
+        cx.simulate_keystrokes("cmd-enter");
+        assert_eq!(*events.borrow(), ["change", "submit"]);
+    }
+
+    #[gpui::test]
+    fn backspace_joins_lines(cx: &mut TestAppContext) {
+        let (area, _, cx) = setup(cx);
+        cx.update(|window, cx| area.update(cx, |a, cx| a.set_value("a\nb", window, cx)));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("down backspace");
+        assert_eq!(value(&area, cx), "ab");
+    }
 }

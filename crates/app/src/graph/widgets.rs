@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, WeakEntity, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, SharedString, Styled as _, div, prelude::FluentBuilder as _,
-    px,
+    AnyElement, App, AppContext as _, Context, Entity, Subscription, WeakEntity, Window,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, SharedString,
+    Styled as _, div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
 use shader_graph::color::{ColorMode, ColorSpace as DisplayGamut, Rgba};
 use shader_graph::curve::{CurvePoint, linear_curve};
 use shader_graph::graph::{ColorSpace, GraphModel, GraphNode, GraphProject, GroupWidget};
@@ -18,11 +19,12 @@ use shader_graph::types::{
     InputValue, NodeData, NodeWidget, ScalarValue, VectorValue, WgslType, enum_value,
 };
 use theme::{
-    ActiveTheme as _, ColorWheels, ColorWheelsEvent, CurveEditor, CurveEditorEvent, InputEvent,
-    RampEditor, RampEditorEvent, Textarea, TextInput,
+    ActiveTheme as _, ColorWheels, ColorWheelsEvent, CurveEditor, CurveEditorEvent, RampEditor,
+    RampEditorEvent,
 };
 
 use super::item_widgets;
+use super::sheet::new_text_area;
 use crate::editor::Editor;
 
 /// What a linked ramp stop is drawn as: its colour is only known in the shader.
@@ -32,7 +34,7 @@ const UNKNOWN_STOP: Rgba = Rgba { r: 0.214, g: 0.214, b: 0.214, a: 1.0 };
 #[derive(Clone)]
 pub struct ItemRow {
     pub id: String,
-    pub name: Entity<TextInput>,
+    pub label: String,
     pub format: String,
 }
 
@@ -44,13 +46,101 @@ pub enum WidgetView {
     Color(Entity<ColorWheels>),
     Cases(u32),
     Items { rows: Vec<ItemRow>, can_remove: bool },
-    Code { signature: String, code: Entity<Textarea> },
+    Code { signature: String, text: String },
 }
 
-struct ItemName {
-    input: Entity<TextInput>,
+/// The name field of a Render Texture item. Kept across renders by the item's key, since
+/// the window it needs only exists while drawing.
+pub struct ItemNameField {
+    pub(super) input: Entity<InputState>,
     /// The stored name last put in the field, to tell edits made elsewhere from typing.
     synced: String,
+    _subscription: Subscription,
+}
+
+impl ItemNameField {
+    pub(super) fn new(
+        node: &str,
+        item: &str,
+        label: &str,
+        ed: WeakEntity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let input = cx.new(|cx| {
+            let mut input = InputState::new(window, cx);
+            input.set_value(label.to_owned(), window, cx);
+            input
+        });
+        let (node, item) = (node.to_owned(), item.to_owned());
+        let subscription = cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| {
+            if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                return;
+            }
+            let name = input.read(cx).value().to_string();
+            let accepted = guard::guard("item name", || {
+                ed.update(cx, |editor, cx| editor.rename_render_item(&node, &item, &name, cx))
+            })
+            .and_then(Result::ok)
+            .unwrap_or(true);
+            if !accepted {
+                let stored = this.synced.clone();
+                input.update(cx, |input, cx| input.set_value(stored, window, cx));
+            }
+        });
+        Self { input, synced: label.to_owned(), _subscription: subscription }
+    }
+
+    /// Puts a name the model changed into the field; typing that hasn't been submitted is kept.
+    pub(super) fn sync(&mut self, label: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.synced != label {
+            self.synced = label.to_owned();
+            let label = label.to_owned();
+            self.input.update(cx, |input, cx| input.set_value(label, window, cx));
+        }
+    }
+}
+
+/// The Custom WGSL code of a node, kept across renders by the node's key.
+pub struct CodeField {
+    pub(super) area: Entity<TextareaState>,
+    /// The stored code last put in the field, to tell edits made elsewhere from typing.
+    synced: String,
+    _subscription: Subscription,
+}
+
+impl CodeField {
+    pub(super) fn new(node: &str, text: &str, ed: WeakEntity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let area = cx.new(|cx| new_text_area("", text, window, cx));
+        let node = node.to_owned();
+        let subscription = cx.subscribe_in(&area, window, move |_, area, event: &InputEvent, _, cx| {
+            if !matches!(event, InputEvent::Change | InputEvent::Blur) {
+                return;
+            }
+            let value = area.read(cx).value().to_string();
+            let is_change = matches!(event, InputEvent::Change);
+            guard::guard("code editor", || {
+                ed.update(cx, |editor, cx| {
+                    if is_change {
+                        editor.code_typed(&node, value, cx);
+                    } else {
+                        editor.code_commit(&node, value, cx);
+                    }
+                })
+            });
+        });
+        Self { area, synced: text.to_owned(), _subscription: subscription }
+    }
+
+    pub(super) fn sync(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.synced != text {
+            self.synced = text.to_owned();
+            if self.area.read(cx).value().as_ref() != text {
+                let text = text.to_owned();
+                self.area.update(cx, |area, cx| area.set_value(text, window, cx));
+            }
+        }
+    }
 }
 
 /// The entities behind the widgets of the nodes drawn, kept between syncs
@@ -60,8 +150,6 @@ pub struct Widgets {
     curves: HashMap<String, Entity<CurveEditor>>,
     ramps: HashMap<String, (DisplayGamut, bool, Entity<RampEditor>)>,
     wheels: HashMap<String, Entity<ColorWheels>>,
-    names: HashMap<String, ItemName>,
-    code: HashMap<String, (String, Entity<Textarea>)>,
 }
 
 pub fn gamut_of(space: ColorSpace) -> DisplayGamut {
@@ -150,8 +238,6 @@ impl Widgets {
         self.curves.retain(|k, _| present(k));
         self.ramps.retain(|k, _| present(k));
         self.wheels.retain(|k, _| present(k));
-        self.names.retain(|k, _| present(k));
-        self.code.retain(|k, _| present(k));
     }
 
     /// The wheel of a colour input drawn on the node itself.
@@ -186,14 +272,6 @@ impl Widgets {
             w.set_gamut(gamut, cx);
         });
         entity
-    }
-
-    /// Puts the stored name back in an item's field after the model refused a new one.
-    pub fn reset_name(&self, node: &str, item: &str, cx: &mut Context<Editor>) {
-        if let Some(entry) = self.names.get(&format!("{node}/{item}")) {
-            let label = entry.synced.clone();
-            entry.input.update(cx, |input, cx| input.set_value(label, cx));
-        }
     }
 
     pub fn view(
@@ -314,35 +392,10 @@ impl Widgets {
                 let can_remove = items.len() > 1;
                 let rows = items
                     .iter()
-                    .map(|item| {
-                        let key = format!("{id}/{}", item.id);
-                        let entry = self.names.entry(key).or_insert_with(|| {
-                            let input = cx.new(|cx| {
-                                let mut input = TextInput::new(cx);
-                                input.set_compact(Some((px(22.0), px(12.0))), cx);
-                                input.set_value(item.label.clone(), cx);
-                                input
-                            });
-                            let (node, item_id) = (id.to_owned(), item.id.clone());
-                            cx.subscribe(&input, move |editor: &mut Editor, input, event: &InputEvent, cx| {
-                                if matches!(event, InputEvent::Submit | InputEvent::Blur) {
-                                    let name = input.read(cx).value().to_string();
-                                    guard::guard("item name", || editor.rename_render_item(&node, &item_id, &name, cx));
-                                }
-                            })
-                            .detach();
-                            ItemName { input, synced: item.label.clone() }
-                        });
-                        if entry.synced != item.label {
-                            entry.synced = item.label.clone();
-                            let label = item.label.clone();
-                            entry.input.update(cx, |input, cx| input.set_value(label, cx));
-                        }
-                        ItemRow {
-                            id: item.id.clone(),
-                            name: entry.input.clone(),
-                            format: item.format.clone().unwrap_or_else(|| "rgba16float".to_owned()),
-                        }
+                    .map(|item| ItemRow {
+                        id: item.id.clone(),
+                        label: item.label.clone(),
+                        format: item.format.clone().unwrap_or_else(|| "rgba16float".to_owned()),
                     })
                     .collect();
                 Some(WidgetView::Items { rows, can_remove })
@@ -360,32 +413,7 @@ impl Widgets {
                     if outputs.is_empty() { "nothing".to_owned() } else { outputs }
                 );
                 let text = node.data.code.clone().unwrap_or_default();
-                let (synced, entity) = self.code.entry(id.to_owned()).or_insert_with(|| {
-                    let entity = cx.new(|cx| {
-                        let mut area = Textarea::new(cx);
-                        area.set_value(text.clone(), cx);
-                        area
-                    });
-                    let node = id.to_owned();
-                    cx.subscribe(&entity, move |editor: &mut Editor, area, event: &InputEvent, cx| {
-                        let value = area.read(cx).value().to_string();
-                        match event {
-                            InputEvent::Change => editor.code_typed(&node, value, cx),
-                            InputEvent::Blur => editor.code_commit(&node, value, cx),
-                            _ => {}
-                        }
-                    })
-                    .detach();
-                    (text.clone(), entity)
-                });
-                if *synced != text {
-                    *synced = text.clone();
-                    let current = entity.read(cx).value().to_string();
-                    if current != text {
-                        entity.update(cx, |area, cx| area.set_value(text, cx));
-                    }
-                }
-                Some(WidgetView::Code { signature, code: entity.clone() })
+                Some(WidgetView::Code { signature, text })
             }
         }
     }
@@ -398,6 +426,7 @@ pub fn render(
     zoom: f32,
     locked: bool,
     ed: &WeakEntity<Editor>,
+    window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     let theme = cx.theme().clone();
@@ -453,32 +482,41 @@ pub fn render(
         WidgetView::Items { rows, can_remove } => {
             let mut list = div().flex().flex_col().gap(px(4.0 * z));
             for row in rows {
-                list = list.child(item_widgets::row(row, node, *can_remove && !locked, locked, z, ed, cx));
+                list = list.child(item_widgets::row(row, node, *can_remove && !locked, locked, z, ed, window, cx));
             }
             list.child(item_widgets::add(node, locked, z, ed, cx)).into_any_element()
         }
-        WidgetView::Code { signature, code } => div()
-            .flex()
-            .flex_col()
-            .gap(px(4.0 * z))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0 * z))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(12.0 * z))
-                            .text_color(c.muted_foreground)
-                            .child(SharedString::from(signature.clone())),
-                    )
-                    .child(item_widgets::sockets_button(node, locked, z, ed, cx)),
-            )
-            .child(code.clone())
-            .into_any_element(),
+        WidgetView::Code { signature, text } => {
+            let field = window.use_keyed_state(
+                SharedString::from(format!("code-{node}")),
+                cx,
+                |window, cx| CodeField::new(node, text, ed.clone(), window, cx),
+            );
+            field.update(cx, |field, cx| field.sync(text, window, cx));
+            let area = field.read(cx).area.clone();
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0 * z))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0 * z))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(12.0 * z))
+                                .text_color(c.muted_foreground)
+                                .child(SharedString::from(signature.clone())),
+                        )
+                        .child(item_widgets::sockets_button(node, locked, z, ed, cx)),
+                )
+                .child(Textarea::new(&area))
+                .into_any_element()
+        }
     };
     div()
         .px(px(12.0 * z))

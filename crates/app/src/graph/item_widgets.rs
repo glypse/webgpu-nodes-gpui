@@ -2,13 +2,14 @@ use std::rc::Rc;
 
 use gpui::{
     App, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, SharedString,
-    Styled as _, WeakEntity, div, prelude::FluentBuilder as _, px,
+    Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::input::Input;
 use shader_graph::passes::TextureFormat;
 use theme::ActiveTheme as _;
 
 use super::fields::picker;
-use super::widgets::ItemRow;
+use super::widgets::{ItemNameField, ItemRow};
 use crate::editor::{Editor, ListItem};
 
 fn icon_button(
@@ -40,6 +41,7 @@ fn icon_button(
         .child(label)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn row(
     row: &ItemRow,
     node: &str,
@@ -47,8 +49,16 @@ pub fn row(
     locked: bool,
     z: f32,
     ed: &WeakEntity<Editor>,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
+    let name = window.use_keyed_state(
+        SharedString::from(format!("item-name-{node}-{}", row.id)),
+        cx,
+        |window, cx| ItemNameField::new(node, &row.id, &row.label, ed.clone(), window, cx),
+    );
+    name.update(cx, |name, cx| name.sync(&row.label, window, cx));
+    let input = name.read(cx).input.clone();
     let colors = &cx.theme().colors;
     let items: Vec<ListItem> = TextureFormat::ALL
         .into_iter()
@@ -77,7 +87,7 @@ pub fn row(
                 .rounded(px(4.0 * z))
                 .bg(colors.foreground.opacity(0.05))
                 .when(locked, |d| d.opacity(0.5).child(div().absolute().size_full()))
-                .child(row.name.clone()),
+                .child(Input::new(&input).h(px(22.0 * z)).text_size(px(12.0 * z))),
         )
         .child(div().w(px(84.0 * z)).flex().child(picker(
             SharedString::from(format!("format-{node}-{}", row.id)),
