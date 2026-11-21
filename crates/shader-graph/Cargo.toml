@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 serde.workspace = true
+graph-math = { path = "../graph-math" }
 # Without it parsed floats can differ in the last digit, which changes library versions.
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true

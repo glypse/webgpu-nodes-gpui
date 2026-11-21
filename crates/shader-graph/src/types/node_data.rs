@@ -353,7 +353,7 @@ pub struct CustomSockets {
 }
 
 /// Everything a node stores. Which fields apply depends on the node type.
-/// Fields of nodes this port doesn't implement (ramps, assets) are
+/// Fields of nodes this port doesn't implement (assets) are
 /// kept in `extra` so saved projects round-trip.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -394,6 +394,9 @@ pub struct NodeData {
     /// A Curve node's control points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub curve: Option<Vec<crate::curve::CurvePoint>>,
+    /// A Color Ramp's stops; their colours are its inputs' values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ramp: Option<Vec<crate::ramp::RampStop>>,
     /// Only the node's linked sockets are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hide_unlinked: Option<bool>,
@@ -431,6 +434,8 @@ impl NodeData {
         data.sockets = own.sockets.or(data.sockets);
         data.hide_links = own.hide_links.or(data.hide_links);
         data.hide_unlinked = own.hide_unlinked.or(data.hide_unlinked);
+        data.curve = own.curve.or(data.curve);
+        data.ramp = own.ramp.or(data.ramp);
         data.values.extend(own.values);
         data.settings.extend(own.settings);
         data.types.extend(own.types);

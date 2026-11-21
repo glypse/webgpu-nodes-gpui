@@ -2587,6 +2587,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "graph-math"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "grid"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5383,6 +5390,7 @@ dependencies = [
 name = "shader-graph"
 version = "0.1.0"
 dependencies = [
+ "graph-math",
  "naga 30.0.2",
  "runtime",
  "serde",

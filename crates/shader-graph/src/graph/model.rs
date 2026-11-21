@@ -12,7 +12,7 @@ use super::{
 use crate::color::color_mode_conversion;
 use crate::codegen::{CodegenError, Program, ShaderOptions, generate_program};
 use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, hidden_inputs_of};
-use crate::nodes::{default_data_for_type, registered, resolve_descriptor};
+use crate::nodes::{COLOR_RAMP, color_ramp_hidden_inputs, default_data_for_type, registered, resolve_descriptor};
 use crate::types::{
     InputValue, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, ResolvedNodeTypes,
     TypeBindings, TypeResolver, WgslType, input_family_key, is_connection_compatible,
@@ -440,9 +440,17 @@ impl GraphModel {
         });
     }
 
-    /// The inputs of a group node hidden by its enums' values and its types.
+    /// The inputs of a group node hidden by its enums' values and its types, or a Color Ramp's unused ones.
     pub fn hidden_inputs(&self, node_id: &str) -> HashSet<String> {
         let Some(node) = self.node(node_id) else { return HashSet::new() };
+        if node.is(COLOR_RAMP) {
+            let linked = self
+                .project
+                .document_of(node_id)
+                .map(|doc| doc.edges_into(node_id).map(|e| e.target_handle.clone()).collect())
+                .unwrap_or_default();
+            return color_ramp_hidden_inputs(&node.data, &linked);
+        }
         let Some(def) = node.definition_ref().and_then(|r| self.project.document(r)) else {
             return HashSet::new();
         };

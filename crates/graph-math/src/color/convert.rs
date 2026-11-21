@@ -473,7 +473,7 @@ mod tests {
                 for c in [0.05, 0.12, 0.22, 0.32] {
                     for h in [0.0, 72.0, 144.0, 216.0, 288.0] {
                         let mapped = oklch_to_linear(Lch { l, c, h }, space);
-                        assert!(super::super::in_gamut(mapped, space), "{l} {c} {h}");
+                        assert!(crate::color::in_gamut(mapped, space), "{l} {c} {h}");
                     }
                 }
             }
