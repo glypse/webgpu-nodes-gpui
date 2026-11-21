@@ -29,6 +29,6 @@ opt-level = 2
 [profile.dev]
 debug = "line-tables-only"
 
-# Vendored gpui-fast-apple with BGRA surface support, see vendor/patches.
+# gpui-fast-apple 0.1.17 plus BGRA surface support (the published crate with one commit on top).
 [patch.crates-io]
-gpui-fast-apple = { path = "vendor/gpui-fast-apple" }
+gpui-fast-apple = { git = "https://github.com/glypse/gpui-fast", rev = "5e132f5a6a4e36f7cd0983793621aeaa5e08e84e" }

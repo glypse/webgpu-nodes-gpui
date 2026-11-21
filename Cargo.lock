@@ -2489,6 +2489,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.17"
+source = "git+https://github.com/glypse/gpui-fast?rev=5e132f5a6a4e36f7cd0983793621aeaa5e08e84e#5e132f5a6a4e36f7cd0983793621aeaa5e08e84e"
 dependencies = [
  "anyhow",
  "async-task",
