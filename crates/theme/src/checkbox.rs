@@ -55,37 +55,52 @@ impl Checkbox {
 
 impl RenderOnce for Checkbox {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        let filled = self.checked || self.indeterminate;
-        let (checked, disabled) = (self.checked, self.disabled);
-        let next = !checked;
-        let primary_fg = c.primary_foreground;
-        div()
-            .id(self.id)
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .size(px(16.0))
-            .rounded(px(4.0))
-            .border_1()
-            .border_color(if filled { c.primary } else { c.input })
-            .when(filled, |d| d.bg(c.primary).text_color(c.primary_foreground))
-            .when(!filled && theme.is_dark(), |d| d.bg(c.input.opacity(0.3)))
-            .when(disabled, |d| d.opacity(0.5))
-            .when(!disabled, |d| d.cursor_pointer())
-            .when(filled, |d| {
-                let icon = if checked {
-                    IconName::Check
-                } else {
-                    IconName::Minus
-                };
-                d.child(Icon::new(icon).size(px(14.0)).color(primary_fg))
-            })
-            .when_some(self.on_change.filter(|_| !disabled), move |d, handler| {
-                d.on_click(move |_, window, cx| handler(next, window, cx))
-            })
+        guard::render("Checkbox", || {
+            let theme = cx.theme();
+            let c = &theme.colors;
+            let filled = self.checked || self.indeterminate;
+            let (checked, disabled) = (self.checked, self.disabled);
+            let next = !checked;
+            let primary_fg = c.primary_foreground;
+            let ring = c.ring;
+            div()
+                .id(self.id)
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(16.0))
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(if filled { c.primary } else { c.input })
+                .when(filled, |d| d.bg(c.primary).text_color(c.primary_foreground))
+                .when(!filled && theme.is_dark(), |d| d.bg(c.input.opacity(0.3)))
+                .when(disabled, |d| d.opacity(0.5))
+                .when(!disabled, |d| {
+                    d.cursor_pointer()
+                        .focusable()
+                        .tab_stop(true)
+                        .focus(move |s| s.border_color(ring))
+                })
+                .when(filled, |d| {
+                    let icon = if checked {
+                        IconName::Check
+                    } else {
+                        IconName::Minus
+                    };
+                    d.child(Icon::new(icon).size(px(14.0)).color(primary_fg))
+                })
+                .when_some(self.on_change.filter(|_| !disabled), move |d, handler| {
+                    let on_key = handler.clone();
+                    d.on_click(move |_, window, cx| handler(next, window, cx))
+                        .on_key_down(move |event, window, cx| {
+                            if event.keystroke.key == "space" {
+                                cx.stop_propagation();
+                                on_key(next, window, cx);
+                            }
+                        })
+                })
+        })
     }
 }
 
@@ -106,22 +121,24 @@ mod tests {
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let host = cx.entity();
-            let changes = self.changes.clone();
-            div().child(
-                Checkbox::new("box")
-                    .checked(self.checked)
-                    .indeterminate(self.indeterminate)
-                    .disabled(self.disabled)
-                    .on_change(move |value, _, cx| {
-                        changes.borrow_mut().push(value);
-                        host.update(cx, |host, cx| {
-                            host.checked = value;
-                            host.indeterminate = false;
-                            cx.notify();
-                        });
-                    }),
-            )
+            guard::render("Host", || {
+                let host = cx.entity();
+                let changes = self.changes.clone();
+                div().child(
+                    Checkbox::new("box")
+                        .checked(self.checked)
+                        .indeterminate(self.indeterminate)
+                        .disabled(self.disabled)
+                        .on_change(move |value, _, cx| {
+                            changes.borrow_mut().push(value);
+                            host.update(cx, |host, cx| {
+                                host.checked = value;
+                                host.indeterminate = false;
+                                cx.notify();
+                            });
+                        }),
+                )
+            })
         }
     }
 
@@ -154,6 +171,15 @@ mod tests {
         let (changes, cx) = setup(cx, false, false, false);
         click(cx);
         click(cx);
+        assert_eq!(*changes.borrow(), [true, false]);
+    }
+
+    #[gpui::test]
+    fn space_toggles_the_focused_one(cx: &mut TestAppContext) {
+        let (changes, cx) = setup(cx, false, false, false);
+        click(cx);
+        cx.simulate_keystrokes("space");
+        cx.run_until_parked();
         assert_eq!(*changes.borrow(), [true, false]);
     }
 

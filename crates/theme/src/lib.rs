@@ -39,7 +39,7 @@ pub use color_wheels::{
     ColorWheels, ColorWheelsEvent, oklch_max_chroma, wheel_cursor, wheel_polar,
 };
 pub use curve_editor::{CurveEditor, CurveEditorEvent, PathStep, curve_path};
-pub use dialog::Dialog;
+pub use dialog::{Dialog, DialogSide};
 pub use icon::{Assets, Icon, IconName};
 pub use input::{InputEvent, TextInput};
 pub use kbd::Kbd;
@@ -58,7 +58,7 @@ pub use tooltip::Tooltip;
 
 const INTERFACE_FONT_DATA: &[u8] = include_bytes!("../assets/fonts/AtkinsonHyperlegibleNext.ttf");
 
-/// Registers the interface font and the text input's key bindings, and sets
+/// Registers the interface font and the key bindings of the text inputs, dialog and select, and sets
 /// the theme to the system appearance.
 pub fn init(cx: &mut App) {
     cx.text_system()
@@ -67,5 +67,7 @@ pub fn init(cx: &mut App) {
     input::bind_keys(cx);
     dialog::bind_keys(cx);
     textarea::bind_keys(cx);
+    select::bind_keys(cx);
+    menu::bind_keys(cx);
     cx.set_global(Theme::new(Appearance::Dark));
 }
