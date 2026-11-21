@@ -42,9 +42,10 @@ const EDGE_GRAB: f32 = 4.0;
 pub const HEADER_HEIGHT: f32 = 36.0;
 const CORNER_SIZE: f32 = 12.0;
 
-/// Lays out an area's toolbar across the header row's free width. The toolbar's own
-/// flex layout (right alignment, vertical centring) only applies inside a flex box,
-/// so the slot itself must be one.
+/// Lays out an area's toolbar across the header row's free width. The slot is a flex box
+/// so the toolbar fills it, and the toolbar is a cached view: one with live readouts then
+/// re-renders on its own rather than re-rendering the whole screen. A cached view is laid
+/// out as a root, so the toolbar fills the cached box itself.
 pub fn toolbar_slot(toolbar: AnyView) -> impl IntoElement {
     div()
         .flex()
@@ -52,7 +53,7 @@ pub fn toolbar_slot(toolbar: AnyView) -> impl IntoElement {
         .min_w_0()
         .h_full()
         .items_center()
-        .child(toolbar)
+        .child(toolbar.cached(StyleRefinement::default().size_full()))
 }
 
 #[derive(Clone, Copy)]

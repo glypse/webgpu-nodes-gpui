@@ -7,7 +7,7 @@ use gpui::{
 use guard::SafeListener as _;
 use runtime::Size;
 use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}, menu::{PopupMenu, PopupMenuItem}};
-use theme::{ActiveTheme as _, IconName, popup};
+use theme::{ActiveTheme as _, Icon, IconName, popup};
 
 use crate::playback::{Playback, Shown, device_size};
 
@@ -496,8 +496,7 @@ impl Render for PreviewToolbar {
                 .and_then(|m| Some(m.popup.as_ref()?.draw(window, m.at).into_any_element()));
             div()
                 .flex()
-                .flex_1()
-                .min_w_0()
+                .size_full()
                 .items_center()
                 .justify_end()
                 .gap_1()
@@ -517,7 +516,7 @@ impl Render for PreviewToolbar {
                         .ghost()
                         .xsmall()
                         .label(format!("{}%", (zoom * 100.0).round()))
-                        .dropdown_caret(true)
+                        .child(Icon::new(IconName::CaretUpDown).size(px(12.0)))
                         .selected(is_open(Open::Zoom))
                         .tooltip("Zoom")
                         .on_click(open(Open::Zoom)),
