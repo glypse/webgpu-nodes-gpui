@@ -28,22 +28,24 @@ impl Kbd {
 
 impl RenderOnce for Kbd {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = cx.theme();
-        let base = div()
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(theme.text.xs)
-            .text_color(theme.colors.muted_foreground);
-        if self.quiet {
-            base.child(self.text)
-        } else {
-            base.h(px(20.0))
-                .min_w(px(20.0))
-                .px_1()
-                .rounded(theme.radius.sm)
-                .bg(theme.colors.muted)
-                .child(self.text)
-        }
+        guard::render("Kbd", || {
+            let theme = cx.theme();
+            let base = div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(theme.text.xs)
+                .text_color(theme.colors.muted_foreground);
+            if self.quiet {
+                base.child(self.text)
+            } else {
+                base.h(px(20.0))
+                    .min_w(px(20.0))
+                    .px_1()
+                    .rounded(theme.radius.sm)
+                    .bg(theme.colors.muted)
+                    .child(self.text)
+            }
+        })
     }
 }

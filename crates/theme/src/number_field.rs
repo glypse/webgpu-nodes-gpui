@@ -228,27 +228,75 @@ fn soft_clamp(value: f64, from: f64, soft_min: Option<f64>, soft_max: Option<f64
 
 impl Render for NumberField {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        let base = div()
-            .flex()
-            .items_center()
-            .h(px(32.0))
-            .w_full()
-            .min_w_0()
-            .font_family(theme.font.clone())
-            .text_size(theme.text.sm);
-        if self.editing {
-            return base.child(self.input.clone()).into_any_element();
-        }
-        if self.read_only {
-            return base
+        guard::render("NumberField", || {
+            let theme = cx.theme();
+            let c = &theme.colors;
+            let base = div()
+                .flex()
+                .items_center()
+                .h(px(32.0))
+                .w_full()
+                .min_w_0()
+                .font_family(theme.font.clone())
+                .text_size(theme.text.sm);
+            if self.editing {
+                return base.child(self.input.clone()).into_any_element();
+            }
+            if self.read_only {
+                return base
+                    .px(px(10.0))
+                    .gap_2()
+                    .rounded(theme.radius.lg)
+                    .border_1()
+                    .border_color(c.input)
+                    .opacity(0.5)
+                    .children(
+                        self.label
+                            .clone()
+                            .map(|label| div().text_color(c.muted_foreground).child(label)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_right()
+                            .text_color(c.foreground)
+                            .child(self.format()),
+                    )
+                    .into_any_element();
+            }
+            base.id("number-field")
                 .px(px(10.0))
                 .gap_2()
                 .rounded(theme.radius.lg)
                 .border_1()
                 .border_color(c.input)
-                .opacity(0.5)
+                .when(theme.is_dark(), |d| d.bg(c.input.opacity(0.3)))
+                .cursor(CursorStyle::ResizeLeftRight)
+                .hover(|s| s.border_color(c.ring))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, event: &MouseDownEvent, _, _| {
+                        this.scrub = Some((event.position.x.into(), this.value));
+                        this.moved = false;
+                    }),
+                )
+                .on_drag(Scrub, |_, _, _, cx| cx.new(|_| Empty))
+                .on_drag_move::<Scrub>(cx.safe_listener(
+                    |this, event: &DragMoveEvent<Scrub>, _, cx| {
+                        this.scrub_to(
+                            event.event.position.x.into(),
+                            event.event.modifiers.shift,
+                            cx,
+                        );
+                    },
+                ))
+                .on_click(cx.safe_listener(|this, _: &ClickEvent, window, cx| {
+                    let scrubbed = std::mem::take(&mut this.moved);
+                    this.scrub = None;
+                    if !scrubbed {
+                        this.start_editing(window, cx);
+                    }
+                }))
                 .children(
                     self.label
                         .clone()
@@ -261,54 +309,8 @@ impl Render for NumberField {
                         .text_color(c.foreground)
                         .child(self.format()),
                 )
-                .into_any_element();
-        }
-        base.id("number-field")
-            .px(px(10.0))
-            .gap_2()
-            .rounded(theme.radius.lg)
-            .border_1()
-            .border_color(c.input)
-            .when(theme.is_dark(), |d| d.bg(c.input.opacity(0.3)))
-            .cursor(CursorStyle::ResizeLeftRight)
-            .hover(|s| s.border_color(c.ring))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.safe_listener(|this, event: &MouseDownEvent, _, _| {
-                    this.scrub = Some((event.position.x.into(), this.value));
-                    this.moved = false;
-                }),
-            )
-            .on_drag(Scrub, |_, _, _, cx| cx.new(|_| Empty))
-            .on_drag_move::<Scrub>(
-                cx.safe_listener(|this, event: &DragMoveEvent<Scrub>, _, cx| {
-                    this.scrub_to(
-                        event.event.position.x.into(),
-                        event.event.modifiers.shift,
-                        cx,
-                    );
-                }),
-            )
-            .on_click(cx.safe_listener(|this, _: &ClickEvent, window, cx| {
-                let scrubbed = std::mem::take(&mut this.moved);
-                this.scrub = None;
-                if !scrubbed {
-                    this.start_editing(window, cx);
-                }
-            }))
-            .children(
-                self.label
-                    .clone()
-                    .map(|label| div().text_color(c.muted_foreground).child(label)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_right()
-                    .text_color(c.foreground)
-                    .child(self.format()),
-            )
-            .into_any_element()
+                .into_any_element()
+        })
     }
 }
 

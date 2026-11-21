@@ -643,59 +643,61 @@ impl Focusable for TextInput {
 
 impl Render for TextInput {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let focused = self.focus_handle.is_focused(window);
-        if self.was_focused && !focused {
-            cx.emit(InputEvent::Blur);
-        }
-        self.was_focused = focused;
-        let theme = cx.theme();
-        let c = &theme.colors;
-        div()
-            .flex()
-            .items_center()
-            .h(self.compact.map_or(px(32.0), |(h, _)| h))
-            .w_full()
-            .min_w_0()
-            .px(px(if self.compact.is_some() { 4.0 } else { 10.0 }))
-            .rounded(if self.compact.is_some() {
-                px(4.0)
-            } else {
-                theme.radius.lg
-            })
-            .border_1()
-            .border_color(if focused { c.ring } else { c.input })
-            .when(theme.is_dark() && self.compact.is_none(), |d| {
-                d.bg(c.input.opacity(0.3))
-            })
-            .text_color(c.foreground)
-            .font_family(theme.font.clone())
-            .text_size(self.compact.map_or(theme.text.sm, |(_, t)| t))
-            .key_context(CONTEXT)
-            .track_focus(&self.focus_handle)
-            .cursor(CursorStyle::IBeam)
-            .on_action(cx.safe_listener(Self::backspace))
-            .on_action(cx.safe_listener(Self::delete))
-            .on_action(cx.safe_listener(Self::left))
-            .on_action(cx.safe_listener(Self::right))
-            .on_action(cx.safe_listener(Self::select_left))
-            .on_action(cx.safe_listener(Self::select_right))
-            .on_action(cx.safe_listener(Self::select_all))
-            .on_action(cx.safe_listener(Self::home))
-            .on_action(cx.safe_listener(Self::end))
-            .on_action(cx.safe_listener(Self::paste))
-            .on_action(cx.safe_listener(Self::cut))
-            .on_action(cx.safe_listener(Self::copy))
-            .on_action(cx.safe_listener(Self::submit))
-            .on_action(cx.safe_listener(Self::cancel))
-            .on_mouse_down(MouseButton::Left, cx.safe_listener(Self::on_mouse_down))
-            .on_mouse_up(MouseButton::Left, cx.safe_listener(Self::on_mouse_up))
-            .on_mouse_up_out(MouseButton::Left, cx.safe_listener(Self::on_mouse_up))
-            .on_mouse_move(cx.safe_listener(Self::on_mouse_move))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(TextElement { input: cx.entity() }),
-            )
+        guard::render("TextInput", || {
+            let focused = self.focus_handle.is_focused(window);
+            if self.was_focused && !focused {
+                cx.emit(InputEvent::Blur);
+            }
+            self.was_focused = focused;
+            let theme = cx.theme();
+            let c = &theme.colors;
+            div()
+                .flex()
+                .items_center()
+                .h(self.compact.map_or(px(32.0), |(h, _)| h))
+                .w_full()
+                .min_w_0()
+                .px(px(if self.compact.is_some() { 4.0 } else { 10.0 }))
+                .rounded(if self.compact.is_some() {
+                    px(4.0)
+                } else {
+                    theme.radius.lg
+                })
+                .border_1()
+                .border_color(if focused { c.ring } else { c.input })
+                .when(theme.is_dark() && self.compact.is_none(), |d| {
+                    d.bg(c.input.opacity(0.3))
+                })
+                .text_color(c.foreground)
+                .font_family(theme.font.clone())
+                .text_size(self.compact.map_or(theme.text.sm, |(_, t)| t))
+                .key_context(CONTEXT)
+                .track_focus(&self.focus_handle)
+                .cursor(CursorStyle::IBeam)
+                .on_action(cx.safe_listener(Self::backspace))
+                .on_action(cx.safe_listener(Self::delete))
+                .on_action(cx.safe_listener(Self::left))
+                .on_action(cx.safe_listener(Self::right))
+                .on_action(cx.safe_listener(Self::select_left))
+                .on_action(cx.safe_listener(Self::select_right))
+                .on_action(cx.safe_listener(Self::select_all))
+                .on_action(cx.safe_listener(Self::home))
+                .on_action(cx.safe_listener(Self::end))
+                .on_action(cx.safe_listener(Self::paste))
+                .on_action(cx.safe_listener(Self::cut))
+                .on_action(cx.safe_listener(Self::copy))
+                .on_action(cx.safe_listener(Self::submit))
+                .on_action(cx.safe_listener(Self::cancel))
+                .on_mouse_down(MouseButton::Left, cx.safe_listener(Self::on_mouse_down))
+                .on_mouse_up(MouseButton::Left, cx.safe_listener(Self::on_mouse_up))
+                .on_mouse_up_out(MouseButton::Left, cx.safe_listener(Self::on_mouse_up))
+                .on_mouse_move(cx.safe_listener(Self::on_mouse_move))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(TextElement { input: cx.entity() }),
+                )
+        })
     }
 }

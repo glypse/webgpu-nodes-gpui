@@ -22,22 +22,24 @@ impl Tooltip {
 
 impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        // Offset from the cursor, which GPUI anchors tooltips at.
-        div().pl(px(12.0)).pt(px(16.0)).child(
-            div()
-                .px_2()
-                .py_1()
-                .rounded(theme.radius.md)
-                .bg(c.popover)
-                .border_1()
-                .border_color(c.foreground.opacity(0.1))
-                .shadow_md()
-                .font_family(theme.font.clone())
-                .text_size(theme.text.xs)
-                .text_color(c.popover_foreground)
-                .child(self.text.clone()),
-        )
+        guard::render("Tooltip", || {
+            let theme = cx.theme();
+            let c = &theme.colors;
+            // Offset from the cursor, which GPUI anchors tooltips at.
+            div().pl(px(12.0)).pt(px(16.0)).child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .rounded(theme.radius.md)
+                    .bg(c.popover)
+                    .border_1()
+                    .border_color(c.foreground.opacity(0.1))
+                    .shadow_md()
+                    .font_family(theme.font.clone())
+                    .text_size(theme.text.xs)
+                    .text_color(c.popover_foreground)
+                    .child(self.text.clone()),
+            )
+        })
     }
 }

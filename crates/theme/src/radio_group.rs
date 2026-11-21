@@ -54,51 +54,55 @@ impl RadioGroup {
 
 impl RenderOnce for RadioGroup {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        let dark = theme.is_dark();
-        let disabled = self.disabled;
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .font_family(theme.font.clone())
-            .text_size(theme.text.sm)
-            .text_color(c.foreground)
-            .children(self.items.into_iter().enumerate().map(|(index, label)| {
-                let checked = self.selected == Some(index);
-                let on_change = self.on_change.clone().filter(|_| !disabled);
-                let row = div()
-                    .id(ElementId::NamedInteger(self.id.clone(), index as u64))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .when(disabled, |d| d.opacity(0.5))
-                    .when(!disabled, |d| d.cursor_pointer())
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .size(px(16.0))
-                            .rounded_full()
-                            .border_1()
-                            .border_color(if checked { c.primary } else { c.input })
-                            .when(checked, |d| d.bg(c.primary))
-                            .when(!checked && dark, |d| d.bg(c.input.opacity(0.3)))
-                            .when(checked, |d| {
-                                d.child(div().size(px(8.0)).rounded_full().bg(c.primary_foreground))
-                            }),
-                    )
-                    .child(label)
-                    .when_some(on_change, |d, handler| {
-                        d.on_click(move |_, window, cx| handler(index, window, cx))
-                    });
-                #[cfg(test)]
-                let row = row.debug_selector(|| format!("radio-{index}"));
-                row
-            }))
+        guard::render("RadioGroup", || {
+            let theme = cx.theme();
+            let c = &theme.colors;
+            let dark = theme.is_dark();
+            let disabled = self.disabled;
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .font_family(theme.font.clone())
+                .text_size(theme.text.sm)
+                .text_color(c.foreground)
+                .children(self.items.into_iter().enumerate().map(|(index, label)| {
+                    let checked = self.selected == Some(index);
+                    let on_change = self.on_change.clone().filter(|_| !disabled);
+                    let row = div()
+                        .id(ElementId::NamedInteger(self.id.clone(), index as u64))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .when(disabled, |d| d.opacity(0.5))
+                        .when(!disabled, |d| d.cursor_pointer())
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .justify_center()
+                                .size(px(16.0))
+                                .rounded_full()
+                                .border_1()
+                                .border_color(if checked { c.primary } else { c.input })
+                                .when(checked, |d| d.bg(c.primary))
+                                .when(!checked && dark, |d| d.bg(c.input.opacity(0.3)))
+                                .when(checked, |d| {
+                                    d.child(
+                                        div().size(px(8.0)).rounded_full().bg(c.primary_foreground),
+                                    )
+                                }),
+                        )
+                        .child(label)
+                        .when_some(on_change, |d, handler| {
+                            d.on_click(move |_, window, cx| handler(index, window, cx))
+                        });
+                    #[cfg(test)]
+                    let row = row.debug_selector(|| format!("radio-{index}"));
+                    row
+                }))
+        })
     }
 }
 
@@ -118,23 +122,25 @@ mod tests {
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let host = cx.entity();
-            let changes = self.changes.clone();
-            div().w(px(200.0)).child(
-                RadioGroup::new("radio")
-                    .item("One")
-                    .item("Two")
-                    .item("Three")
-                    .selected(self.selected)
-                    .disabled(self.disabled)
-                    .on_change(move |index, _, cx| {
-                        changes.borrow_mut().push(index);
-                        host.update(cx, |host, cx| {
-                            host.selected = Some(index);
-                            cx.notify();
-                        });
-                    }),
-            )
+            guard::render("Host", || {
+                let host = cx.entity();
+                let changes = self.changes.clone();
+                div().w(px(200.0)).child(
+                    RadioGroup::new("radio")
+                        .item("One")
+                        .item("Two")
+                        .item("Three")
+                        .selected(self.selected)
+                        .disabled(self.disabled)
+                        .on_change(move |index, _, cx| {
+                            changes.borrow_mut().push(index);
+                            host.update(cx, |host, cx| {
+                                host.selected = Some(index);
+                                cx.notify();
+                            });
+                        }),
+                )
+            })
         }
     }
 

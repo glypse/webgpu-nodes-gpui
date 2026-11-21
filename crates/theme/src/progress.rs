@@ -33,22 +33,24 @@ impl Progress {
 
 impl RenderOnce for Progress {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let c = &cx.theme().colors;
-        let fill = div()
-            .h_full()
-            .w(relative(self.fraction()))
-            .rounded_full()
-            .bg(c.primary);
-        #[cfg(test)]
-        let fill = gpui::InteractiveElement::debug_selector(fill, || "progress-fill".into());
-        div()
-            .flex()
-            .w_full()
-            .h(px(4.0))
-            .rounded_full()
-            .overflow_hidden()
-            .bg(c.muted)
-            .child(fill)
+        guard::render("Progress", || {
+            let c = &cx.theme().colors;
+            let fill = div()
+                .h_full()
+                .w(relative(self.fraction()))
+                .rounded_full()
+                .bg(c.primary);
+            #[cfg(test)]
+            let fill = gpui::InteractiveElement::debug_selector(fill, || "progress-fill".into());
+            div()
+                .flex()
+                .w_full()
+                .h(px(4.0))
+                .rounded_full()
+                .overflow_hidden()
+                .bg(c.muted)
+                .child(fill)
+        })
     }
 }
 
@@ -62,7 +64,9 @@ mod tests {
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-            div().w(px(200.0)).child(Progress::new(self.0).max(self.1))
+            guard::render("Host", || {
+                div().w(px(200.0)).child(Progress::new(self.0).max(self.1))
+            })
         }
     }
 

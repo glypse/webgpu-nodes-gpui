@@ -19,11 +19,13 @@ impl Separator {
 
 impl RenderOnce for Separator {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let line = div().flex_none().bg(cx.theme().colors.border);
-        if self.vertical {
-            line.w(px(1.0)).h_full()
-        } else {
-            line.h(px(1.0)).w_full()
-        }
+        guard::render("Separator", || {
+            let line = div().flex_none().bg(cx.theme().colors.border);
+            if self.vertical {
+                line.w(px(1.0)).h_full()
+            } else {
+                line.h(px(1.0)).w_full()
+            }
+        })
     }
 }

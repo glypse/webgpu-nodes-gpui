@@ -417,165 +417,176 @@ impl ColorWheels {
 
 impl Render for ColorWheels {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity();
-        let size = self.size;
-        let (wheel_disabled, bar_disabled) = (self.wheel_disabled(), self.bar_disabled());
-        let polar_mode = self.mode == ColorMode::Oklch;
+        guard::render("ColorWheels", || {
+            let this = cx.entity();
+            let size = self.size;
+            let (wheel_disabled, bar_disabled) = (self.wheel_disabled(), self.bar_disabled());
+            let polar_mode = self.mode == ColorMode::Oklch;
 
-        // The wheel: its image, then the cursor at the colour's hue and saturation.
-        let (cursor, cursor_color, bar_level) = if polar_mode {
-            let lch = self.lch_shown();
-            let radius = (lch.c / oklch_max_chroma(self.gamut)).clamp(0.0, 1.0);
-            let color = encode_in(oklch_to_linear(lch, self.gamut), self.gamut);
-            (wheel_cursor(lch.h / 360.0, radius), encoded(color), lch.l)
-        } else {
-            let hsv = self.hsv_shown();
-            (wheel_cursor(hsv.h, hsv.s), encoded(hsv_to_rgb(hsv)), hsv.v)
-        };
-        let image = if polar_mode {
-            self.oklch_wheel_image()
-        } else {
-            hsv_wheel()
-        };
-        let bar_image = polar_mode.then(|| self.lightness_bar_image());
-        let darkness = (!polar_mode).then(|| 1.0 - self.hsv_shown().v as f32);
-        let half = size / 2.0;
-        let cursor_at = (half + half * cursor.0 as f32, half + half * cursor.1 as f32);
+            // The wheel: its image, then the cursor at the colour's hue and saturation.
+            let (cursor, cursor_color, bar_level) = if polar_mode {
+                let lch = self.lch_shown();
+                let radius = (lch.c / oklch_max_chroma(self.gamut)).clamp(0.0, 1.0);
+                let color = encode_in(oklch_to_linear(lch, self.gamut), self.gamut);
+                (wheel_cursor(lch.h / 360.0, radius), encoded(color), lch.l)
+            } else {
+                let hsv = self.hsv_shown();
+                (wheel_cursor(hsv.h, hsv.s), encoded(hsv_to_rgb(hsv)), hsv.v)
+            };
+            let image = if polar_mode {
+                self.oklch_wheel_image()
+            } else {
+                hsv_wheel()
+            };
+            let bar_image = polar_mode.then(|| self.lightness_bar_image());
+            let darkness = (!polar_mode).then(|| 1.0 - self.hsv_shown().v as f32);
+            let half = size / 2.0;
+            let cursor_at = (half + half * cursor.0 as f32, half + half * cursor.1 as f32);
 
-        let wheel_canvas = {
-            let this = this.clone();
-            let image = image.clone();
-            canvas(
-                {
-                    let this = this.clone();
+            let wheel_canvas = {
+                let this = this.clone();
+                let image = image.clone();
+                canvas(
+                    {
+                        let this = this.clone();
+                        move |bounds, _, cx| {
+                            guard::guard("color wheels layout", || {
+                                this.update(cx, |wheels, _| wheels.wheel_bounds = bounds)
+                            });
+                        }
+                    },
+                    move |bounds, _, window, cx| {
+                        guard::guard("color wheels paint", || {
+                            window
+                                .paint_image(
+                                    bounds,
+                                    Corners::all(bounds.size.width / 2.0),
+                                    image,
+                                    0,
+                                    false,
+                                )
+                                .ok();
+                            // Images the wheel moved on from are no longer drawn.
+                            let retired =
+                                this.update(cx, |wheels, _| std::mem::take(&mut wheels.retired));
+                            for old in retired {
+                                window.drop_image(old).ok();
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full()
+            };
+
+            let wheel = div()
+                .id("color-wheel")
+                .relative()
+                .flex_none()
+                .size(size)
+                .when(wheel_disabled, |d| d.opacity(0.5))
+                .child(wheel_canvas)
+                .when_some(darkness, |d, darkness| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .size_full()
+                            .rounded_full()
+                            .bg(gpui::black().opacity(darkness)),
+                    )
+                })
+                .child(self.marker(cursor_at.0, cursor_at.1, cursor_color))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
+                        this.pick(Surface::Wheel, event.position, cx);
+                    }),
+                )
+                .on_drag(Pick(Surface::Wheel), |_, _, _, cx| cx.new(|_| Empty))
+                .on_drag_move::<Pick>(cx.safe_listener(
+                    |this, event: &DragMoveEvent<Pick>, _, cx| {
+                        if matches!(event.drag(cx).0, Surface::Wheel) {
+                            this.pick(Surface::Wheel, event.event.position, cx);
+                        }
+                    },
+                ));
+
+            let bar_canvas = {
+                let this = this.clone();
+                let image = bar_image.clone();
+                canvas(
                     move |bounds, _, cx| {
-                        this.update(cx, |wheels, _| wheels.wheel_bounds = bounds);
-                    }
-                },
-                move |bounds, _, window, cx| {
-                    window
-                        .paint_image(
-                            bounds,
-                            Corners::all(bounds.size.width / 2.0),
-                            image,
-                            0,
-                            false,
-                        )
-                        .ok();
-                    // Images the wheel moved on from are no longer drawn.
-                    let retired = this.update(cx, |wheels, _| std::mem::take(&mut wheels.retired));
-                    for old in retired {
-                        window.drop_image(old).ok();
-                    }
-                },
-            )
-            .absolute()
-            .size_full()
-        };
-
-        let wheel = div()
-            .id("color-wheel")
-            .relative()
-            .flex_none()
-            .size(size)
-            .when(wheel_disabled, |d| d.opacity(0.5))
-            .child(wheel_canvas)
-            .when_some(darkness, |d, darkness| {
-                d.child(
+                        guard::guard("color wheels layout", || {
+                            this.update(cx, |wheels, _| wheels.bar_bounds = bounds)
+                        });
+                    },
+                    move |bounds, _, window, _| {
+                        guard::guard("color wheels paint", || {
+                            if let Some(image) = image {
+                                window
+                                    .paint_image(bounds, Corners::all(px(2.0)), image, 0, false)
+                                    .ok();
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full()
+            };
+            let top = px(0.0) + size * (1.0 - bar_level.clamp(0.0, 1.0) as f32);
+            let bar = div()
+                .id("color-bar")
+                .relative()
+                .flex_none()
+                .w(BAR_WIDTH)
+                .h(size)
+                .rounded_sm()
+                .when(bar_disabled, |d| d.opacity(0.5))
+                .when(!polar_mode, |d| {
+                    let hsv = Hsv {
+                        v: 1.0,
+                        ..self.hsv_shown()
+                    };
+                    d.bg(linear_gradient(
+                        180.0,
+                        linear_color_stop(encoded(hsv_to_rgb(hsv)), 0.0),
+                        linear_color_stop(gpui::black(), 1.0),
+                    ))
+                })
+                .child(bar_canvas)
+                .child(
                     div()
                         .absolute()
-                        .size_full()
+                        .left(px(-2.0))
+                        .w(BAR_WIDTH + px(4.0))
+                        .top(top - px(3.0))
+                        .h(px(6.0))
                         .rounded_full()
-                        .bg(gpui::black().opacity(darkness)),
+                        .border_2()
+                        .border_color(gpui::white()),
                 )
-            })
-            .child(self.marker(cursor_at.0, cursor_at.1, cursor_color))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.pick(Surface::Wheel, event.position, cx);
-                }),
-            )
-            .on_drag(Pick(Surface::Wheel), |_, _, _, cx| cx.new(|_| Empty))
-            .on_drag_move::<Pick>(
-                cx.safe_listener(|this, event: &DragMoveEvent<Pick>, _, cx| {
-                    if matches!(event.drag(cx).0, Surface::Wheel) {
-                        this.pick(Surface::Wheel, event.event.position, cx);
-                    }
-                }),
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
+                        this.pick(Surface::Bar, event.position, cx);
+                    }),
+                )
+                .on_drag(Pick(Surface::Bar), |_, _, _, cx| cx.new(|_| Empty))
+                .on_drag_move::<Pick>(cx.safe_listener(
+                    |this, event: &DragMoveEvent<Pick>, _, cx| {
+                        if matches!(event.drag(cx).0, Surface::Bar) {
+                            this.pick(Surface::Bar, event.event.position, cx);
+                        }
+                    },
+                ));
+            #[cfg(test)]
+            let (wheel, bar) = (
+                wheel.debug_selector(|| "color-wheel".into()),
+                bar.debug_selector(|| "color-bar".into()),
             );
 
-        let bar_canvas = {
-            let this = this.clone();
-            let image = bar_image.clone();
-            canvas(
-                move |bounds, _, cx| {
-                    this.update(cx, |wheels, _| wheels.bar_bounds = bounds);
-                },
-                move |bounds, _, window, _| {
-                    if let Some(image) = image {
-                        window
-                            .paint_image(bounds, Corners::all(px(2.0)), image, 0, false)
-                            .ok();
-                    }
-                },
-            )
-            .absolute()
-            .size_full()
-        };
-        let top = px(0.0) + size * (1.0 - bar_level.clamp(0.0, 1.0) as f32);
-        let bar = div()
-            .id("color-bar")
-            .relative()
-            .flex_none()
-            .w(BAR_WIDTH)
-            .h(size)
-            .rounded_sm()
-            .when(bar_disabled, |d| d.opacity(0.5))
-            .when(!polar_mode, |d| {
-                let hsv = Hsv {
-                    v: 1.0,
-                    ..self.hsv_shown()
-                };
-                d.bg(linear_gradient(
-                    180.0,
-                    linear_color_stop(encoded(hsv_to_rgb(hsv)), 0.0),
-                    linear_color_stop(gpui::black(), 1.0),
-                ))
-            })
-            .child(bar_canvas)
-            .child(
-                div()
-                    .absolute()
-                    .left(px(-2.0))
-                    .w(BAR_WIDTH + px(4.0))
-                    .top(top - px(3.0))
-                    .h(px(6.0))
-                    .rounded_full()
-                    .border_2()
-                    .border_color(gpui::white()),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.pick(Surface::Bar, event.position, cx);
-                }),
-            )
-            .on_drag(Pick(Surface::Bar), |_, _, _, cx| cx.new(|_| Empty))
-            .on_drag_move::<Pick>(
-                cx.safe_listener(|this, event: &DragMoveEvent<Pick>, _, cx| {
-                    if matches!(event.drag(cx).0, Surface::Bar) {
-                        this.pick(Surface::Bar, event.event.position, cx);
-                    }
-                }),
-            );
-        #[cfg(test)]
-        let (wheel, bar) = (
-            wheel.debug_selector(|| "color-wheel".into()),
-            bar.debug_selector(|| "color-bar".into()),
-        );
-
-        div().flex().gap_2().child(wheel).child(bar)
+            div().flex().gap_2().child(wheel).child(bar)
+        })
     }
 }
 

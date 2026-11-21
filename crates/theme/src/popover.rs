@@ -85,20 +85,22 @@ pub(crate) fn panel(cx: &App) -> Div {
 
 impl RenderOnce for Popover {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let mut panel = panel(cx)
-            .occlude()
-            .when_width(self.width)
-            .children(self.children);
-        if let Some(dismiss) = self.on_dismiss {
-            panel = panel.on_mouse_down_out(move |_, window, cx| dismiss(window, cx));
-        }
-        let mut anchored = anchored()
-            .anchor(self.anchor)
-            .snap_to_window_with_margin(px(8.0));
-        if let Some(position) = self.at {
-            anchored = anchored.position(position);
-        }
-        deferred(anchored.child(panel)).with_priority(1)
+        guard::render("Popover", || {
+            let mut panel = panel(cx)
+                .occlude()
+                .when_width(self.width)
+                .children(self.children);
+            if let Some(dismiss) = self.on_dismiss {
+                panel = panel.on_mouse_down_out(move |_, window, cx| dismiss(window, cx));
+            }
+            let mut anchored = anchored()
+                .anchor(self.anchor)
+                .snap_to_window_with_margin(px(8.0));
+            if let Some(position) = self.at {
+                anchored = anchored.position(position);
+            }
+            deferred(anchored.child(panel)).with_priority(1)
+        })
     }
 }
 

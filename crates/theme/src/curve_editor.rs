@@ -615,159 +615,168 @@ fn kind_glyph(kind: CurvePointKind) -> Glyph {
 
 impl Render for CurveEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let c = theme.colors.clone();
-        let side = self.side;
-        let plane = self.plane();
-        let disabled = self.disabled;
-        let selected = self.selected;
-        let points = self.points.clone();
-        let active = self.active().copied();
-        let this = cx.entity();
+        guard::render("CurveEditor", || {
+            let theme = cx.theme();
+            let c = theme.colors.clone();
+            let side = self.side;
+            let plane = self.plane();
+            let disabled = self.disabled;
+            let selected = self.selected;
+            let points = self.points.clone();
+            let active = self.active().copied();
+            let this = cx.entity();
 
-        let graph = {
-            let (points, c, this) = (points.clone(), c.clone(), this.clone());
-            canvas(
-                {
-                    let this = this.clone();
-                    move |bounds, _, cx| this.update(cx, |editor, _| editor.origin = bounds.origin)
-                },
-                move |bounds, _, window, _| {
-                    let origin = bounds.origin;
-                    let mut quad = fill(bounds, c.foreground.opacity(0.05));
-                    quad.corner_radii = px(4.0).into();
-                    window.paint_quad(quad);
-                    let span = plane.span as f32;
-                    let inset = INSET as f32;
-                    for g in GRID {
-                        let g = g as f32;
-                        let line = c.foreground.opacity(0.1);
-                        window.paint_quad(fill(
-                            Bounds::new(
-                                point(origin.x + px(inset + g * span), origin.y + px(inset)),
-                                size(px(1.0), px(span)),
-                            ),
-                            line,
-                        ));
-                        window.paint_quad(fill(
-                            Bounds::new(
-                                point(origin.x + px(inset), origin.y + px(inset + g * span)),
-                                size(px(span), px(1.0)),
-                            ),
-                            line,
-                        ));
-                    }
-                    let mut frame = fill(
-                        Bounds::new(
-                            point(origin.x + px(inset), origin.y + px(inset)),
-                            size(px(span), px(span)),
-                        ),
-                        gpui::transparent_black(),
-                    );
-                    frame.border_widths = px(1.0).into();
-                    frame.border_color = c.foreground.opacity(0.15);
-                    window.paint_quad(frame);
+            let graph = {
+                let (points, c, this) = (points.clone(), c.clone(), this.clone());
+                canvas(
+                    {
+                        let this = this.clone();
+                        move |bounds, _, cx| {
+                            guard::guard("curve editor layout", || {
+                                this.update(cx, |editor, _| editor.origin = bounds.origin)
+                            });
+                        }
+                    },
+                    move |bounds, _, window, _| {
+                        guard::guard("curve editor paint", || {
+                            let origin = bounds.origin;
+                            let mut quad = fill(bounds, c.foreground.opacity(0.05));
+                            quad.corner_radii = px(4.0).into();
+                            window.paint_quad(quad);
+                            let span = plane.span as f32;
+                            let inset = INSET as f32;
+                            for g in GRID {
+                                let g = g as f32;
+                                let line = c.foreground.opacity(0.1);
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        point(
+                                            origin.x + px(inset + g * span),
+                                            origin.y + px(inset),
+                                        ),
+                                        size(px(1.0), px(span)),
+                                    ),
+                                    line,
+                                ));
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        point(
+                                            origin.x + px(inset),
+                                            origin.y + px(inset + g * span),
+                                        ),
+                                        size(px(span), px(1.0)),
+                                    ),
+                                    line,
+                                ));
+                            }
+                            let mut frame = fill(
+                                Bounds::new(
+                                    point(origin.x + px(inset), origin.y + px(inset)),
+                                    size(px(span), px(span)),
+                                ),
+                                gpui::transparent_black(),
+                            );
+                            frame.border_widths = px(1.0).into();
+                            frame.border_color = c.foreground.opacity(0.15);
+                            window.paint_quad(frame);
 
-                    let steps = curve_path(&points, |p| plane.project(p));
-                    // The area under the curve.
-                    if let (Some(first), Some(last)) = (points.first(), points.last()) {
-                        let mut area = PathBuilder::fill();
-                        for step in &steps {
-                            match *step {
-                                PathStep::Move(p) => area.move_to(pt(origin, p)),
-                                PathStep::Line(p) => area.line_to(pt(origin, p)),
-                                PathStep::Cubic { first, second, end } => {
-                                    area.cubic_bezier_to(
-                                        pt(origin, end),
-                                        pt(origin, first),
-                                        pt(origin, second),
-                                    );
+                            let steps = curve_path(&points, |p| plane.project(p));
+                            // The area under the curve.
+                            if let (Some(first), Some(last)) = (points.first(), points.last()) {
+                                let mut area = PathBuilder::fill();
+                                for step in &steps {
+                                    match *step {
+                                        PathStep::Move(p) => area.move_to(pt(origin, p)),
+                                        PathStep::Line(p) => area.line_to(pt(origin, p)),
+                                        PathStep::Cubic { first, second, end } => {
+                                            area.cubic_bezier_to(
+                                                pt(origin, end),
+                                                pt(origin, first),
+                                                pt(origin, second),
+                                            );
+                                        }
+                                    }
+                                }
+                                let _ = (first, last);
+                                area.line_to(pt(origin, plane.project(Vec2::new(1.0, 0.0))));
+                                area.line_to(pt(origin, plane.project(Vec2::new(0.0, 0.0))));
+                                area.close();
+                                if let Ok(path) = area.build() {
+                                    window.paint_path(path, c.foreground.opacity(0.05));
                                 }
                             }
-                        }
-                        let _ = (first, last);
-                        area.line_to(pt(origin, plane.project(Vec2::new(1.0, 0.0))));
-                        area.line_to(pt(origin, plane.project(Vec2::new(0.0, 0.0))));
-                        area.close();
-                        if let Ok(path) = area.build() {
-                            window.paint_path(path, c.foreground.opacity(0.05));
-                        }
-                    }
-                    stroke_path(window, origin, &steps, 1.5, c.foreground);
+                            stroke_path(window, origin, &steps, 1.5, c.foreground);
 
-                    if let (Some(point), Some(index)) =
-                        (points.get(selected.unwrap_or(usize::MAX)), selected)
-                    {
-                        let at = plane.project(Vec2::new(point.x, point.y));
-                        for handle_side in sides(&points, index) {
-                            let part = if handle_side == HandleSide::Left {
-                                Part::Left
-                            } else {
-                                Part::Right
-                            };
-                            let handle = plane.project(part_at(point, part));
-                            stroke_path(
-                                window,
-                                origin,
-                                &[PathStep::Move(at), PathStep::Line(handle)],
-                                1.0,
-                                c.primary.opacity(0.7),
-                            );
-                            paint_dot(window, pt(origin, handle), 3.0, c.card, c.primary);
-                        }
-                    }
-                    for (i, p) in points.iter().enumerate() {
-                        let at = pt(origin, plane.project(Vec2::new(p.x, p.y)));
-                        if Some(i) == selected {
-                            paint_dot(window, at, 4.5, c.primary, c.card);
-                        } else {
-                            paint_dot(window, at, 3.5, c.foreground, c.card);
-                        }
-                    }
-                },
-            )
-            .absolute()
-            .size_full()
-        };
-        let graph = div()
-            .id("curve-graph")
-            .relative()
-            .flex_none()
-            .size(side)
-            .when(!disabled, |d| d.cursor_crosshair())
-            .track_focus(&self.focus)
-            .on_key_down(cx.safe_listener(Self::key_down))
-            .child(graph)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.safe_listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.press(event.position, event.modifiers, window, cx);
-                }),
-            )
-            .on_drag(DragMarker, |_, _, _, cx| cx.new(|_| Empty))
-            .on_drag_move::<DragMarker>(cx.safe_listener(
-                |this, event: &DragMoveEvent<DragMarker>, _, cx| {
-                    this.drag_to(event.event.position, event.event.modifiers, cx);
-                },
-            ))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
-            )
-            .on_mouse_up_out(
-                MouseButton::Left,
-                cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
-            );
-        #[cfg(test)]
-        let graph = graph.debug_selector(|| "curve-graph".into());
+                            if let (Some(point), Some(index)) =
+                                (points.get(selected.unwrap_or(usize::MAX)), selected)
+                            {
+                                let at = plane.project(Vec2::new(point.x, point.y));
+                                for handle_side in sides(&points, index) {
+                                    let part = if handle_side == HandleSide::Left {
+                                        Part::Left
+                                    } else {
+                                        Part::Right
+                                    };
+                                    let handle = plane.project(part_at(point, part));
+                                    stroke_path(
+                                        window,
+                                        origin,
+                                        &[PathStep::Move(at), PathStep::Line(handle)],
+                                        1.0,
+                                        c.primary.opacity(0.7),
+                                    );
+                                    paint_dot(window, pt(origin, handle), 3.0, c.card, c.primary);
+                                }
+                            }
+                            for (i, p) in points.iter().enumerate() {
+                                let at = pt(origin, plane.project(Vec2::new(p.x, p.y)));
+                                if Some(i) == selected {
+                                    paint_dot(window, at, 4.5, c.primary, c.card);
+                                } else {
+                                    paint_dot(window, at, 3.5, c.foreground, c.card);
+                                }
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full()
+            };
+            let graph = div()
+                .id("curve-graph")
+                .relative()
+                .flex_none()
+                .size(side)
+                .when(!disabled, |d| d.cursor_crosshair())
+                .track_focus(&self.focus)
+                .on_key_down(cx.safe_listener(Self::key_down))
+                .child(graph)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, event: &MouseDownEvent, window, cx| {
+                        this.press(event.position, event.modifiers, window, cx);
+                    }),
+                )
+                .on_drag(DragMarker, |_, _, _, cx| cx.new(|_| Empty))
+                .on_drag_move::<DragMarker>(cx.safe_listener(
+                    |this, event: &DragMoveEvent<DragMarker>, _, cx| {
+                        this.drag_to(event.event.position, event.event.modifiers, cx);
+                    },
+                ))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
+                );
+            #[cfg(test)]
+            let graph = graph.debug_selector(|| "curve-graph".into());
 
-        let muted = c.muted_foreground;
-        let presets =
-            div()
-                .flex()
-                .flex_col()
-                .justify_between()
-                .children(curve_presets().into_iter().map(|preset| {
+            let muted = c.muted_foreground;
+            let presets = div().flex().flex_col().justify_between().children(
+                curve_presets().into_iter().map(|preset| {
                     let label = SharedString::from(format!("{} preset", preset.label));
                     let thumb = preset.points.clone();
                     let applied = preset.points;
@@ -781,10 +790,12 @@ impl Render for CurveEditor {
                             canvas(
                                 |_, _, _| (),
                                 move |bounds, (), window, _| {
-                                    let steps = curve_path(&thumb, |p| {
-                                        Vec2::new(3.0 + p.x * 14.0, 3.0 + (1.0 - p.y) * 14.0)
+                                    guard::guard("curve editor paint", || {
+                                        let steps = curve_path(&thumb, |p| {
+                                            Vec2::new(3.0 + p.x * 14.0, 3.0 + (1.0 - p.y) * 14.0)
+                                        });
+                                        stroke_path(window, bounds.origin, &steps, 1.5, muted);
                                     });
-                                    stroke_path(window, bounds.origin, &steps, 1.5, muted);
                                 },
                             )
                             .size(px(20.0)),
@@ -797,147 +808,151 @@ impl Render for CurveEditor {
                         .debug_selector(move || format!("curve-preset-{id}"))
                         .child(button);
                     button
-                }));
+                }),
+            );
 
-        let kinds = [
-            (
-                CurvePointKind::Vector,
-                "Vector: no handles, straight to its neighbours",
-            ),
-            (CurvePointKind::Free, "Free: each handle goes its own way"),
-            (
-                CurvePointKind::Aligned,
-                "Aligned: opposite handles, each with its length",
-            ),
-            (
-                CurvePointKind::Mirrored,
-                "Mirrored: opposite handles of the same length",
-            ),
-        ];
-        let kind_row = div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .children(kinds.into_iter().map(|(kind, label)| {
-                let pressed = active.is_some_and(|p| p.kind == kind);
-                let (lines, dot, handles) = kind_glyph(kind);
-                let ink = c.foreground;
-                let button = Button::new(SharedString::from(format!("curve-kind-{kind:?}")))
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .tooltip(label)
-                    .selected(pressed)
-                    .disabled(disabled || active.is_none())
-                    .child(
-                        canvas(
-                            |_, _, _| (),
-                            move |bounds, (), window, _| {
-                                let o = bounds.origin;
-                                let steps: Vec<PathStep> = lines
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, (x, y))| {
-                                        let p = Vec2::new(f64::from(*x), f64::from(*y));
-                                        if i == 0 {
-                                            PathStep::Move(p)
-                                        } else {
-                                            PathStep::Line(p)
+            let kinds = [
+                (
+                    CurvePointKind::Vector,
+                    "Vector: no handles, straight to its neighbours",
+                ),
+                (CurvePointKind::Free, "Free: each handle goes its own way"),
+                (
+                    CurvePointKind::Aligned,
+                    "Aligned: opposite handles, each with its length",
+                ),
+                (
+                    CurvePointKind::Mirrored,
+                    "Mirrored: opposite handles of the same length",
+                ),
+            ];
+            let kind_row = div()
+                .flex()
+                .items_center()
+                .gap(px(2.0))
+                .children(kinds.into_iter().map(|(kind, label)| {
+                    let pressed = active.is_some_and(|p| p.kind == kind);
+                    let (lines, dot, handles) = kind_glyph(kind);
+                    let ink = c.foreground;
+                    let button = Button::new(SharedString::from(format!("curve-kind-{kind:?}")))
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::IconSm)
+                        .tooltip(label)
+                        .selected(pressed)
+                        .disabled(disabled || active.is_none())
+                        .child(
+                            canvas(
+                                |_, _, _| (),
+                                move |bounds, (), window, _| {
+                                    guard::guard("curve editor paint", || {
+                                        let o = bounds.origin;
+                                        let steps: Vec<PathStep> = lines
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(i, (x, y))| {
+                                                let p = Vec2::new(f64::from(*x), f64::from(*y));
+                                                if i == 0 {
+                                                    PathStep::Move(p)
+                                                } else {
+                                                    PathStep::Line(p)
+                                                }
+                                            })
+                                            .collect();
+                                        stroke_path(window, o, &steps, 1.25, ink);
+                                        for (x, y) in handles {
+                                            paint_dot(
+                                                window,
+                                                point(o.x + px(*x), o.y + px(*y)),
+                                                1.5,
+                                                gpui::transparent_black(),
+                                                ink,
+                                            );
                                         }
-                                    })
-                                    .collect();
-                                stroke_path(window, o, &steps, 1.25, ink);
-                                for (x, y) in handles {
-                                    paint_dot(
-                                        window,
-                                        point(o.x + px(*x), o.y + px(*y)),
-                                        1.5,
-                                        gpui::transparent_black(),
-                                        ink,
-                                    );
-                                }
-                                paint_dot(
-                                    window,
-                                    point(o.x + px(dot.0), o.y + px(dot.1)),
-                                    2.0,
-                                    ink,
-                                    gpui::transparent_black(),
-                                );
-                            },
+                                        paint_dot(
+                                            window,
+                                            point(o.x + px(dot.0), o.y + px(dot.1)),
+                                            2.0,
+                                            ink,
+                                            gpui::transparent_black(),
+                                        );
+                                    });
+                                },
+                            )
+                            .size(px(16.0)),
                         )
-                        .size(px(16.0)),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_kind(kind, cx)));
-                #[cfg(test)]
-                let button = div()
-                    .debug_selector(move || format!("curve-kind-{kind:?}"))
-                    .child(button);
-                button
-            }))
-            .child(div().flex_1())
-            .child({
-                let b = Button::new("curve-flip-x")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .icon(IconName::FlipHorizontal)
-                    .tooltip("Flip left to right")
-                    .disabled(disabled)
-                    .on_click(cx.listener(|this, _, _, cx| this.flip(true, cx)));
-                #[cfg(test)]
-                let b = div().debug_selector(|| "curve-flip-x".into()).child(b);
-                b
-            })
-            .child({
-                let b = Button::new("curve-flip-y")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .icon(IconName::FlipVertical)
-                    .tooltip("Flip upside down")
-                    .disabled(disabled)
-                    .on_click(cx.listener(|this, _, _, cx| this.flip(false, cx)));
-                #[cfg(test)]
-                let b = div().debug_selector(|| "curve-flip-y".into()).child(b);
-                b
-            })
-            .child({
-                let b = Button::new("curve-delete")
-                    .variant(ButtonVariant::Destructive)
-                    .size(ButtonSize::IconSm)
-                    .icon(IconName::X)
-                    .tooltip("Delete point")
-                    .disabled(disabled || active.is_none() || points.len() <= 2)
-                    .on_click(cx.listener(|this, _, _, cx| this.remove_selected(cx)));
-                #[cfg(test)]
-                let b = div().debug_selector(|| "curve-delete".into()).child(b);
-                b
-            });
+                        .on_click(cx.listener(move |this, _, _, cx| this.set_kind(kind, cx)));
+                    #[cfg(test)]
+                    let button = div()
+                        .debug_selector(move || format!("curve-kind-{kind:?}"))
+                        .child(button);
+                    button
+                }))
+                .child(div().flex_1())
+                .child({
+                    let b = Button::new("curve-flip-x")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::IconSm)
+                        .icon(IconName::FlipHorizontal)
+                        .tooltip("Flip left to right")
+                        .disabled(disabled)
+                        .on_click(cx.listener(|this, _, _, cx| this.flip(true, cx)));
+                    #[cfg(test)]
+                    let b = div().debug_selector(|| "curve-flip-x".into()).child(b);
+                    b
+                })
+                .child({
+                    let b = Button::new("curve-flip-y")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::IconSm)
+                        .icon(IconName::FlipVertical)
+                        .tooltip("Flip upside down")
+                        .disabled(disabled)
+                        .on_click(cx.listener(|this, _, _, cx| this.flip(false, cx)));
+                    #[cfg(test)]
+                    let b = div().debug_selector(|| "curve-flip-y".into()).child(b);
+                    b
+                })
+                .child({
+                    let b = Button::new("curve-delete")
+                        .variant(ButtonVariant::Destructive)
+                        .size(ButtonSize::IconSm)
+                        .icon(IconName::X)
+                        .tooltip("Delete point")
+                        .disabled(disabled || active.is_none() || points.len() <= 2)
+                        .on_click(cx.listener(|this, _, _, cx| this.remove_selected(cx)));
+                    #[cfg(test)]
+                    let b = div().debug_selector(|| "curve-delete".into()).child(b);
+                    b
+                });
 
-        let coordinates =
+            let coordinates =
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .children(self.fields.iter().zip(PARTS).map(|(row, (_, label))| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .text_size(theme.text.xs)
+                            .child(div().w(px(36.0)).flex_none().text_color(muted).child(label))
+                            .children(
+                                row.iter()
+                                    .map(|field| div().flex_1().min_w_0().child(field.clone())),
+                            )
+                    }));
+
             div()
                 .flex()
                 .flex_col()
-                .gap(px(2.0))
-                .children(self.fields.iter().zip(PARTS).map(|(row, (_, label))| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .text_size(theme.text.xs)
-                        .child(div().w(px(36.0)).flex_none().text_color(muted).child(label))
-                        .children(
-                            row.iter()
-                                .map(|field| div().flex_1().min_w_0().child(field.clone())),
-                        )
-                }));
-
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .font_family(theme.font.clone())
-            .when(disabled, |d| d.opacity(0.6))
-            .child(div().flex().gap_1().child(graph).child(presets))
-            .child(kind_row)
-            .child(coordinates)
+                .gap_1()
+                .font_family(theme.font.clone())
+                .when(disabled, |d| d.opacity(0.6))
+                .child(div().flex().gap_1().child(graph).child(presets))
+                .child(kind_row)
+                .child(coordinates)
+        })
     }
 }
 

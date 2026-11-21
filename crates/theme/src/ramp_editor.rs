@@ -402,248 +402,258 @@ impl Focusable for RampEditor {
 
 impl Render for RampEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let c = theme.colors.clone();
-        let disabled = self.disabled;
-        let this = cx.entity();
-        let selected_id = self.selected().map(str::to_owned);
-        let alpha = self.alpha;
+        guard::render("RampEditor", || {
+            let theme = cx.theme();
+            let c = theme.colors.clone();
+            let disabled = self.disabled;
+            let this = cx.entity();
+            let selected_id = self.selected().map(str::to_owned);
+            let alpha = self.alpha;
 
-        // The gradient, one column per pixel, sampled at its middle.
-        let colored = self.colored(&self.stops);
-        let modes = self.modes;
-        let gamut = self.gamut;
-        let bar = {
-            let (this, colored) = (this.clone(), colored.clone());
-            canvas(
-                {
-                    let this = this.clone();
-                    move |bounds, _, cx| this.update(cx, |editor, _| editor.lane = bounds)
-                },
-                move |bounds, _, window, _| {
-                    let width = f64::from(bounds.size.width);
-                    let columns = width.ceil().max(1.0) as usize;
-                    if alpha {
-                        let rows =
-                            (f64::from(bounds.size.height) / f64::from(CHECKER)).ceil() as usize;
-                        let cols = (width / f64::from(CHECKER)).ceil() as usize;
-                        for row in 0..rows {
-                            for col in 0..cols {
-                                let shade = if (row + col) % 2 == 0 { 0.6 } else { 0.4 };
-                                let cell = Bounds::new(
-                                    point(
-                                        bounds.left() + CHECKER * col as f32,
-                                        bounds.top() + CHECKER * row as f32,
-                                    ),
-                                    size(CHECKER, CHECKER),
-                                );
+            // The gradient, one column per pixel, sampled at its middle.
+            let colored = self.colored(&self.stops);
+            let modes = self.modes;
+            let gamut = self.gamut;
+            let bar = {
+                let (this, colored) = (this.clone(), colored.clone());
+                canvas(
+                    {
+                        let this = this.clone();
+                        move |bounds, _, cx| {
+                            guard::guard("ramp editor layout", || {
+                                this.update(cx, |editor, _| editor.lane = bounds)
+                            });
+                        }
+                    },
+                    move |bounds, _, window, _| {
+                        guard::guard("ramp editor paint", || {
+                            let width = f64::from(bounds.size.width);
+                            let columns = width.ceil().max(1.0) as usize;
+                            if alpha {
+                                let rows = (f64::from(bounds.size.height) / f64::from(CHECKER))
+                                    .ceil() as usize;
+                                let cols = (width / f64::from(CHECKER)).ceil() as usize;
+                                for row in 0..rows {
+                                    for col in 0..cols {
+                                        let shade = if (row + col) % 2 == 0 { 0.6 } else { 0.4 };
+                                        let cell = Bounds::new(
+                                            point(
+                                                bounds.left() + CHECKER * col as f32,
+                                                bounds.top() + CHECKER * row as f32,
+                                            ),
+                                            size(CHECKER, CHECKER),
+                                        );
+                                        window.paint_quad(fill(
+                                            cell.intersect(&bounds),
+                                            gpui::hsla(0.0, 0.0, shade, 1.0),
+                                        ));
+                                    }
+                                }
+                            }
+                            for i in 0..columns {
+                                let x = (i as f64 + 0.5) / columns as f64;
+                                let [r, g, b, a] = evaluate_ramp(&colored, x, modes);
+                                let color =
+                                    linear_to_hsla(graph_math::color::Rgb::new(r, g, b), gamut);
+                                let color = if alpha {
+                                    color.opacity(a as f32)
+                                } else {
+                                    color
+                                };
+                                let left =
+                                    bounds.left() + bounds.size.width * (i as f32 / columns as f32);
+                                let next = bounds.left()
+                                    + bounds.size.width * ((i + 1) as f32 / columns as f32);
                                 window.paint_quad(fill(
-                                    cell.intersect(&bounds),
-                                    gpui::hsla(0.0, 0.0, shade, 1.0),
+                                    Bounds::new(
+                                        point(left, bounds.top()),
+                                        size(next - left, bounds.size.height),
+                                    ),
+                                    color,
                                 ));
                             }
-                        }
-                    }
-                    for i in 0..columns {
-                        let x = (i as f64 + 0.5) / columns as f64;
-                        let [r, g, b, a] = evaluate_ramp(&colored, x, modes);
-                        let color = linear_to_hsla(graph_math::color::Rgb::new(r, g, b), gamut);
-                        let color = if alpha {
-                            color.opacity(a as f32)
-                        } else {
-                            color
-                        };
-                        let left = bounds.left() + bounds.size.width * (i as f32 / columns as f32);
-                        let next =
-                            bounds.left() + bounds.size.width * ((i + 1) as f32 / columns as f32);
-                        window.paint_quad(fill(
-                            Bounds::new(
-                                point(left, bounds.top()),
-                                size(next - left, bounds.size.height),
-                            ),
-                            color,
-                        ));
-                    }
-                },
-            )
-            .absolute()
-            .size_full()
-        };
-
-        let lane_width = self.lane.size.width;
-        let markers = self.stops.iter().map(|stop| {
-            let active = Some(&stop.id) == selected_id.as_ref();
-            let fill_color = if self.linked.contains(&stop.id) {
-                c.muted_foreground
-            } else {
-                self.display_color(
-                    LinearRgba {
-                        a: 1.0,
-                        ..self.color_of(&stop.id)
+                        });
                     },
-                    false,
                 )
-            };
-            let left = lane_width * stop.position as f32;
-            div()
                 .absolute()
-                .top_0()
-                .left(left - px(5.0))
-                .w(px(10.0))
+                .size_full()
+            };
+
+            let lane_width = self.lane.size.width;
+            let markers = self.stops.iter().map(|stop| {
+                let active = Some(&stop.id) == selected_id.as_ref();
+                let fill_color = if self.linked.contains(&stop.id) {
+                    c.muted_foreground
+                } else {
+                    self.display_color(
+                        LinearRgba {
+                            a: 1.0,
+                            ..self.color_of(&stop.id)
+                        },
+                        false,
+                    )
+                };
+                let left = lane_width * stop.position as f32;
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(left - px(5.0))
+                    .w(px(10.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .when(active, |d| d.relative())
+                    .child(
+                        div()
+                            .h(BAR_HEIGHT)
+                            .w(px(3.0))
+                            .border_x_1()
+                            .border_color(gpui::black().opacity(0.6))
+                            .bg(gpui::white().opacity(if active { 1.0 } else { 0.7 })),
+                    )
+                    .child(
+                        div()
+                            .h(MARKER_HEIGHT)
+                            .w(px(10.0))
+                            .rounded_b_sm()
+                            .border(if active { px(2.0) } else { px(1.0) })
+                            .border_color(if active {
+                                c.primary
+                            } else {
+                                gpui::black().opacity(0.5)
+                            })
+                            .bg(fill_color),
+                    )
+            });
+
+            let lane = div()
+                .id("ramp-lane")
+                .relative()
+                .mx_1()
+                .h(BAR_HEIGHT + MARKER_HEIGHT)
+                .when(!disabled, |d| d.cursor(gpui::CursorStyle::ResizeLeftRight))
+                .track_focus(&self.focus)
+                .on_key_down(cx.safe_listener(Self::key_down))
+                .child(
+                    div()
+                        .relative()
+                        .h(BAR_HEIGHT)
+                        .rounded_sm()
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(gpui::black().opacity(0.2))
+                        .child(bar),
+                )
+                .children(markers)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, event: &MouseDownEvent, window, cx| {
+                        this.press(event, window, cx)
+                    }),
+                )
+                .on_drag(DragMarker, |_, _, _, cx| cx.new(|_| Empty))
+                .on_drag_move::<DragMarker>(cx.safe_listener(
+                    |this, event: &DragMoveEvent<DragMarker>, _, cx| {
+                        this.drag_to(event.event.position, event.event.modifiers, cx);
+                    },
+                ))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
+                );
+            #[cfg(test)]
+            let lane = lane.debug_selector(|| "ramp-lane".into());
+
+            let tool = |id: &'static str, icon: IconName, label: &'static str, off: bool| {
+                Button::new(id)
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::IconSm)
+                    .icon(icon)
+                    .tooltip(label)
+                    .disabled(disabled || off)
+            };
+            #[cfg(test)]
+            let wrap = |id: &'static str, button: Button| {
+                div().debug_selector(move || id.to_owned()).child(button)
+            };
+            #[cfg(not(test))]
+            let wrap = |_: &'static str, button: Button| button;
+            let toolbar = div()
+                .flex()
+                .items_center()
+                .gap(px(2.0))
+                .child(wrap(
+                    "ramp-add",
+                    tool("ramp-add", IconName::Plus, "Add a stop", false)
+                        .on_click(cx.listener(|this, _, _, cx| this.add_after_selected(cx))),
+                ))
+                .child(wrap(
+                    "ramp-remove",
+                    tool(
+                        "ramp-remove",
+                        IconName::Minus,
+                        "Remove the selected stop",
+                        self.stops.len() <= 1,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.remove_selected(cx))),
+                ))
+                .child(div().flex_1())
+                .child(wrap(
+                    "ramp-flip",
+                    tool(
+                        "ramp-flip",
+                        IconName::FlipHorizontal,
+                        "Flip left to right",
+                        false,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.flip(cx))),
+                ))
+                .child(wrap(
+                    "ramp-distribute",
+                    tool(
+                        "ramp-distribute",
+                        IconName::ArrowsOutLineHorizontal,
+                        "Space the stops evenly",
+                        self.stops.len() < 2,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.distribute(cx))),
+                ));
+
+            let selected_index = self.selected_index();
+            let linked = self.selected().is_some_and(|id| self.linked.contains(id));
+            let caption = SharedString::from(format!(
+                "Stop {}{}",
+                selected_index.map_or(0, |i| i + 1),
+                if linked { " (linked)" } else { "" }
+            ));
+            let footer = div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_1()
+                .text_size(theme.text.xs)
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(c.muted_foreground)
+                        .child(caption),
+                )
+                .child(div().flex_1().min_w_0().child(self.position.clone()));
+
+            div()
                 .flex()
                 .flex_col()
-                .items_center()
-                .when(active, |d| d.relative())
-                .child(
-                    div()
-                        .h(BAR_HEIGHT)
-                        .w(px(3.0))
-                        .border_x_1()
-                        .border_color(gpui::black().opacity(0.6))
-                        .bg(gpui::white().opacity(if active { 1.0 } else { 0.7 })),
-                )
-                .child(
-                    div()
-                        .h(MARKER_HEIGHT)
-                        .w(px(10.0))
-                        .rounded_b_sm()
-                        .border(if active { px(2.0) } else { px(1.0) })
-                        .border_color(if active {
-                            c.primary
-                        } else {
-                            gpui::black().opacity(0.5)
-                        })
-                        .bg(fill_color),
-                )
-        });
-
-        let lane = div()
-            .id("ramp-lane")
-            .relative()
-            .mx_1()
-            .h(BAR_HEIGHT + MARKER_HEIGHT)
-            .when(!disabled, |d| d.cursor(gpui::CursorStyle::ResizeLeftRight))
-            .track_focus(&self.focus)
-            .on_key_down(cx.safe_listener(Self::key_down))
-            .child(
-                div()
-                    .relative()
-                    .h(BAR_HEIGHT)
-                    .rounded_sm()
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(gpui::black().opacity(0.2))
-                    .child(bar),
-            )
-            .children(markers)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.safe_listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.press(event, window, cx)
-                }),
-            )
-            .on_drag(DragMarker, |_, _, _, cx| cx.new(|_| Empty))
-            .on_drag_move::<DragMarker>(cx.safe_listener(
-                |this, event: &DragMoveEvent<DragMarker>, _, cx| {
-                    this.drag_to(event.event.position, event.event.modifiers, cx);
-                },
-            ))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
-            )
-            .on_mouse_up_out(
-                MouseButton::Left,
-                cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
-            );
-        #[cfg(test)]
-        let lane = lane.debug_selector(|| "ramp-lane".into());
-
-        let tool = |id: &'static str, icon: IconName, label: &'static str, off: bool| {
-            Button::new(id)
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::IconSm)
-                .icon(icon)
-                .tooltip(label)
-                .disabled(disabled || off)
-        };
-        #[cfg(test)]
-        let wrap = |id: &'static str, button: Button| {
-            div().debug_selector(move || id.to_owned()).child(button)
-        };
-        #[cfg(not(test))]
-        let wrap = |_: &'static str, button: Button| button;
-        let toolbar = div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .child(wrap(
-                "ramp-add",
-                tool("ramp-add", IconName::Plus, "Add a stop", false)
-                    .on_click(cx.listener(|this, _, _, cx| this.add_after_selected(cx))),
-            ))
-            .child(wrap(
-                "ramp-remove",
-                tool(
-                    "ramp-remove",
-                    IconName::Minus,
-                    "Remove the selected stop",
-                    self.stops.len() <= 1,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.remove_selected(cx))),
-            ))
-            .child(div().flex_1())
-            .child(wrap(
-                "ramp-flip",
-                tool(
-                    "ramp-flip",
-                    IconName::FlipHorizontal,
-                    "Flip left to right",
-                    false,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.flip(cx))),
-            ))
-            .child(wrap(
-                "ramp-distribute",
-                tool(
-                    "ramp-distribute",
-                    IconName::ArrowsOutLineHorizontal,
-                    "Space the stops evenly",
-                    self.stops.len() < 2,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.distribute(cx))),
-            ));
-
-        let selected_index = self.selected_index();
-        let linked = self.selected().is_some_and(|id| self.linked.contains(id));
-        let caption = SharedString::from(format!(
-            "Stop {}{}",
-            selected_index.map_or(0, |i| i + 1),
-            if linked { " (linked)" } else { "" }
-        ));
-        let footer = div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .px_1()
-            .text_size(theme.text.xs)
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(c.muted_foreground)
-                    .child(caption),
-            )
-            .child(div().flex_1().min_w_0().child(self.position.clone()));
-
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .font_family(theme.font.clone())
-            .when(disabled, |d| d.opacity(0.6))
-            .child(toolbar)
-            .child(lane)
-            .child(footer)
+                .gap_1()
+                .font_family(theme.font.clone())
+                .when(disabled, |d| d.opacity(0.6))
+                .child(toolbar)
+                .child(lane)
+                .child(footer)
+        })
     }
 }
 

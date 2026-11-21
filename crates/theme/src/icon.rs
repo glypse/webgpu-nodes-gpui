@@ -105,12 +105,14 @@ impl Icon {
 
 impl RenderOnce for Icon {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
-        // SVGs are drawn as masks: like `currentColor`, the text colour by default.
-        let color = self.color.unwrap_or_else(|| window.text_style().color);
-        svg()
-            .path(self.name.path())
-            .size(self.size)
-            .flex_none()
-            .text_color(color)
+        guard::render("Icon", || {
+            // SVGs are drawn as masks: like `currentColor`, the text colour by default.
+            let color = self.color.unwrap_or_else(|| window.text_style().color);
+            svg()
+                .path(self.name.path())
+                .size(self.size)
+                .flex_none()
+                .text_color(color)
+        })
     }
 }

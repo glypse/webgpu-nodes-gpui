@@ -314,76 +314,79 @@ impl ColorPicker {
 
 impl Render for ColorPicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        let mode = self.mode;
-        let (primary, primary_fg, muted_fg, foreground) = (
-            c.primary,
-            c.primary_foreground,
-            c.muted_foreground,
-            c.foreground,
-        );
-        let tabs = div()
-            .flex()
-            .rounded_md()
-            .p(px(2.0))
-            .bg(c.muted)
-            .children(MODE_LABELS.map(|(option, label)| {
-                let selected = option == mode;
-                let tab = div()
-                    .id(SharedString::from(format!("picker-tab-{label}")))
-                    .flex_1()
-                    .flex()
-                    .justify_center()
-                    .rounded_sm()
-                    .py(px(2.0))
-                    .text_size(theme.text.xs)
-                    .cursor_pointer()
-                    .when(selected, |d| d.bg(primary).text_color(primary_fg))
-                    .when(!selected, |d| {
-                        d.text_color(muted_fg)
-                            .hover(move |s| s.text_color(foreground))
-                    })
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_mode(option, cx)));
-                #[cfg(test)]
-                let tab =
-                    gpui::InteractiveElement::debug_selector(tab, || format!("picker-tab-{label}"));
-                tab
-            }));
-        let shown = if self.alpha { 4 } else { 3 };
-        let fields = div()
-            .flex()
-            .flex_col()
-            .gap(px(1.0))
-            .children(self.fields.iter().take(shown).cloned());
-        let swatch = div()
-            .flex_none()
-            .size(px(28.0))
-            .rounded_sm()
-            .border_1()
-            .border_color(gpui::black().opacity(0.2))
-            .bg(linear_to_hsla(self.value.rgb(), self.gamut));
-        let hex = div().flex_1().min_w_0().child(self.hex.clone());
-        #[cfg(test)]
-        let hex = gpui::InteractiveElement::debug_selector(hex, || "picker-hex".into());
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .w(px(176.0))
-            .font_family(theme.font.clone())
-            .child(div().flex().justify_center().child(self.wheels.clone()))
-            .child(tabs)
-            .child(fields)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(swatch)
-                    .child(hex),
-            )
+        guard::render("ColorPicker", || {
+            let theme = cx.theme();
+            let c = &theme.colors;
+            let mode = self.mode;
+            let (primary, primary_fg, muted_fg, foreground) = (
+                c.primary,
+                c.primary_foreground,
+                c.muted_foreground,
+                c.foreground,
+            );
+            let tabs = div()
+                .flex()
+                .rounded_md()
+                .p(px(2.0))
+                .bg(c.muted)
+                .children(MODE_LABELS.map(|(option, label)| {
+                    let selected = option == mode;
+                    let tab = div()
+                        .id(SharedString::from(format!("picker-tab-{label}")))
+                        .flex_1()
+                        .flex()
+                        .justify_center()
+                        .rounded_sm()
+                        .py(px(2.0))
+                        .text_size(theme.text.xs)
+                        .cursor_pointer()
+                        .when(selected, |d| d.bg(primary).text_color(primary_fg))
+                        .when(!selected, |d| {
+                            d.text_color(muted_fg)
+                                .hover(move |s| s.text_color(foreground))
+                        })
+                        .child(label)
+                        .on_click(cx.listener(move |this, _, _, cx| this.set_mode(option, cx)));
+                    #[cfg(test)]
+                    let tab = gpui::InteractiveElement::debug_selector(tab, || {
+                        format!("picker-tab-{label}")
+                    });
+                    tab
+                }));
+            let shown = if self.alpha { 4 } else { 3 };
+            let fields = div()
+                .flex()
+                .flex_col()
+                .gap(px(1.0))
+                .children(self.fields.iter().take(shown).cloned());
+            let swatch = div()
+                .flex_none()
+                .size(px(28.0))
+                .rounded_sm()
+                .border_1()
+                .border_color(gpui::black().opacity(0.2))
+                .bg(linear_to_hsla(self.value.rgb(), self.gamut));
+            let hex = div().flex_1().min_w_0().child(self.hex.clone());
+            #[cfg(test)]
+            let hex = gpui::InteractiveElement::debug_selector(hex, || "picker-hex".into());
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .w(px(176.0))
+                .font_family(theme.font.clone())
+                .child(div().flex().justify_center().child(self.wheels.clone()))
+                .child(tabs)
+                .child(fields)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(swatch)
+                        .child(hex),
+                )
+        })
     }
 }
 

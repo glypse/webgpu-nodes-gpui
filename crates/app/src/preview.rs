@@ -1,10 +1,10 @@
-use guard::SafeListener as _;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
     Render, ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
     canvas, div, img, point, prelude::FluentBuilder as _, px, size,
 };
+use guard::SafeListener as _;
 use runtime::Size;
 use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
 
@@ -153,146 +153,152 @@ impl PreviewArea {
 
 impl Render for PreviewArea {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.scale = window.scale_factor();
-        let theme = cx.theme().clone();
-        let playback = self.playback.read(cx);
-        let image = playback.image();
-        let failure = playback.failure.clone();
-        let rect = self.rect(cx);
-        let view = cx.entity();
-        div()
-            .id("preview-pane")
-            .relative()
-            .size_full()
-            .overflow_hidden()
-            .bg(gpui::black())
-            .cursor(if self.panning.is_some() {
-                gpui::CursorStyle::ClosedHand
-            } else {
-                gpui::CursorStyle::OpenHand
-            })
-            .child(
-                canvas(
-                    move |bounds, _, cx| {
-                        view.update(cx, |this, cx| {
-                            if this.pane != bounds {
-                                this.pane = bounds;
-                                cx.notify();
-                            }
-                        });
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .size_full(),
-            )
-            .children(image.map(|image| {
-                img(image)
-                    .absolute()
-                    .left(rect.origin.x)
-                    .top(rect.origin.y)
-                    .w(rect.size.width)
-                    .h(rect.size.height)
-            }))
-            .on_scroll_wheel(cx.safe_listener(move |this, event: &ScrollWheelEvent, _, cx| {
-                let delta = event.delta.pixel_delta(px(20.0)).y;
-                let boost = if event.modifiers.control { 10.0 } else { 1.0 };
-                let factor = 2f32.powf(f32::from(delta) * WHEEL_SPEED * boost);
-                let anchor = event.position - this.pane.origin;
-                this.zoom_by(factor, Some(anchor), cx);
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.panning = Some(event.position);
-                    cx.notify();
-                }),
-            )
-            .on_mouse_move(cx.safe_listener(|this, event: &MouseMoveEvent, _, cx| {
-                let Some(last) = this.panning else {
-                    return;
-                };
-                if event.pressed_button != Some(MouseButton::Left) {
-                    this.panning = None;
-                    return;
-                }
-                this.pan_by(
-                    (event.position.x - last.x).into(),
-                    (event.position.y - last.y).into(),
-                    cx,
-                );
-                this.panning = Some(event.position);
-            }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.safe_listener(|this, _, _, cx| {
-                    this.panning = None;
-                    cx.notify();
-                }),
-            )
-            .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
-                if event.click_count() == 2 {
-                    let factor = if event.modifiers().shift { 0.5 } else { 2.0 };
-                    let anchor = event.position() - this.pane.origin;
-                    this.zoom_by(factor, Some(anchor), cx);
-                }
-            }))
-            .child(
-                div().absolute().left_2().bottom_2().child(
-                    Button::new("fit-view")
-                        .variant(ButtonVariant::Outline)
-                        .size(ButtonSize::Icon)
-                        .icon(IconName::ArrowsIn)
-                        .tooltip("Fit view (0)")
-                        .on_click(cx.safe_listener(|this, _, _, cx| this.fit(cx))),
-                ),
-            )
-            .children(failure.map(|failure| {
-                let c = &theme.colors;
-                div()
-                    .absolute()
-                    .left(px(56.0))
-                    .right_2()
-                    .bottom_2()
-                    .p_3()
-                    .rounded(theme.radius.lg)
-                    .bg(c.background.opacity(0.85))
-                    .border_1()
-                    .border_color(c.border)
-                    .shadow_lg()
-                    .text_size(theme.text.xs)
-                    .text_color(c.foreground)
-                    .child(
-                        div()
-                            .mb_1()
-                            .text_size(theme.text.sm)
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(c.destructive)
-                            .child("Shader error"),
+        guard::render("PreviewArea", || {
+            self.scale = window.scale_factor();
+            let theme = cx.theme().clone();
+            let playback = self.playback.read(cx);
+            let image = playback.image();
+            let failure = playback.failure.clone();
+            let rect = self.rect(cx);
+            let view = cx.entity();
+            div()
+                .id("preview-pane")
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .bg(gpui::black())
+                .cursor(if self.panning.is_some() {
+                    gpui::CursorStyle::ClosedHand
+                } else {
+                    gpui::CursorStyle::OpenHand
+                })
+                .child(
+                    canvas(
+                        move |bounds, _, cx| {
+                            guard::guard("preview layout", || {
+                                view.update(cx, |this, cx| {
+                                    if this.pane != bounds {
+                                        this.pane = bounds;
+                                        cx.notify();
+                                    }
+                                });
+                            });
+                        },
+                        |_, _, _, _| {},
                     )
-                    .child(failure.message)
-                    .when(!failure.snippet.is_empty(), |d| {
-                        d.child(
+                    .absolute()
+                    .size_full(),
+                )
+                .children(image.map(|image| {
+                    img(image)
+                        .absolute()
+                        .left(rect.origin.x)
+                        .top(rect.origin.y)
+                        .w(rect.size.width)
+                        .h(rect.size.height)
+                }))
+                .on_scroll_wheel(
+                    cx.safe_listener(move |this, event: &ScrollWheelEvent, _, cx| {
+                        let delta = event.delta.pixel_delta(px(20.0)).y;
+                        let boost = if event.modifiers.control { 10.0 } else { 1.0 };
+                        let factor = 2f32.powf(f32::from(delta) * WHEEL_SPEED * boost);
+                        let anchor = event.position - this.pane.origin;
+                        this.zoom_by(factor, Some(anchor), cx);
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, event: &MouseDownEvent, _, cx| {
+                        this.panning = Some(event.position);
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_move(cx.safe_listener(|this, event: &MouseMoveEvent, _, cx| {
+                    let Some(last) = this.panning else {
+                        return;
+                    };
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        this.panning = None;
+                        return;
+                    }
+                    this.pan_by(
+                        (event.position.x - last.x).into(),
+                        (event.position.y - last.y).into(),
+                        cx,
+                    );
+                    this.panning = Some(event.position);
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.safe_listener(|this, _, _, cx| {
+                        this.panning = None;
+                        cx.notify();
+                    }),
+                )
+                .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
+                    if event.click_count() == 2 {
+                        let factor = if event.modifiers().shift { 0.5 } else { 2.0 };
+                        let anchor = event.position() - this.pane.origin;
+                        this.zoom_by(factor, Some(anchor), cx);
+                    }
+                }))
+                .child(
+                    div().absolute().left_2().bottom_2().child(
+                        Button::new("fit-view")
+                            .variant(ButtonVariant::Outline)
+                            .size(ButtonSize::Icon)
+                            .icon(IconName::ArrowsIn)
+                            .tooltip("Fit view (0)")
+                            .on_click(cx.safe_listener(|this, _, _, cx| this.fit(cx))),
+                    ),
+                )
+                .children(failure.map(|failure| {
+                    let c = &theme.colors;
+                    div()
+                        .absolute()
+                        .left(px(56.0))
+                        .right_2()
+                        .bottom_2()
+                        .p_3()
+                        .rounded(theme.radius.lg)
+                        .bg(c.background.opacity(0.85))
+                        .border_1()
+                        .border_color(c.border)
+                        .shadow_lg()
+                        .text_size(theme.text.xs)
+                        .text_color(c.foreground)
+                        .child(
                             div()
-                                .mt_2()
-                                .p_2()
-                                .rounded(theme.radius.sm)
-                                .bg(c.muted)
-                                .font_family(theme.mono_font.clone())
-                                .children(failure.snippet.into_iter().map(
-                                    |(number, text, at_fault)| {
-                                        div()
-                                            .whitespace_nowrap()
-                                            .when(at_fault, |d| d.text_color(c.destructive))
-                                            .child(format!(
-                                                "{number:>4} {} {text}",
-                                                if at_fault { ">" } else { " " }
-                                            ))
-                                    },
-                                )),
+                                .mb_1()
+                                .text_size(theme.text.sm)
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(c.destructive)
+                                .child("Shader error"),
                         )
-                    })
-            }))
+                        .child(failure.message)
+                        .when(!failure.snippet.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .mt_2()
+                                    .p_2()
+                                    .rounded(theme.radius.sm)
+                                    .bg(c.muted)
+                                    .font_family(theme.mono_font.clone())
+                                    .children(failure.snippet.into_iter().map(
+                                        |(number, text, at_fault)| {
+                                            div()
+                                                .whitespace_nowrap()
+                                                .when(at_fault, |d| d.text_color(c.destructive))
+                                                .child(format!(
+                                                    "{number:>4} {} {text}",
+                                                    if at_fault { ">" } else { " " }
+                                                ))
+                                        },
+                                    )),
+                            )
+                        })
+                }))
+        })
     }
 }
 
@@ -423,58 +429,60 @@ fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut App) {
 
 impl Render for PreviewToolbar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let resolution = self.playback.read(cx).resolution;
-        let zoom = self.area.read(cx).zoom(cx);
-        let this = cx.entity();
-        let open = move |kind: Open| {
-            let this = this.clone();
-            move |event: &ClickEvent, _: &mut Window, cx: &mut App| {
-                this.update(cx, |this, cx| {
-                    this.open = Some((kind, event.position() + point(px(0.0), px(8.0))));
-                    cx.notify();
-                });
-            }
-        };
-        let is_open = |kind| self.open.is_some_and(|(k, _)| k == kind);
-        let menu: Option<AnyElement> = self
-            .open
-            .map(|(kind, at)| self.menu(kind, at, cx).into_any_element());
-        div()
-            .flex()
-            .flex_1()
-            .min_w_0()
-            .items_center()
-            .justify_end()
-            .gap_1()
-            .child(
-                Button::new("resolution")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
-                    .label(format!("{} × {}", resolution.width, resolution.height))
-                    .selected(is_open(Open::Resolution))
-                    .tooltip("Canvas size")
-                    .on_click(open(Open::Resolution)),
-            )
-            .child(
-                Button::new("zoom")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
-                    .label(format!("{}%", (zoom * 100.0).round()))
-                    .icon_end(IconName::CaretUpDown)
-                    .selected(is_open(Open::Zoom))
-                    .tooltip("Zoom")
-                    .on_click(open(Open::Zoom)),
-            )
-            .child(
-                Button::new("export")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconXs)
-                    .icon(IconName::DownloadSimple)
-                    .selected(is_open(Open::Export))
-                    .tooltip("Export")
-                    .on_click(open(Open::Export)),
-            )
-            .children(menu)
+        guard::render("PreviewToolbar", || {
+            let resolution = self.playback.read(cx).resolution;
+            let zoom = self.area.read(cx).zoom(cx);
+            let this = cx.entity();
+            let open = move |kind: Open| {
+                let this = this.clone();
+                move |event: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    this.update(cx, |this, cx| {
+                        this.open = Some((kind, event.position() + point(px(0.0), px(8.0))));
+                        cx.notify();
+                    });
+                }
+            };
+            let is_open = |kind| self.open.is_some_and(|(k, _)| k == kind);
+            let menu: Option<AnyElement> = self
+                .open
+                .map(|(kind, at)| self.menu(kind, at, cx).into_any_element());
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .justify_end()
+                .gap_1()
+                .child(
+                    Button::new("resolution")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Xs)
+                        .label(format!("{} × {}", resolution.width, resolution.height))
+                        .selected(is_open(Open::Resolution))
+                        .tooltip("Canvas size")
+                        .on_click(open(Open::Resolution)),
+                )
+                .child(
+                    Button::new("zoom")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Xs)
+                        .label(format!("{}%", (zoom * 100.0).round()))
+                        .icon_end(IconName::CaretUpDown)
+                        .selected(is_open(Open::Zoom))
+                        .tooltip("Zoom")
+                        .on_click(open(Open::Zoom)),
+                )
+                .child(
+                    Button::new("export")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::IconXs)
+                        .icon(IconName::DownloadSimple)
+                        .selected(is_open(Open::Export))
+                        .tooltip("Export")
+                        .on_click(open(Open::Export)),
+                )
+                .children(menu)
+        })
     }
 }
 
