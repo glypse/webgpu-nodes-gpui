@@ -12,6 +12,8 @@ mod present;
 mod refresh_rate;
 mod renderer;
 mod simulation;
+#[cfg(target_os = "macos")]
+mod surface;
 mod uniforms;
 
 pub use clock::{Clock, FrameInputs, Timing};
@@ -20,8 +22,10 @@ pub use media::MediaError;
 pub use player::Player;
 pub use refresh_rate::RefreshRateMeter;
 pub use renderer::{
-    Frame, PixelFormat, Program, ProgramDiagnostic, ProgramError, RenderOptions,
+    Frame, PixelFormat, Presented, Program, ProgramDiagnostic, ProgramError, RenderOptions,
     Renderer, Size,
 };
+#[cfg(target_os = "macos")]
+pub use surface::Surface;
 pub use simulation::{Step, StepKind, StepRecord, next_step};
 pub use uniforms::{UniformBlock, UniformField, UniformScalar, pack_block};

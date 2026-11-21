@@ -20,6 +20,8 @@ use crate::mips::MipGenerator;
 use crate::present::{PresentOptions, Presenter};
 use crate::simulation::{SimulationState, Step, StepKind};
 use crate::uniforms::{UniformBlock, pack_block};
+#[cfg(target_os = "macos")]
+use crate::surface::{Planes, Surface, SurfacePool};
 
 pub use shader_graph::passes::Size;
 
@@ -117,6 +119,16 @@ impl Frame {
     }
 }
 
+/// A frame as the renderer hands it out: its pixels, or the surface it was drawn into.
+pub enum Presented {
+    Pixels(Frame),
+    #[cfg(target_os = "macos")]
+    Surface {
+        surface: Surface,
+        gpu_time: Option<f64>,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderOptions {
     pub size: Size,
@@ -125,60 +137,81 @@ pub struct RenderOptions {
     pub premultiply: bool,
 }
 
-/// Staging buffers for one frame's pixels and timing.
-struct Readback {
-    size: Size,
-    pixels: wgpu::Buffer,
-    timing: wgpu::Buffer,
+/// A GPU step's completion, reported once it has been seen; `None` after that.
+type Ready = Option<Receiver<anyhow::Result<()>>>;
+
+/// Where a submitted frame's output goes: copied to a staging buffer, or drawn into a surface.
+enum Output {
+    Pixels {
+        size: Size,
+        format: PixelFormat,
+        buffer: wgpu::Buffer,
+    },
+    #[cfg(target_os = "macos")]
+    Surface(Surface),
 }
 
-/// A buffer's map result, until it has been seen. `None` once mapped.
-type Mapping = Option<Receiver<Result<(), wgpu::BufferAsyncError>>>;
+/// A frame's pass timestamps, read once mapped.
+struct Timing {
+    buffer: wgpu::Buffer,
+    ready: Ready,
+}
 
-/// A frame whose copy into a staging buffer is on its way to the CPU.
+/// A frame whose GPU work is on its way to the CPU or the window.
 struct Submitted {
-    readback: Readback,
-    format: PixelFormat,
-    pixels: Mapping,
-    timing: Mapping,
+    output: Output,
+    /// Done when the output can be read: its copy is mapped, or the GPU has finished drawing it.
+    ready: Ready,
+    timing: Option<Timing>,
 }
 
 impl Submitted {
-    /// Whether both buffers are mapped, without waiting for them.
+    /// Whether the output and its timing are ready, without waiting for them.
     fn poll(&mut self) -> Result<bool> {
-        let pixels = poll_mapping(&mut self.pixels)?;
-        let timing = poll_mapping(&mut self.timing)?;
-        Ok(pixels && timing)
+        let output = poll_ready(&mut self.ready)?;
+        let timing = match &mut self.timing {
+            Some(timing) => poll_ready(&mut timing.ready)?,
+            None => true,
+        };
+        Ok(output && timing)
     }
 }
 
-/// Maps a buffer for reading once the copy into it has run; the result is
-/// reported through the returned receiver, by `poll_mapping`.
-fn map_for_read(buffer: &wgpu::Buffer) -> Mapping {
+/// Frames in flight at once: one being read out while the next draws.
+const READBACK_DEPTH: usize = 2;
+
+/// Maps a staging buffer for reading, once the copy into it has run.
+fn map_for_read(buffer: &wgpu::Buffer) -> Ready {
     let (sender, receiver) = std::sync::mpsc::channel();
     buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
         // The receiver is gone only when the frame was dropped unread.
-        let _ = sender.send(result);
+        let _ = sender.send(result.map_err(anyhow::Error::from));
     });
     Some(receiver)
 }
 
-/// Whether a buffer's mapping has finished, without waiting; a failed mapping is an error.
-fn poll_mapping(mapping: &mut Mapping) -> Result<bool> {
-    let Some(receiver) = mapping else { return Ok(true) };
+/// Reports once the GPU has finished the work submitted so far.
+fn gpu_done(queue: &wgpu::Queue) -> Ready {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    queue.on_submitted_work_done(move || {
+        let _ = sender.send(Ok(()));
+    });
+    Some(receiver)
+}
+
+/// Whether a step has finished, without waiting; a failed step is an error.
+fn poll_ready(ready: &mut Ready) -> Result<bool> {
+    let Some(receiver) = ready else { return Ok(true) };
     match receiver.try_recv() {
         Ok(result) => {
             result?;
-            *mapping = None;
+            *ready = None;
             Ok(true)
         }
         Err(TryRecvError::Empty) => Ok(false),
-        Err(TryRecvError::Disconnected) => anyhow::bail!("the frame's readback was dropped"),
+        Err(TryRecvError::Disconnected) => anyhow::bail!("a frame was dropped before it finished"),
     }
 }
-
-/// Frames read back at once: one being copied out while the next draws.
-const READBACK_DEPTH: usize = 2;
 
 /// What a frame is drawn with: its inputs, and the canvas' size.
 #[derive(Clone, Copy)]
@@ -291,9 +324,13 @@ pub struct Renderer {
     simulation: SimulationState,
     linear: Option<wgpu::Texture>,
     output: Option<wgpu::Texture>,
-    /// Staging buffers no frame is reading, reused by the next submitted frame.
-    free_readbacks: Vec<Readback>,
+    /// Staging buffers no frame is reading, reused by the next frame of their size.
+    free_pixels: Vec<(Size, wgpu::Buffer)>,
+    free_timing: Vec<wgpu::Buffer>,
     in_flight: VecDeque<Submitted>,
+    /// Surfaces frames are drawn into, of one size; CoreVideo recycles them once the window lets go.
+    #[cfg(target_os = "macos")]
+    surfaces: Option<(Size, SurfacePool)>,
 }
 
 fn filter_mode(filter: SamplerFilter) -> wgpu::FilterMode {
@@ -353,8 +390,11 @@ impl Renderer {
             simulation: SimulationState::default(),
             linear: None,
             output: None,
-            free_readbacks: Vec::new(),
+            free_pixels: Vec::new(),
+            free_timing: Vec::new(),
             in_flight: VecDeque::new(),
+            #[cfg(target_os = "macos")]
+            surfaces: None,
         })
     }
 
@@ -845,7 +885,7 @@ impl Renderer {
         size: Size,
     ) -> Result<()> {
         anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
-        self.ensure_targets(size, PixelFormat::Rgba8);
+        self.ensure_linear(size);
         let linear = self.linear.clone().context("no target")?;
         for inputs in frames {
             let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -863,39 +903,46 @@ impl Renderer {
         inputs: FrameInputs,
         options: RenderOptions,
     ) -> Result<Frame> {
-        let readback = self.new_readback(options.size)?;
-        let mut submitted = self.start_readback(program, inputs, options, readback)?;
+        let mut submitted = self.start_pixels(program, inputs, options)?;
         self.device.poll(wgpu::PollType::wait_indefinitely())?;
-        anyhow::ensure!(submitted.poll()?, "the frame's readback didn't finish");
-        self.read_out(submitted)
+        anyhow::ensure!(submitted.poll()?, "the frame didn't finish");
+        match self.read_out(submitted)? {
+            Presented::Pixels(frame) => Ok(frame),
+            #[cfg(target_os = "macos")]
+            Presented::Surface { .. } => anyhow::bail!("a readback came out as a surface"),
+        }
     }
 
-    /// Starts drawing a frame and copying it to the CPU, without waiting for
-    /// the GPU. `take_frame` returns it once the copy has finished.
+    /// Starts drawing a frame and copying its pixels to the CPU, without waiting for the GPU.
+    /// `take_frame` returns it once the copy has finished.
     pub fn submit(
         &mut self,
         program: &Program,
         inputs: FrameInputs,
         options: RenderOptions,
     ) -> Result<()> {
-        anyhow::ensure!(
-            self.in_flight.len() < READBACK_DEPTH,
-            "frames are already waiting to be read back"
-        );
-        let readback = self.take_readback(options.size)?;
-        let submitted = self.start_readback(program, inputs, options, readback)?;
+        self.ensure_room()?;
+        let submitted = self.start_pixels(program, inputs, options)?;
         self.in_flight.push_back(submitted);
         Ok(())
     }
 
-    /// The oldest submitted frame, if its copy has finished; never waits.
-    /// A frame whose copy failed is returned as an error, and the frame is
-    /// consumed either way.
-    pub fn take_frame(&mut self) -> Option<Result<Frame>> {
+    /// Starts drawing a frame into a surface a window can show, without copying it to the CPU.
+    #[cfg(target_os = "macos")]
+    pub fn submit_surface(&mut self, program: &Program, inputs: FrameInputs, size: Size) -> Result<()> {
+        self.ensure_room()?;
+        let submitted = self.start_surface(program, inputs, size)?;
+        self.in_flight.push_back(submitted);
+        Ok(())
+    }
+
+    /// The oldest submitted frame, once its GPU work has finished; never waits.
+    /// A frame that failed is returned as an error, and is consumed either way.
+    pub fn take_frame(&mut self) -> Option<Result<Presented>> {
         if self.in_flight.is_empty() {
             return None;
         }
-        // Mapping callbacks run while the device is polled; this does not wait for the GPU.
+        // Completion callbacks run while the device is polled; this does not wait for the GPU.
         if let Err(error) = self.device.poll(wgpu::PollType::Poll) {
             self.in_flight.clear();
             return Some(Err(error.into()));
@@ -914,19 +961,29 @@ impl Renderer {
         }
     }
 
-    fn start_readback(
+    fn ensure_room(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.in_flight.len() < READBACK_DEPTH,
+            "frames are already waiting to be read back"
+        );
+        Ok(())
+    }
+
+    fn start_pixels(
         &mut self,
         program: &Program,
         inputs: FrameInputs,
         options: RenderOptions,
-        readback: Readback,
     ) -> Result<Submitted> {
         let size = options.size;
-        self.ensure_targets(size, options.format);
+        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        self.ensure_linear(size);
+        self.ensure_output(size, options.format);
         let (linear, output) = (
             self.linear.clone().context("no target")?,
             self.output.clone().context("no target")?,
         );
+        let buffer = self.take_pixel_buffer(size);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.encode_plan(&mut encoder, program, inputs, &linear);
         self.presenter.encode(
@@ -942,7 +999,7 @@ impl Renderer {
         encoder.copy_texture_to_buffer(
             output.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
-                buffer: &readback.pixels,
+                buffer: &buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some((size.width * 4).next_multiple_of(ROW_ALIGNMENT)),
@@ -951,125 +1008,185 @@ impl Renderer {
             },
             output.size(),
         );
-        if let Some(timer) = &self.timer {
-            timer.resolve(&mut encoder, &readback.timing, 0);
-        }
+        let timing = self.start_timing(&mut encoder);
         self.queue.submit([encoder.finish()]);
-
-        let pixels = map_for_read(&readback.pixels);
-        let timing = if self.timer.is_some() {
-            map_for_read(&readback.timing)
-        } else {
-            None
-        };
         Ok(Submitted {
-            readback,
-            format: options.format,
-            pixels,
-            timing,
+            ready: map_for_read(&buffer),
+            output: Output::Pixels {
+                size,
+                format: options.format,
+                buffer,
+            },
+            timing: timing.map(|buffer| Timing {
+                ready: map_for_read(&buffer),
+                buffer,
+            }),
         })
     }
 
-    /// Copies a frame's mapped pixels out and unmaps its buffers.
-    fn read_out(&mut self, submitted: Submitted) -> Result<Frame> {
-        let Submitted { readback, format, .. } = submitted;
-        let Readback { size, pixels, timing } = readback;
-        let row_bytes = (size.width * 4) as usize;
-        let padded_row = row_bytes.next_multiple_of(ROW_ALIGNMENT as usize);
-        let mut out = Vec::with_capacity(row_bytes * size.height as usize);
-        {
-            let mapped = pixels.slice(..).get_mapped_range()?;
-            for row in mapped.chunks_exact(padded_row).take(size.height as usize) {
-                if let Some(bytes) = row.get(..row_bytes) {
-                    out.extend_from_slice(bytes);
-                }
-            }
-        }
-        pixels.unmap();
-        let gpu_time = match &self.timer {
-            Some(timer) => {
-                let seconds = timing
-                    .slice(..)
-                    .get_mapped_range()
-                    .ok()
-                    .and_then(|view| timer.seconds(&view));
-                timing.unmap();
-                seconds
-            }
-            None => None,
-        };
-        if self.free_readbacks.len() < READBACK_DEPTH {
-            self.free_readbacks.push(Readback { size, pixels, timing });
-        }
-        Ok(Frame { size, format, pixels: out, gpu_time })
-    }
-
-    /// A staging buffer no frame is reading, from the pool when one fits the size.
-    fn take_readback(&mut self, size: Size) -> Result<Readback> {
-        self.free_readbacks.retain(|r| r.size == size);
-        match self.free_readbacks.pop() {
-            Some(readback) => Ok(readback),
-            None => self.new_readback(size),
-        }
-    }
-
-    fn new_readback(&self, size: Size) -> Result<Readback> {
+    #[cfg(target_os = "macos")]
+    fn start_surface(&mut self, program: &Program, inputs: FrameInputs, size: Size) -> Result<Submitted> {
         anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        self.ensure_linear(size);
+        if !matches!(&self.surfaces, Some((kept, _)) if *kept == size) {
+            self.surfaces = Some((size, SurfacePool::new(size)?));
+        }
+        let (_, pool) = self.surfaces.as_ref().context("no surface pool")?;
+        let surface = pool.next()?;
+        let planes = Planes::wrap(&self.device, &surface)?;
+        let linear = self.linear.clone().context("no target")?;
+        let luma = planes.luma.create_view(&Default::default());
+        let chroma = planes.chroma.create_view(&Default::default());
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.encode_plan(&mut encoder, program, inputs, &linear);
+        self.presenter
+            .encode_planes(&self.device, &mut encoder, &linear, &luma, &chroma);
+        let timing = self.start_timing(&mut encoder);
+        self.queue.submit([encoder.finish()]);
+        Ok(Submitted {
+            ready: gpu_done(&self.queue),
+            output: Output::Surface(surface),
+            timing: timing.map(|buffer| Timing {
+                ready: map_for_read(&buffer),
+                buffer,
+            }),
+        })
+    }
+
+    /// Copies a finished frame out, and recycles its buffers.
+    fn read_out(&mut self, submitted: Submitted) -> Result<Presented> {
+        let Submitted { output, timing, .. } = submitted;
+        let gpu_time = timing.and_then(|timing| self.read_seconds(timing));
+        Ok(match output {
+            Output::Pixels { size, format, buffer } => {
+                let pixels = read_pixels(&buffer, size)?;
+                buffer.unmap();
+                if self.free_pixels.len() < READBACK_DEPTH {
+                    self.free_pixels.push((size, buffer));
+                }
+                Presented::Pixels(Frame {
+                    size,
+                    format,
+                    pixels,
+                    gpu_time,
+                })
+            }
+            #[cfg(target_os = "macos")]
+            Output::Surface(surface) => Presented::Surface { surface, gpu_time },
+        })
+    }
+
+    fn take_pixel_buffer(&mut self, size: Size) -> wgpu::Buffer {
+        self.free_pixels.retain(|(kept, _)| *kept == size);
+        if let Some((_, buffer)) = self.free_pixels.pop() {
+            return buffer;
+        }
         let padded_row = u64::from((size.width * 4).next_multiple_of(ROW_ALIGNMENT));
-        let buffer = |label, bytes| {
+        self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame readback"),
+            size: padded_row * u64::from(size.height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Encodes the pass timestamps into a buffer, when the device can time passes.
+    fn start_timing(&mut self, encoder: &mut wgpu::CommandEncoder) -> Option<wgpu::Buffer> {
+        let timer = self.timer.as_ref()?;
+        let buffer = self.free_timing.pop().unwrap_or_else(|| {
             self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: bytes,
+                label: Some("timing readback"),
+                size: TIMING_BYTES,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             })
-        };
-        Ok(Readback {
-            size,
-            pixels: buffer("frame readback", padded_row * u64::from(size.height)),
-            timing: buffer("timing readback", TIMING_BYTES),
-        })
+        });
+        timer.resolve(encoder, &buffer, 0);
+        Some(buffer)
     }
 
-    /// Textures and buffers for frames of `size`, kept while it stays the same.
-    fn ensure_targets(&mut self, size: Size, format: PixelFormat) {
-        let extent = wgpu::Extent3d {
-            width: size.width,
-            height: size.height,
-            depth_or_array_layers: 1,
-        };
-        let texture = |label, format, usage| {
-            self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size: extent,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage,
-                view_formats: &[],
-            })
-        };
-        let fits = |t: &wgpu::Texture, format| {
-            t.width() == size.width && t.height() == size.height && t.format() == format
-        };
-        let linear_ok = self.linear.as_ref().is_some_and(|t| fits(t, LINEAR_FORMAT));
-        if !linear_ok {
-            self.linear = Some(texture(
+    /// The seconds a frame's passes took, read from its mapped timestamps; the buffer is recycled.
+    fn read_seconds(&mut self, timing: Timing) -> Option<f64> {
+        let Timing { buffer, .. } = timing;
+        let seconds = self.timer.as_ref().and_then(|timer| {
+            let view = buffer.slice(..).get_mapped_range().ok()?;
+            timer.seconds(&view)
+        });
+        buffer.unmap();
+        if self.free_timing.len() < READBACK_DEPTH {
+            self.free_timing.push(buffer);
+        }
+        seconds
+    }
+
+    /// The linear target frames are drawn into, kept while its size stays the same.
+    fn ensure_linear(&mut self, size: Size) {
+        if !self.linear.as_ref().is_some_and(|t| fits(t, size, LINEAR_FORMAT)) {
+            self.linear = Some(render_target(
+                &self.device,
                 "linear",
+                size,
                 LINEAR_FORMAT,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             ));
         }
-        let output_format = format.texture_format();
-        if !self.output.as_ref().is_some_and(|t| fits(t, output_format)) {
-            self.output = Some(texture(
+    }
+
+    /// The target readback frames are copied from, kept while its size and format stay the same.
+    fn ensure_output(&mut self, size: Size, format: PixelFormat) {
+        let format = format.texture_format();
+        if !self.output.as_ref().is_some_and(|t| fits(t, size, format)) {
+            self.output = Some(render_target(
+                &self.device,
                 "output",
-                output_format,
+                size,
+                format,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             ));
         }
     }
+}
+
+fn fits(texture: &wgpu::Texture, size: Size, format: wgpu::TextureFormat) -> bool {
+    texture.width() == size.width && texture.height() == size.height && texture.format() == format
+}
+
+fn render_target(
+    device: &wgpu::Device,
+    label: &str,
+    size: Size,
+    format: wgpu::TextureFormat,
+    usage: wgpu::TextureUsages,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: size.width,
+            height: size.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage,
+        view_formats: &[],
+    })
+}
+
+/// The rows of a mapped staging buffer, tightly packed, top first.
+fn read_pixels(buffer: &wgpu::Buffer, size: Size) -> Result<Vec<u8>> {
+    let row_bytes = (size.width * 4) as usize;
+    let padded_row = row_bytes.next_multiple_of(ROW_ALIGNMENT as usize);
+    let mapped = buffer.slice(..).get_mapped_range()?;
+    let mut pixels = Vec::with_capacity(row_bytes * size.height as usize);
+    for row in mapped.chunks_exact(padded_row).take(size.height as usize) {
+        if let Some(bytes) = row.get(..row_bytes) {
+            pixels.extend_from_slice(bytes);
+        }
+    }
+    Ok(pixels)
 }
 
 #[cfg(test)]
@@ -1164,8 +1281,10 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         let mut taken = Vec::new();
         while taken.len() < 2 {
             renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-            if let Some(frame) = renderer.take_frame() {
-                taken.push(frame.unwrap());
+            match renderer.take_frame() {
+                Some(Ok(Presented::Pixels(frame))) => taken.push(frame),
+                Some(_) => panic!("a readback came out as something else"),
+                None => {}
             }
         }
         assert!(renderer.take_frame().is_none());
@@ -1174,6 +1293,88 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             assert_eq!(frame.pixels, want.pixels);
         }
         assert_ne!(taken[0].pixels, taken[1].pixels, "each frame is its own");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn surfaces_hold_the_planes_of_the_frame_the_readback_gives() {
+        use objc2_core_video::{
+            CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
+            CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+            kCVReturnSuccess,
+        };
+
+        let mut renderer = Renderer::new().unwrap();
+        let program = renderer.compile(&plan(CODE)).unwrap();
+        let size = Size::new(100, 50);
+        let options = RenderOptions {
+            size,
+            format: PixelFormat::Bgra8,
+            premultiply: true,
+        };
+        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let expected = renderer.render(&program, inputs, options).unwrap();
+
+        renderer.submit_surface(&program, inputs, size).unwrap();
+        let surface = loop {
+            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            match renderer.take_frame() {
+                Some(Ok(Presented::Surface { surface, .. })) => break surface,
+                Some(_) => panic!("a surface frame came out as something else"),
+                None => {}
+            }
+        };
+
+        let (width, height) = (size.width as usize, size.height as usize);
+        // The readback's colour, as the shader's encoded floats: BGRA bytes, top first.
+        let rgb = |x: usize, y: usize| -> [f32; 3] {
+            let at = (y.min(height - 1) * width + x.min(width - 1)) * 4;
+            [2, 1, 0].map(|channel| f32::from(expected.pixels[at + channel]))
+        };
+        unsafe {
+            assert_eq!(
+                CVPixelBufferLockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly),
+                kCVReturnSuccess
+            );
+            let luma = CVPixelBufferGetBaseAddressOfPlane(&surface, 0).cast::<u8>();
+            let luma_stride = CVPixelBufferGetBytesPerRowOfPlane(&surface, 0);
+            let chroma = CVPixelBufferGetBaseAddressOfPlane(&surface, 1).cast::<u8>();
+            let chroma_stride = CVPixelBufferGetBytesPerRowOfPlane(&surface, 1);
+
+            // Full-range BT.601 luma of every pixel.
+            for y in 0..height {
+                for x in 0..width {
+                    let [r, g, b] = rgb(x, y);
+                    let want = 0.299 * r + 0.587 * g + 0.114 * b;
+                    let got = f32::from(*luma.add(y * luma_stride + x));
+                    assert!((got - want).abs() <= 1.5, "luma at ({x}, {y}): {got} vs {want}");
+                }
+            }
+            // Each chroma sample is the mean of the 2x2 pixels it covers.
+            for cy in 0..height / 2 {
+                for cx in 0..width / 2 {
+                    let mut mean = [0.0f32; 3];
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let [r, g, b] = rgb(cx * 2 + dx, cy * 2 + dy);
+                        mean[0] += r / 4.0;
+                        mean[1] += g / 4.0;
+                        mean[2] += b / 4.0;
+                    }
+                    let [r, g, b] = mean;
+                    let want_cb = 128.0 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+                    let want_cr = 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+                    let row = chroma.add(cy * chroma_stride + cx * 2);
+                    let got_cb = f32::from(*row);
+                    let got_cr = f32::from(*row.add(1));
+                    assert!((got_cb - want_cb).abs() <= 2.0, "Cb at ({cx}, {cy}): {got_cb} vs {want_cb}");
+                    assert!((got_cr - want_cr).abs() <= 2.0, "Cr at ({cx}, {cy}): {got_cr} vs {want_cr}");
+                }
+            }
+            assert_eq!(
+                CVPixelBufferUnlockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly),
+                kCVReturnSuccess
+            );
+        }
     }
 
     #[test]

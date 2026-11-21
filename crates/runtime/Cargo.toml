@@ -17,3 +17,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = ["CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVPixelBufferPool", "CVReturn", "objc2-io-surface"] }
+objc2-io-surface = { version = "0.3.2", default-features = false, features = ["IOSurfaceRef", "objc2-core-foundation"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "MTLAllocation", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "objc2-io-surface"] }

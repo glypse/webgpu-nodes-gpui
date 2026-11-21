@@ -2,13 +2,13 @@ use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
     Render, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
-    canvas, div, point, prelude::FluentBuilder as _, px, size,
+    canvas, div, img, point, prelude::FluentBuilder as _, px, size,
 };
 use guard::SafeListener as _;
 use runtime::Size;
 use theme::{ActiveTheme as _, Button, ButtonSize, ButtonVariant, IconName, Menu, MenuItem};
 
-use crate::playback::Playback;
+use crate::playback::{Playback, Shown};
 
 pub const MIN_ZOOM: f32 = 0.02;
 pub const MAX_ZOOM: f32 = 32.0;
@@ -157,7 +157,7 @@ impl Render for PreviewArea {
             self.scale = window.scale_factor();
             let theme = cx.theme().clone();
             let playback = self.playback.read(cx);
-            let texture = playback.texture();
+            let shown = playback.shown();
             let failure = playback.failure.clone();
             let rect = self.rect(cx);
             let view = cx.entity();
@@ -189,22 +189,25 @@ impl Render for PreviewArea {
                     .absolute()
                     .size_full(),
                 )
-                .children(texture.map(|texture| {
-                    canvas(
-                        |_, _, _| {},
-                        move |bounds, _, window, _| {
-                            guard::guard("preview frame", || {
-                                if let Err(error) = window.paint_dynamic_texture(bounds, texture) {
-                                    log::warn!("painting the frame failed: {error:#}");
-                                }
-                            });
-                        },
-                    )
-                    .absolute()
-                    .left(rect.origin.x)
-                    .top(rect.origin.y)
-                    .w(rect.size.width)
-                    .h(rect.size.height)
+                .children(shown.map(|shown| {
+                    match shown {
+                        #[cfg(target_os = "macos")]
+                        Shown::Surface(frame) => gpui::surface(frame)
+                            .object_fit(gpui::ObjectFit::Fill)
+                            .absolute()
+                            .left(rect.origin.x)
+                            .top(rect.origin.y)
+                            .w(rect.size.width)
+                            .h(rect.size.height)
+                            .into_any_element(),
+                        Shown::Image(image) => img(image)
+                            .absolute()
+                            .left(rect.origin.x)
+                            .top(rect.origin.y)
+                            .w(rect.size.width)
+                            .h(rect.size.height)
+                            .into_any_element(),
+                    }
                 }))
                 .on_scroll(
                     cx.safe_listener(move |this, event: &ScrollEvent, _, cx| {

@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{Bounds, Context, DevicePixels, DynamicTexture, EventEmitter, SharedString, Window, point};
+use gpui::{Context, EventEmitter, RenderImage, SharedString, Window};
 use shader_graph::assets::AssetKind;
 use shader_graph::codegen::ResourceDecl;
 
 use crate::project::AssetFiles;
 use runtime::{
-    Frame, PixelFormat, Player, Program, ProgramError, RefreshRateMeter,
+    Frame, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
     RenderOptions, Renderer, Size, Timing,
 };
 
@@ -64,6 +64,14 @@ impl Failure {
     }
 }
 
+/// A drawn frame, as the window shows it.
+#[derive(Clone)]
+pub enum Shown {
+    #[cfg(target_os = "macos")]
+    Surface(runtime::Surface),
+    Image(Arc<RenderImage>),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaybackEvent {
     /// A frame was drawn, or the program or settings changed.
@@ -79,8 +87,8 @@ pub struct Playback {
     program: Option<Program>,
     pub player: Player,
     pub resolution: Size,
-    /// The texture the latest frame was uploaded into, and the size it was made for.
-    texture: Option<(DynamicTexture, Size)>,
+    /// The latest frame drawn, as the window shows it.
+    shown: Option<Shown>,
     stats: FrameStats,
     /// The WGSL of the latest program the graph generated, working or not.
     pub code: SharedString,
@@ -112,7 +120,7 @@ impl Playback {
             program: None,
             player,
             resolution: DEFAULT_RESOLUTION,
-            texture: None,
+            shown: None,
             stats: FrameStats::default(),
             code: SharedString::default(),
             failure,
@@ -170,9 +178,8 @@ impl Playback {
         }
     }
 
-    /// The texture showing the latest presented frame, once one has been drawn.
-    pub fn texture(&self) -> Option<DynamicTexture> {
-        self.texture.map(|(texture, _)| texture)
+    pub fn shown(&self) -> Option<Shown> {
+        self.shown.clone()
     }
 
     pub fn timing(&self) -> Timing {
@@ -324,7 +331,7 @@ impl Playback {
             self.player.finished();
             changed = true;
             match result {
-                Ok(frame) => self.present(frame, window),
+                Ok(presented) => self.present(presented, window),
                 Err(error) => self.failure = Some(Failure::text(error.to_string())),
             }
         }
@@ -347,12 +354,15 @@ impl Playback {
         self.schedule(window, cx);
     }
 
-    /// Starts drawing a frame. It is presented once the GPU has copied it out.
+    /// Starts drawing a frame; it is shown once the GPU has finished with it.
     fn submit(&mut self, inputs: runtime::FrameInputs) -> bool {
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else {
             return false;
         };
         let started = Instant::now();
+        #[cfg(target_os = "macos")]
+        let submitted = renderer.submit_surface(program, inputs, self.resolution);
+        #[cfg(not(target_os = "macos"))]
         let submitted = renderer.submit(
             program,
             inputs,
@@ -372,35 +382,26 @@ impl Playback {
         }
     }
 
-    /// Uploads a frame into the texture on screen: one texture per size, updated in place.
-    fn present(&mut self, frame: Frame, window: &mut Window) {
+    fn present(&mut self, presented: Presented, window: &mut Window) {
         let started = Instant::now();
-        let Frame { size, pixels, gpu_time, .. } = frame;
-        let (Ok(width), Ok(height)) = (i32::try_from(size.width), i32::try_from(size.height)) else {
-            log::error!("a {}x{} frame is too large to show", size.width, size.height);
-            return;
-        };
-        let device_size = gpui::size(DevicePixels(width), DevicePixels(height));
-        let stride = size.width * 4;
-        let result = match self.texture {
-            Some((texture, shown)) if shown == size => window.update_dynamic_texture(
-                texture,
-                Bounds::new(point(DevicePixels(0), DevicePixels(0)), device_size),
-                &pixels,
-                stride,
-            ),
-            previous => {
-                if let Some((old, _)) = previous {
-                    window.remove_dynamic_texture(old);
+        let (shown, gpu_time) = match presented {
+            #[cfg(target_os = "macos")]
+            Presented::Surface { surface, gpu_time } => (Shown::Surface(surface), gpu_time),
+            Presented::Pixels(frame) => {
+                let gpu_time = frame.gpu_time;
+                match image_of(frame) {
+                    Some(image) => (Shown::Image(image), gpu_time),
+                    None => {
+                        log::error!("a frame's pixels don't match its size");
+                        return;
+                    }
                 }
-                self.texture = None;
-                window
-                    .create_dynamic_texture(device_size, &pixels, stride)
-                    .map(|texture| self.texture = Some((texture, size)))
             }
         };
-        if let Err(error) = result {
-            log::warn!("showing a frame failed: {error:#}");
+        if let Some(Shown::Image(old)) = self.shown.replace(shown)
+            && let Err(error) = window.drop_image(old)
+        {
+            log::warn!("dropping the previous frame failed: {error:#}");
         }
         if let Some(seconds) = gpu_time
             && self.player.playing()
@@ -409,6 +410,12 @@ impl Playback {
         }
         self.stats.presented(started.elapsed(), gpu_time);
     }
+}
+
+/// The frame as an image GPUI can draw: its BGRA bytes, premultiplied as the renderer drew them.
+fn image_of(frame: Frame) -> Option<Arc<RenderImage>> {
+    let buffer = image::RgbaImage::from_raw(frame.size.width, frame.size.height, frame.pixels)?;
+    Some(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])))
 }
 
 /// Averages the CPU and GPU cost of the preview's frames, logged every `STATS_PERIOD`.
