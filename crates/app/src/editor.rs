@@ -934,7 +934,7 @@ impl Editor {
     /// Makes an editable copy of a locked group for the node.
     pub(crate) fn clone_group(&mut self, node: &str, cx: &mut Context<Self>) {
         self.edit(cx, |m| {
-            m.make_group_unique(node);
+            m.deep_clone_group(node);
         });
     }
 

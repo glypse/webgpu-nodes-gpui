@@ -8,7 +8,7 @@ use super::{
     GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GroupRef,
     GroupSide, NODE_GROUP, Point, ROOT_ID, new_id,
 };
-use crate::library::is_library_ref;
+use crate::library::{self, is_library_ref};
 use super::model_interface::fit_type_owners;
 use crate::enums::{fit_variants, is_under, owner_chain, owner_exists, shown_apart};
 use crate::types::{
@@ -868,25 +868,54 @@ impl GraphModel {
         });
     }
 
-    /// Clone a locked group's definition so there is an editable copy; the
-    /// node then points at the copy.
-    pub fn make_group_unique(&mut self, node_id: &str) -> Option<String> {
-        let node = self.node(node_id)?.clone();
-        let def = self.project.document(node.definition_ref()?)?.clone();
-        let (nodes, edges, _) = clone_subgraph(&def.nodes, &def.edges, Point::default());
+    /// Copies the definition of the group node (anywhere in the project) into
+    /// a new, unlocked definition, and points the node at the copy. Returns
+    /// the copy's definition ref.
+    pub fn deep_clone_group(&mut self, node_id: &str) -> Option<String> {
+        let holder = self.project.definition_ref_of(node_id)?.to_owned();
+        let source_ref = self.project.document(&holder)?.node(node_id)?.definition_ref()?.to_owned();
+        let source = self.project.document(&source_ref)?.clone();
+        let (nodes, edges, _) = clone_subgraph(&source.nodes, &source.edges, Point::default());
         let copy = GraphDocument {
             nodes,
             edges,
-            label: def.label.clone(),
-            locked: false,
-            ..def
+            label: Some(self.unique_copy_label(source.label.as_deref())),
+            type_variables: source.type_variables,
+            inputs: source.inputs,
+            outputs: source.outputs,
+            defaults: source.defaults,
+            ..GraphDocument::default()
         };
         let reference = new_id();
         self.project.definitions.insert(reference.clone(), copy);
-        let key = self.project.definition_ref_of(node_id)?.to_owned();
-        let target = self.project.definitions.get_mut(&key)?.node_mut(node_id)?;
+        let target = self.project.definitions.get_mut(&holder)?.node_mut(node_id)?;
         target.group = Some(GroupRef { definition_ref: reference.clone(), locked: false });
         self.changed();
         Some(reference)
+    }
+
+    /// "<label> - Copy", then "<label> - Copy 2", ... whichever no library or
+    /// user group has yet.
+    fn unique_copy_label(&self, source: Option<&str>) -> String {
+        let Some(source) = source.filter(|s| !s.is_empty()) else {
+            return "Group".to_owned();
+        };
+        let used: HashSet<&str> = library::entries()
+            .iter()
+            .map(|e| e.label.as_str())
+            .chain(self.project.definitions.values().filter_map(|d| d.label.as_deref()))
+            .collect();
+        let base = format!("{source} - Copy");
+        if !used.contains(base.as_str()) {
+            return base;
+        }
+        let mut n = 2;
+        loop {
+            let label = format!("{base} {n}");
+            if !used.contains(label.as_str()) {
+                return label;
+            }
+            n += 1;
+        }
     }
 }
