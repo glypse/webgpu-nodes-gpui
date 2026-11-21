@@ -224,6 +224,8 @@ pub enum NodeWidget {
     Code,
     /// How many cases the node has, added and removed at the end.
     Cases,
+    /// A graph editing the node's curve.
+    Curve,
 }
 
 /// Shader helper functions nodes may request through `WgslCtx::helper`.

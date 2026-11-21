@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod codegen;
+pub mod curve;
 pub mod enums;
 pub mod graph;
 pub mod library;

@@ -353,7 +353,7 @@ pub struct CustomSockets {
 }
 
 /// Everything a node stores. Which fields apply depends on the node type.
-/// Fields of nodes this port doesn't implement (curves, ramps, assets) are
+/// Fields of nodes this port doesn't implement (ramps, assets) are
 /// kept in `extra` so saved projects round-trip.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -391,6 +391,9 @@ pub struct NodeData {
     /// A reroute's links out are drawn as tags on the inputs they reach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hide_links: Option<bool>,
+    /// A Curve node's control points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curve: Option<Vec<crate::curve::CurvePoint>>,
     /// Only the node's linked sockets are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hide_unlinked: Option<bool>,

@@ -1,6 +1,7 @@
 //! The node registry: every node type's descriptor.
 
 mod builders;
+mod curve;
 mod dynamic;
 mod standard;
 
@@ -38,6 +39,7 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     let mut all = Vec::new();
     all.extend(standard::input_nodes());
     all.extend(standard::math_nodes());
+    all.push(curve::curve_node());
     all.extend(standard::vector_nodes());
     all.extend(standard::logic_nodes());
     all.extend(standard::integer_nodes());

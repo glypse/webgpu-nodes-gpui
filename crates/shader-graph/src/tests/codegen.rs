@@ -198,3 +198,49 @@ fn simulation_zones_are_reported_unsupported() {
     g.link((&declare, "value"), (&out, "color"));
     assert!(g.model.generate().is_err());
 }
+
+#[test]
+fn curve_nodes_generate_valid_wgsl_for_every_float_type() {
+    use crate::curve::{CurvePoint, CurvePointKind, Vec2, linear_curve};
+    let mut three = linear_curve();
+    three.insert(
+        1,
+        CurvePoint {
+            x: 0.4,
+            y: 0.8,
+            kind: CurvePointKind::Mirrored,
+            left: Vec2::new(-0.1, 0.0),
+            right: Vec2::new(0.1, 0.0),
+        },
+    );
+    let flat = vec![CurvePoint { x: 0.5, y: 0.3, kind: CurvePointKind::Vector, left: Vec2::default(), right: Vec2::default() }];
+    for points in [linear_curve(), three, flat, Vec::new()] {
+        for ty in [WgslType::F32, WgslType::Vec2f, WgslType::Vec3f, WgslType::Vec4f] {
+            let mut g = TestGraph::new();
+            let curve = g.add("curve");
+            g.force_type(&curve, ty);
+            let curve_points = points.clone();
+            g.model.update_node_data(&curve, |d| d.curve = Some(curve_points));
+            let to_color = g.add("declare");
+            g.force_type(&to_color, WgslType::Vec4f);
+            let float = g.add("to-float");
+            g.link((&curve, "result"), (&float, "e"));
+            let sum = g.add("add");
+            g.force_type(&sum, WgslType::Vec4f);
+            g.link((&float, "result"), (&sum, "operands"));
+            let out = g.output();
+            g.link((&sum, "result"), (&out, "color"));
+            assert_eq!(g.wgsl().contains("fn curveSegment"), points.len() >= 2);
+            crate::testing::validate_wgsl(&g.literal_program().program.code);
+        }
+    }
+}
+
+#[test]
+fn a_curve_round_trips_through_saved_node_data() {
+    let data = crate::nodes::default_data_for_type("curve");
+    let json = serde_json::to_value(&data).expect("serialises");
+    assert_eq!(json["curve"][0]["kind"], "aligned");
+    let loaded: crate::types::NodeData = serde_json::from_value(json).expect("loads");
+    assert_eq!(loaded, data);
+}
