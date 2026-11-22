@@ -41,6 +41,7 @@ fn editor_json(panel: &Panel, graph: &GraphView) -> Value {
         Panel::Timeline => json!({ "type": "timeline" }),
         Panel::Code => json!({ "type": "code" }),
         Panel::Assets => json!({ "type": "assets" }),
+        Panel::Properties => json!({ "type": "properties" }),
     }
 }
 
@@ -92,6 +93,7 @@ fn editor_from_json(v: &Value) -> Option<(Panel, Option<GraphView>)> {
         "timeline" => Some((Panel::Timeline, None)),
         "code" => Some((Panel::Code, None)),
         "assets" => Some((Panel::Assets, None)),
+        "properties" => Some((Panel::Properties, None)),
         _ => None,
     }
 }
@@ -228,5 +230,19 @@ mod tests {
             ] }),
         );
         assert_eq!(load(&project).map(|l| l.screen.areas()[0].editor), Some(Panel::Assets));
+    }
+
+    #[test]
+    fn the_properties_area_is_saved_by_name() {
+        let mut project = GraphProject::default();
+        let screen = Screen::new([
+            (Rect::new(0.0, 0.0, 0.5, 1.0), Panel::Graph),
+            (Rect::new(0.5, 0.0, 1.0, 1.0), Panel::Properties),
+        ]);
+        store(&mut project, &screen, &|_| GraphView::default());
+        let loaded = load(&project).expect("loads");
+        let editors: Vec<&Panel> = loaded.screen.areas().iter().map(|a| &a.editor).collect();
+        assert_eq!(editors, [&Panel::Graph, &Panel::Properties]);
+        assert_eq!(project.extra["layout"]["areas"][1]["editor"], json!({ "type": "properties" }));
     }
 }

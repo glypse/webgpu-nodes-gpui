@@ -2,7 +2,6 @@ mod assets;
 mod cli;
 mod code_view;
 mod editor;
-mod export_dialog;
 mod graph;
 mod group_bundles;
 mod layout;
@@ -10,14 +9,16 @@ mod output;
 mod perf;
 mod playback;
 mod preferences;
+mod preferences_window;
 mod preview;
 mod probe;
 mod project;
+mod properties;
 #[cfg(test)]
 mod scenes;
-mod settings;
 mod shell;
 mod timeline;
+mod video_export;
 mod windows;
 
 use gpui::{App, AppContext as _, Global, KeyBinding, Menu, MenuItem, actions};
@@ -31,7 +32,7 @@ use gpui::{AsyncApp, WindowHandle};
 use preferences::ToggleDeveloperTools;
 use shell::{
     ExportFrame, ExportVideo, ImportGroups, ImportMedia, MenuActualSizePreview, MenuFitPreview, MenuZoomPreviewIn,
-    MenuZoomPreviewOut, NewProject, OpenPreferences, OpenProject, OpenProjectSettings, OpenSettings, SaveProject,
+    MenuZoomPreviewOut, NewProject, OpenPreferences, OpenProject, OpenProjectSettings, SaveProject,
     SaveProjectAs, Shell, Start, ToggleMode, TogglePlayback,
 };
 use windows::{CloseWindow, NewOutputWindow, ToggleFullscreen, ToggleOutputStretch};
@@ -72,7 +73,7 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
             name: "webgpu-nodes".into(),
             disabled: false,
             items: vec![
-                MenuItem::action("Settings...", OpenSettings),
+                MenuItem::action("Preferences…", OpenPreferences),
                 MenuItem::separator(),
                 MenuItem::action("Quit", Quit),
             ],

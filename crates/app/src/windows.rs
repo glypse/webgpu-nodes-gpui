@@ -1,18 +1,16 @@
-//! The app's windows: project windows, each owning its project, plus the
-//! settings window and the output windows that belong to one of them.
+//! The app's windows: project windows, each owning its project, the one
+//! preferences window and the output windows that belong to a project.
 
 use std::path::Path;
 
 use anyhow::Result;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Entity, EntityId, Global, KeyBinding, SharedString, TitlebarOptions,
+    AnyWindowHandle, App, AppContext as _, Bounds, Entity, EntityId, Global, KeyBinding, TitlebarOptions,
     WindowBounds, WindowOptions, actions, point, px, size,
 };
 use gpui_component::Root;
 
-use crate::playback::Playback;
-use crate::editor::Editor;
-use crate::settings::{Page, SettingsDialog};
+use crate::preferences_window::PreferencesDialog;
 use crate::shell::{Shell, Start};
 
 actions!(windows, [NewOutputWindow, ToggleFullscreen, ToggleOutputStretch, CloseWindow]);
@@ -21,13 +19,6 @@ const DEFAULT_SIZE: (f32, f32) = (1400.0, 860.0);
 /// How far a new project window sits from the one it opens beside.
 const CASCADE: f32 = 28.0;
 
-struct SettingsWindow {
-    handle: AnyWindowHandle,
-    dialog: Entity<SettingsDialog>,
-    /// The project window whose project the settings edit.
-    owner: EntityId,
-}
-
 struct OutputWindow {
     handle: AnyWindowHandle,
     owner: EntityId,
@@ -35,7 +26,7 @@ struct OutputWindow {
 
 #[derive(Default)]
 struct Registry {
-    settings: Option<SettingsWindow>,
+    preferences: Option<AnyWindowHandle>,
     outputs: Vec<OutputWindow>,
 }
 
@@ -67,21 +58,10 @@ pub fn init(cx: &mut App) {
             }
         });
     });
-    for_each_settings_action(cx);
-}
-
-/// A settings window the focus is in has no project to open it for, so opening it again shows it.
-fn for_each_settings_action(cx: &mut App) {
-    fn show(cx: &mut App) {
-        cx.defer(|cx| {
-            if let Some(window) = open_settings_window(cx) {
-                cx.update_window(window, |_, window, _| window.activate_window()).ok();
-            }
-        });
-    }
-    cx.on_action(|_: &crate::shell::OpenSettings, cx| show(cx));
-    cx.on_action(|_: &crate::shell::OpenProjectSettings, cx| show(cx));
-    cx.on_action(|_: &crate::shell::OpenPreferences, cx| show(cx));
+    // The preferences don't belong to a project, so they open from any window.
+    cx.on_action(|_: &crate::shell::OpenPreferences, cx| {
+        cx.defer(open_preferences);
+    });
 }
 
 /// The shell a window's root view is, or the root's content.
@@ -151,73 +131,36 @@ fn live(handle: AnyWindowHandle, cx: &App) -> bool {
     cx.windows().contains(&handle)
 }
 
-/// The settings window, if it is open.
-fn open_settings_window(cx: &mut App) -> Option<AnyWindowHandle> {
-    let registry = cx.global_mut::<Registry>();
-    let handle = registry.settings.as_ref()?.handle;
-    if live(handle, cx) {
-        Some(handle)
-    } else {
-        cx.global_mut::<Registry>().settings = None;
-        None
-    }
-}
-
-/// Shows the settings window on `page`, editing the project of `owner`'s window. There is one settings
-/// window: opening it from another project window makes it edit that window's project.
-pub fn open_settings(
-    page: Page,
-    editor: &Entity<Editor>,
-    playback: &Entity<Playback>,
-    owner: EntityId,
-    name: SharedString,
-    cx: &mut App,
-) {
-    if let Some(handle) = open_settings_window(cx) {
-        let dialog = cx.global::<Registry>().settings.as_ref().map(|s| (s.dialog.clone(), s.owner));
-        if let Some((dialog, current)) = dialog {
-            if current != owner {
-                dialog.update(cx, |d, cx| d.set_target(editor.clone(), playback.clone(), name, cx));
-                if let Some(settings) = cx.global_mut::<Registry>().settings.as_mut() {
-                    settings.owner = owner;
-                }
-            }
-            dialog.update(cx, |d, cx| d.show_page(page, cx));
-        }
+/// Shows the preferences window, opening it if it isn't open. There is only one.
+pub fn open_preferences(cx: &mut App) {
+    if let Some(handle) = live_preferences(cx) {
         activate(handle, cx);
         return;
     }
-    let bounds = Bounds::centered(None, size(px(768.0), px(576.0)), cx);
+    let bounds = Bounds::centered(None, size(px(560.0), px(480.0)), cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions { title: Some("Settings".into()), ..Default::default() }),
+        titlebar: Some(TitlebarOptions { title: Some("Preferences".into()), ..Default::default() }),
         ..Default::default()
     };
-    let (editor, playback) = (editor.clone(), playback.clone());
-    let dialog = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let made = dialog.clone();
-    let opened = cx.open_window(options, move |window, cx| {
-        let settings = cx.new(|cx| SettingsDialog::new(editor, playback, name, window, cx));
-        settings.update(cx, |d, cx| d.show_page(page, cx));
-        *made.borrow_mut() = Some(settings.clone());
-        cx.new(|cx| Root::new(gpui::AnyView::from(settings), window, cx))
-    });
-    match (opened, dialog.take()) {
-        (Ok(handle), Some(dialog)) => {
-            cx.global_mut::<Registry>().settings = Some(SettingsWindow { handle: handle.into(), dialog, owner });
-        }
-        (Err(error), _) => log::error!("failed to open the settings window: {error:#}"),
-        (Ok(_), None) => {}
+    match cx.open_window(options, |window, cx| {
+        let dialog = cx.new(|cx| PreferencesDialog::new(window, cx));
+        cx.new(|cx| Root::new(gpui::AnyView::from(dialog), window, cx))
+    }) {
+        Ok(handle) => cx.global_mut::<Registry>().preferences = Some(handle.into()),
+        Err(error) => log::error!("failed to open the preferences window: {error:#}"),
     }
 }
 
-/// Keeps the settings window's project name current.
-pub fn project_renamed(owner: EntityId, name: SharedString, cx: &mut App) {
-    let dialog = match cx.try_global::<Registry>().and_then(|r| r.settings.as_ref()) {
-        Some(settings) if settings.owner == owner => settings.dialog.clone(),
-        _ => return,
-    };
-    dialog.update(cx, |d, cx| d.set_project_name(name, cx));
+/// The preferences window, if it is open.
+fn live_preferences(cx: &mut App) -> Option<AnyWindowHandle> {
+    let handle = cx.global::<Registry>().preferences?;
+    if live(handle, cx) {
+        Some(handle)
+    } else {
+        cx.global_mut::<Registry>().preferences = None;
+        None
+    }
 }
 
 /// Registers an output window opened for the project window `owner`.
@@ -234,24 +177,14 @@ pub fn outputs_of(owner: EntityId, cx: &App) -> Vec<AnyWindowHandle> {
         .unwrap_or_default()
 }
 
-/// Closes what belongs to a project window that is gone: its settings window and its outputs.
+/// Closes the outputs of a project window that is gone.
 pub fn owner_closed(owner: EntityId, cx: &mut App) {
     let Some(registry) = cx.try_global::<Registry>() else { return };
-    let mut gone: Vec<AnyWindowHandle> =
-        registry.outputs.iter().filter(|o| o.owner == owner).map(|o| o.handle).collect();
-    if let Some(settings) = &registry.settings
-        && settings.owner == owner
-    {
-        gone.push(settings.handle);
-    }
+    let gone: Vec<AnyWindowHandle> = registry.outputs.iter().filter(|o| o.owner == owner).map(|o| o.handle).collect();
     for handle in gone {
         cx.update_window(handle, |_, window, _| window.remove_window()).ok();
     }
-    let registry = cx.global_mut::<Registry>();
-    registry.outputs.retain(|o| o.owner != owner);
-    if registry.settings.as_ref().is_some_and(|s| s.owner == owner) {
-        registry.settings = None;
-    }
+    cx.global_mut::<Registry>().outputs.retain(|o| o.owner != owner);
 }
 
 #[cfg(test)]
@@ -265,7 +198,7 @@ mod tests {
     use super::*;
     use crate::output::OutputView;
     use crate::preferences;
-    use crate::shell::{self, NewProject, OpenSettings, TogglePlayback};
+    use crate::shell::{self, NewProject, OpenPreferences, TogglePlayback};
 
     /// A project window that starts without a project file.
     fn project_window(cx: &mut TestAppContext) -> (Entity<Shell>, VisualTestContext) {
@@ -412,40 +345,30 @@ mod tests {
     }
 
     #[gpui::test]
-    fn there_is_one_settings_window_editing_the_project_it_was_opened_from(cx: &mut TestAppContext) {
+    fn there_is_one_preferences_window_for_every_project(cx: &mut TestAppContext) {
         app(cx);
         let (a, mut ca) = project_window(cx);
-        let (b, mut cb) = project_window(cx);
-        let settings_of = |cx: &mut TestAppContext| cx.update(|cx| cx.global::<Registry>().settings.as_ref().map(|s| s.owner));
+        let (_, mut cb) = project_window(cx);
+        let preferences_open = |cx: &mut TestAppContext| cx.update(|cx| cx.global::<Registry>().preferences.is_some());
 
-        ca.dispatch_action(OpenSettings);
+        ca.dispatch_action(OpenPreferences);
         cx.run_until_parked();
         assert_eq!(window_count(cx), 3);
-        assert_eq!(settings_of(cx), Some(a.entity_id()));
+        assert!(preferences_open(cx));
 
-        cb.dispatch_action(OpenSettings);
+        cb.dispatch_action(OpenPreferences);
         cx.run_until_parked();
         assert_eq!(window_count(cx), 3, "opening it again shows the one that is open");
-        assert_eq!(settings_of(cx), Some(b.entity_id()), "and points it at the project it was asked from");
 
-        let dialog = cx.update(|cx| cx.global::<Registry>().settings.as_ref().map(|s| s.dialog.clone())).expect("open");
-        let width = b.read_with(&cb, |s, cx| s.editor().read(cx).settings().canvas.width);
-        dialog.update(&mut cb, |d, cx| {
-            d.update(cx, |s| s.canvas.width = width + 5);
-        });
-        assert_eq!(b.read_with(&cb, |s, cx| s.editor().read(cx).settings().canvas.width), width + 5, "it updates live");
-        assert_eq!(a.read_with(&ca, |s, cx| s.editor().read(cx).settings().canvas.width), width);
-
+        assert!(close(&mut cb));
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 2, "the preferences don't close with a project");
+        assert!(preferences_open(cx));
+        drop(a);
         assert!(close(&mut ca));
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 2, "closing a window that doesn't own the settings leaves them");
-        // The project has a change now, so closing asks first.
-        drop((a, b));
-        assert!(!close(&mut cb));
-        cb.simulate_prompt_answer("Discard");
-        cx.run_until_parked();
-        assert_eq!(window_count(cx), 0, "the settings close with their project window");
-        assert_eq!(settings_of(cx), None);
+        assert_eq!(window_count(cx), 1, "nor do they follow the project window that opened them");
+        assert!(preferences_open(cx));
     }
 
     #[gpui::test]

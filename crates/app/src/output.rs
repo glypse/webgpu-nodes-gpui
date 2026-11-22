@@ -13,8 +13,7 @@ use gpui::{
 use guard::SafeListener as _;
 
 use crate::playback::{Playback, Shown, device_size};
-use crate::settings::Page;
-use crate::shell::{OpenPreferences, OpenProjectSettings, OpenSettings, Shell};
+use crate::shell::{OpenProjectSettings, Shell};
 use crate::windows::{self, NewOutputWindow, ToggleOutputStretch};
 
 const DEFAULT_SIZE: (f32, f32) = (960.0, 540.0);
@@ -99,10 +98,16 @@ impl OutputView {
         cx.notify();
     }
 
-    fn show_settings(&self, page: Page, cx: &mut App) {
-        if let Some(shell) = self.shell.upgrade() {
-            shell.update(cx, |shell, cx| shell.show_settings(page, cx));
-        }
+    /// Shows the Properties area of the project window this one shows the playback of.
+    fn show_project_settings(&self, cx: &mut App) {
+        let Some(shell) = self.shell.upgrade() else { return };
+        let Some(handle) = windows::project_windows(cx).into_iter().find(|(_, s)| *s == shell).map(|(h, _)| h) else {
+            return;
+        };
+        cx.update_window(handle, |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.reveal_properties(None, window, cx));
+        })
+        .ok();
     }
 }
 
@@ -180,9 +185,7 @@ impl Render for OutputView {
                     }
                 }))
                 .on_action(cx.safe_listener(|_, _: &windows::CloseWindow, window, _| window.remove_window()))
-                .on_action(cx.safe_listener(|this, _: &OpenSettings, _, cx| this.show_settings(Page::Canvas, cx)))
-                .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, _, cx| this.show_settings(Page::Canvas, cx)))
-                .on_action(cx.safe_listener(|this, _: &OpenPreferences, _, cx| this.show_settings(Page::Appearance, cx)))
+                .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, _, cx| this.show_project_settings(cx)))
         })
     }
 }

@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, Entity, EntityId, ExternalPaths, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, StyleRefinement, Window,
+    AnyWindowHandle, App, AppContext as _, Context, Entity, ExternalPaths, Focusable as _, InteractiveElement as _,
+    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, StyleRefinement, Window,
     actions, div,
 };
 use runtime::{Size, Timing};
-use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
+use screen::{AreaContent, AreaId, Axis, HEADER_HEIGHT, MinSize, Part, Rect, Screen, ScreenView};
 use shader_graph::assets::BundleKind;
 use shader_graph::graph::{GraphProject, ProjectSettings};
 use theme::{ActiveTheme as _, IconName};
@@ -21,17 +21,17 @@ use theme::{ActiveTheme as _, IconName};
 use crate::assets::{self, AssetsPanel};
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
-use crate::export_dialog;
 use crate::group_bundles;
 use crate::graph::breadcrumbs::Breadcrumbs;
 use crate::layout::{self, GraphView};
 use crate::output;
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences::{self, Preferences};
-use crate::settings::Page;
 use crate::project::{self, AssetFiles, Loaded};
+use crate::properties::{PropertiesPanel, Section};
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
+use crate::video_export;
 use crate::windows::{self, CloseWindow, NewOutputWindow};
 
 actions!(
@@ -45,7 +45,6 @@ actions!(
         OpenProject,
         SaveProject,
         SaveProjectAs,
-        OpenSettings,
         OpenProjectSettings,
         OpenPreferences,
         ExportFrame,
@@ -77,7 +76,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-o", OpenProject, Some("Shell")),
         KeyBinding::new("cmd-s", SaveProject, Some("Shell")),
         KeyBinding::new("cmd-shift-s", SaveProjectAs, Some("Shell")),
-        KeyBinding::new("cmd-,", OpenSettings, Some("Shell")),
+        KeyBinding::new("cmd-,", OpenPreferences, Some("Shell")),
         KeyBinding::new("cmd-m", ToggleMode, Some("Shell")),
         // Both keys of "+": typed with shift on US layouts, where only the typed character matches.
         KeyBinding::new("+", ZoomPreviewIn, Some(CONTEXT)),
@@ -97,11 +96,12 @@ pub enum Panel {
     Timeline,
     Code,
     Assets,
+    Properties,
 }
 
 impl screen::Editor for Panel {
     fn all() -> &'static [Self] {
-        &[Self::Graph, Self::Preview, Self::Timeline, Self::Code, Self::Assets]
+        &[Self::Graph, Self::Preview, Self::Timeline, Self::Code, Self::Assets, Self::Properties]
     }
 
     fn label(&self) -> &'static str {
@@ -111,6 +111,7 @@ impl screen::Editor for Panel {
             Self::Timeline => "Timeline",
             Self::Code => "WGSL",
             Self::Assets => "Assets",
+            Self::Properties => "Properties",
         }
     }
 
@@ -121,17 +122,41 @@ impl screen::Editor for Panel {
             Self::Timeline => IconName::FilmStrip,
             Self::Code => IconName::Code,
             Self::Assets => IconName::Palette,
+            Self::Properties => IconName::Faders,
         }
     }
 }
 
 fn default_screen() -> Screen<Panel> {
     Screen::new([
-        (Rect::new(0.0, 0.0, 0.6, 1.0), Panel::Graph),
-        (Rect::new(0.6, 0.0, 1.0, 0.55), Panel::Preview),
-        (Rect::new(0.6, 0.55, 1.0, 0.63), Panel::Timeline),
-        (Rect::new(0.6, 0.63, 1.0, 1.0), Panel::Code),
+        (Rect::new(0.0, 0.0, 0.6, 0.9), Panel::Graph),
+        (Rect::new(0.0, 0.9, 0.6, 1.0), Panel::Timeline),
+        (Rect::new(0.6, 0.0, 1.0, 0.5), Panel::Preview),
+        (Rect::new(0.6, 0.5, 1.0, 0.8), Panel::Properties),
+        (Rect::new(0.6, 0.8, 1.0, 1.0), Panel::Code),
     ])
+}
+
+/// The narrowest a split-off Properties area may be, in points.
+const PROPERTIES_MIN_WIDTH: f64 = 320.0;
+
+/// Splits the largest area of `screen` in two, the new half showing Properties. `None` when the window has no room for it.
+fn split_for_properties(screen: &Screen<Panel>, window: &Window) -> Option<Screen<Panel>> {
+    let viewport = window.viewport_size();
+    let (width, height) = (f64::from(viewport.width).max(1.0), f64::from(viewport.height).max(1.0));
+    let largest = screen
+        .areas()
+        .iter()
+        .max_by(|a, b| (a.rect.width() * a.rect.height()).total_cmp(&(b.rect.width() * b.rect.height())))?;
+    let rect = largest.rect;
+    let (axis, at) = if rect.width() * width >= rect.height() * height {
+        (Axis::X, (rect.left + rect.right) / 2.0)
+    } else {
+        (Axis::Y, (rect.top + rect.bottom) / 2.0)
+    };
+    let min = MinSize { width: PROPERTIES_MIN_WIDTH / width, height: f64::from(HEADER_HEIGHT) / height };
+    let (mut next, id) = screen.split(largest.id, axis, at, Part::After, min)?;
+    next.set_editor(id, Panel::Properties).then_some(next)
 }
 
 /// The views of the areas showing a panel, kept as long as the area exists.
@@ -156,11 +181,10 @@ pub struct Shell {
     screen: Entity<ScreenView<Panel>>,
     playback: Entity<Playback>,
     editor: Entity<Editor>,
+    /// The Properties area's panel, shared by every area showing it.
+    properties: Entity<PropertiesPanel>,
     views: Rc<RefCell<AreaViews>>,
     path: Option<PathBuf>,
-    id: EntityId,
-    /// The project name the title and the settings window last showed.
-    named: String,
     /// Whether a discard prompt is open, so repeated close or quit requests don't stack prompts.
     confirming: bool,
 }
@@ -192,6 +216,7 @@ impl Shell {
         editor.update(cx, |e, cx| e.attach_playback(&playback, cx));
         let mut path = None;
         let mut layout = None;
+        let mut stored_output = None;
         let opening = match start {
             Start::Launch(requested) => requested.or_else(project::last).and_then(|last| match project::read(&last) {
                 Ok(loaded) => Some((last, loaded)),
@@ -208,6 +233,7 @@ impl Shell {
         };
         if let Some((last, Loaded { project: loaded, files })) = opening {
             layout = layout::load(&loaded);
+            stored_output = video_export::stored(&loaded);
             assets::report_problems(window, &unusable_files(&loaded, &files), cx);
             playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
             editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
@@ -257,6 +283,8 @@ impl Shell {
         })
         .detach();
 
+        let output = video_export::from_stored(stored_output.as_ref(), editor.read(cx).settings().timing.fps);
+        let properties = cx.new(|cx| PropertiesPanel::new(editor.clone(), playback.clone(), output, cx));
         let views = Rc::new(RefCell::new(AreaViews { startup_zoom: zoom, ..Default::default() }));
         if let Some(layout) = &layout {
             views.borrow_mut().pending.extend(layout.graphs.iter().cloned());
@@ -265,6 +293,7 @@ impl Shell {
             let playback = playback.clone();
             let editor = editor.clone();
             let views = views.clone();
+            let properties = properties.clone();
             ScreenView::new(layout.map_or_else(default_screen, |l| l.screen), move |id, panel, window, cx| {
                 let mut views = views.borrow_mut();
                 match panel {
@@ -327,6 +356,7 @@ impl Shell {
                             .clone();
                         AreaContent { toolbar: None, body: Some(panel.into()) }
                     }
+                    Panel::Properties => AreaContent { toolbar: None, body: Some(properties.clone().into()) },
                     Panel::Code => AreaContent {
                         toolbar: None,
                         body: Some(
@@ -342,7 +372,7 @@ impl Shell {
             }, cx)
         });
         let id = cx.entity_id();
-        let mut shell = Self { screen, playback, editor, views, path, id, named: String::new(), confirming: false };
+        let mut shell = Self { screen, playback, editor, properties, views, path, confirming: false };
         shell.refresh_title(window, cx);
         cx.on_release(move |_, cx| windows::owner_closed(id, cx)).detach();
         let shell_weak = cx.entity().downgrade();
@@ -422,10 +452,28 @@ impl Shell {
         }
     }
 
-    /// Shows the settings window on `page`, editing this window's project.
-    pub(crate) fn show_settings(&mut self, page: Page, cx: &mut Context<Self>) {
-        let name = self.project_name().into();
-        windows::open_settings(page, &self.editor, &self.playback, cx.entity_id(), name, cx);
+    /// Shows the Properties area on `section`, or on the section it was last on. A window without one gets
+    /// one, split from its largest area.
+    pub(crate) fn reveal_properties(&mut self, section: Option<Section>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(section) = section {
+            self.properties.update(cx, |p, cx| p.show(section, cx));
+        }
+        let screen = self.screen.read(cx).screen().clone();
+        if screen.areas().iter().all(|area| area.editor != Panel::Properties) {
+            let Some(next) = split_for_properties(&screen, window) else {
+                log::warn!("there is no room in the window for the Properties area");
+                return;
+            };
+            self.screen.update(cx, |s, cx| s.set_screen(next, cx));
+        }
+        let focus = self.properties.focus_handle(cx);
+        window.focus(&focus, cx);
+    }
+
+    /// Starts the video export with the Output section's settings, showing that section.
+    fn export_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reveal_properties(Some(Section::Output), window, cx);
+        self.properties.update(cx, |p, cx| p.start_export(window, cx));
     }
 
     /// Opens an output window for this project; `window` is the window that draws it.
@@ -463,12 +511,6 @@ impl Shell {
         let dirty = self.editor.read(cx).has_unsaved_changes();
         window.set_window_title(&format!("{name}{} - webgpu-nodes", if dirty { " *" } else { "" }));
         window.set_window_edited(dirty);
-        // Only a changed name is passed on: a change made in the settings window comes through here
-        // while that window is being updated, and the name can't change then.
-        if name != self.named {
-            windows::project_renamed(self.id, name.clone().into(), cx);
-            self.named = name;
-        }
     }
 
     fn report(window: &mut Window, message: &str, error: &anyhow::Error, cx: &mut App) {
@@ -599,9 +641,13 @@ impl Shell {
         match project::read(&path) {
             Ok(Loaded { project: loaded, files }) => {
                 let layout = layout::load(&loaded);
+                let stored = video_export::stored(&loaded);
                 assets::report_problems(window, &unusable_files(&loaded, &files), cx);
                 self.playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
                 self.editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+                let fps = self.editor.read(cx).settings().timing.fps;
+                let output = video_export::from_stored(stored.as_ref(), fps);
+                self.properties.update(cx, |p, cx| p.set_output(output, cx));
                 let (screen, graphs) = layout.map_or_else(|| (default_screen(), Vec::new()), |l| (l.screen, l.graphs));
                 self.show_screen(screen, graphs, cx);
                 self.adopt(Some(path), window, cx);
@@ -695,6 +741,7 @@ impl Shell {
             let graph = |id: AreaId| views.graphs.get(&id).map(|e| e.read(cx).view(cx)).unwrap_or_default();
             layout::store(&mut project, self.screen.read(cx).screen(), &graph);
         }
+        video_export::store(&mut project, &self.properties.read(cx).output());
         let files = self.playback.read(cx).asset_files().clone();
         let result: Result<()> = project::write(&path, &project, &files);
         match result {
@@ -811,16 +858,10 @@ impl Render for Shell {
                 group_bundles::pick_and_import(&this.editor, &this.playback, window, cx);
             }))
             .on_action(cx.safe_listener(|this, _: &ExportVideo, window, cx| {
-                export_dialog::open(this.editor.clone(), this.playback.clone(), window, cx);
+                this.export_video(window, cx);
             }))
-            .on_action(cx.safe_listener(|this, _: &OpenSettings, _, cx| {
-                this.show_settings(Page::Canvas, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, _, cx| {
-                this.show_settings(Page::Canvas, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &OpenPreferences, _, cx| {
-                this.show_settings(Page::Appearance, cx);
+            .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, window, cx| {
+                this.reveal_properties(None, window, cx);
             }))
             .on_action(cx.safe_listener(|this, _: &NewOutputWindow, window, cx| {
                 this.new_output(window.window_handle(), cx);
@@ -874,7 +915,7 @@ impl Render for Shell {
 mod tests {
     use std::path::PathBuf;
 
-    use gpui::{Focusable as _, Modifiers, TestAppContext};
+    use gpui::{Modifiers, TestAppContext};
     use shader_graph::assets::{Asset, AssetFile, asset_hash};
 
     use super::*;
@@ -1093,5 +1134,67 @@ mod tests {
                 .is_some_and(|item| matches!(item, gpui::OwnedMenuItem::Action { checked: true, .. }))
         });
         assert_eq!(checked, !before, "the Developer tools item shows the new state");
+    }
+
+    fn properties_areas(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) -> Vec<Panel> {
+        shell.read_with(cx, |s, cx| s.screen.read(cx).screen().areas().iter().map(|a| a.editor).collect())
+    }
+
+    #[gpui::test]
+    fn the_default_layout_has_a_properties_area_that_project_settings_focus(cx: &mut TestAppContext) {
+        let (shell, mut cx) = open(cx);
+        let cx = &mut cx;
+        let count = |areas: Vec<Panel>| areas.iter().filter(|p| **p == Panel::Properties).count();
+        assert_eq!(count(properties_areas(&shell, cx)), 1);
+
+        cx.dispatch_action(OpenProjectSettings);
+        cx.run_until_parked();
+        assert_eq!(count(properties_areas(&shell, cx)), 1, "project settings focus the area there is");
+        let focus = shell.read_with(cx, |s, cx| s.properties.focus_handle(cx));
+        assert!(cx.update(|window, _| focus.is_focused(window)), "and it takes the focus");
+    }
+
+    #[gpui::test]
+    fn project_settings_open_an_area_in_a_window_without_one(cx: &mut TestAppContext) {
+        let (shell, mut cx) = open(cx);
+        let cx = &mut cx;
+        shell.update(cx, |s, cx| {
+            s.screen.update(cx, |view, cx| {
+                view.set_screen(Screen::new([(Rect::new(0.0, 0.0, 1.0, 1.0), Panel::Graph)]), cx);
+            });
+        });
+        cx.dispatch_action(OpenProjectSettings);
+        cx.run_until_parked();
+        let areas = properties_areas(&shell, cx);
+        assert_eq!(areas.len(), 2, "the window gets one more area");
+        assert!(areas.contains(&Panel::Properties));
+    }
+
+    #[gpui::test]
+    fn the_output_settings_a_project_saved_come_back_when_it_opens(cx: &mut TestAppContext) {
+        let dir = scratch("output");
+        let path = dir.join("a.wgnodes");
+        let output = video_export::OutputSettings {
+            container: export::Container::Matroska,
+            codec: export::Codec::Png,
+            alpha: true,
+            start: 1.0,
+            duration: 2.0,
+            fps: 24.0,
+        };
+        let mut project = GraphProject::from_json(&GraphProject::default().to_json()).expect("loads");
+        video_export::store(&mut project, &output);
+        project::write(&path, &project, &AssetFiles::new()).expect("writes");
+
+        cx.update(|cx| {
+            theme::init(cx);
+            preferences::init(cx);
+            init(cx);
+        });
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(path), None, window, cx));
+        cx.run_until_parked();
+        let panel = shell.read_with(cx, |s, _| s.properties.clone());
+        assert_eq!(panel.read_with(cx, |p, _| p.output()), output);
+        std::fs::remove_dir_all(dir).ok();
     }
 }
