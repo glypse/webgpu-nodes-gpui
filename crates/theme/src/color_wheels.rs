@@ -14,7 +14,7 @@ use graph_math::color::{
 use guard::SafeListener as _;
 use image::Frame;
 
-use crate::gamut_image::paint_gamut;
+use crate::gamut_image::{PlaneKey, paint_gamut, plane_image};
 
 /// Red at the bottom, hues going clockwise (as Blender's wheel).
 const HUE_OFFSET: f64 = PI;
@@ -84,19 +84,6 @@ fn hsv_wheel() -> Arc<RenderImage> {
         .clone()
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct WheelKey {
-    lightness: i32,
-    gamut: ColorSpace,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct BarKey {
-    chroma: i32,
-    hue: i32,
-    gamut: ColorSpace,
-}
-
 #[derive(Clone, Copy)]
 enum Surface {
     Wheel,
@@ -123,8 +110,9 @@ pub struct ColorWheels {
     sent: Option<[f64; 3]>,
     wheel_bounds: Bounds<Pixels>,
     bar_bounds: Bounds<Pixels>,
-    wheel_image: Option<(WheelKey, Arc<RenderImage>)>,
-    bar_image: Option<(BarKey, Arc<RenderImage>)>,
+    /// The last images this wheel drew, so a redraw doesn't go through the shared cache.
+    wheel_image: Option<(PlaneKey, Arc<RenderImage>)>,
+    bar_image: Option<(PlaneKey, Arc<RenderImage>)>,
     retired: Vec<Arc<RenderImage>>,
 }
 
@@ -365,27 +353,30 @@ impl ColorWheels {
     }
 
     fn oklch_wheel_image(&mut self) -> Arc<RenderImage> {
-        let key = WheelKey {
-            lightness: (self.lch_shown().l * 400.0).round() as i32,
-            gamut: self.gamut,
+        let lightness_q = (self.lch_shown().l * 400.0).round() as i32;
+        let gamut = self.gamut;
+        let key = PlaneKey::Wheel {
+            lightness: lightness_q,
+            gamut,
         };
         if let Some((cached, image)) = &self.wheel_image
             && *cached == key
         {
             return image.clone();
         }
-        let lightness = f64::from(key.lightness) / 400.0;
-        let chroma = oklch_max_chroma(self.gamut);
-        let frame = paint_gamut(WHEEL_PIXELS, WHEEL_PIXELS, self.gamut, |x, y| {
-            let (dx, dy) = (x * 2.0 - 1.0, y * 2.0 - 1.0);
-            let (h, radius) = wheel_polar(dx, dy);
-            (dx.hypot(dy) <= 1.0).then_some(Lch {
-                l: lightness,
-                c: radius * chroma,
-                h: h * 360.0,
+        let image = plane_image(key, || {
+            let lightness = f64::from(lightness_q) / 400.0;
+            let chroma = oklch_max_chroma(gamut);
+            paint_gamut(WHEEL_PIXELS, WHEEL_PIXELS, gamut, |x, y| {
+                let (dx, dy) = (x * 2.0 - 1.0, y * 2.0 - 1.0);
+                let (h, radius) = wheel_polar(dx, dy);
+                (dx.hypot(dy) <= 1.0).then_some(Lch {
+                    l: lightness,
+                    c: radius * chroma,
+                    h: h * 360.0,
+                })
             })
         });
-        let image = Arc::new(RenderImage::new(vec![frame]));
         if let Some((_, old)) = self.wheel_image.replace((key, image.clone())) {
             self.retire(old);
         }
@@ -394,19 +385,25 @@ impl ColorWheels {
 
     fn lightness_bar_image(&mut self) -> Arc<RenderImage> {
         let lch = self.lch_shown();
-        let key = BarKey {
-            chroma: (lch.c * 1000.0).round() as i32,
-            hue: (lch.h * 10.0).round() as i32,
-            gamut: self.gamut,
+        let (chroma_q, hue_q) = (
+            (lch.c * 1000.0).round() as i32,
+            (lch.h * 10.0).round() as i32,
+        );
+        let gamut = self.gamut;
+        let key = PlaneKey::Bar {
+            chroma: chroma_q,
+            hue: hue_q,
+            gamut,
         };
         if let Some((cached, image)) = &self.bar_image
             && *cached == key
         {
             return image.clone();
         }
-        let (c, h) = (f64::from(key.chroma) / 1000.0, f64::from(key.hue) / 10.0);
-        let frame = paint_gamut(4, 256, self.gamut, |_, y| Some(Lch { l: 1.0 - y, c, h }));
-        let image = Arc::new(RenderImage::new(vec![frame]));
+        let image = plane_image(key, || {
+            let (c, h) = (f64::from(chroma_q) / 1000.0, f64::from(hue_q) / 10.0);
+            paint_gamut(4, 256, gamut, |_, y| Some(Lch { l: 1.0 - y, c, h }))
+        });
         if let Some((_, old)) = self.bar_image.replace((key, image.clone())) {
             self.retire(old);
         }
@@ -782,5 +779,32 @@ mod tests {
         });
         assert!(changes.borrow().is_empty());
         assert_eq!(cx.read(|cx| view.read(cx).components()), [0.5, 0.1, 90.0]);
+    }
+
+    #[test]
+    fn wheels_with_the_same_lightness_share_one_image() {
+        let mut a = ColorWheels::new(ColorMode::Oklch, [0.6, 0.1, 90.0]);
+        let mut b = ColorWheels::new(ColorMode::Oklch, [0.6, 0.4, 10.0]);
+        let mut c = ColorWheels::new(ColorMode::Oklch, [0.6001, 0.1, 90.0]);
+        let image = a.oklch_wheel_image();
+        assert!(Arc::ptr_eq(&image, &b.oklch_wheel_image()));
+        assert!(Arc::ptr_eq(&image, &c.oklch_wheel_image()));
+    }
+
+    #[test]
+    fn a_wheel_built_after_another_is_dropped_reuses_its_image() {
+        let first = ColorWheels::new(ColorMode::Oklch, [0.37, 0.0, 0.0]).oklch_wheel_image();
+        let rebuilt = ColorWheels::new(ColorMode::Oklch, [0.37, 0.0, 0.0]).oklch_wheel_image();
+        assert!(Arc::ptr_eq(&first, &rebuilt));
+    }
+
+    #[test]
+    fn bars_with_the_same_chroma_and_hue_share_one_image() {
+        let mut a = ColorWheels::new(ColorMode::Oklch, [0.2, 0.15, 33.0]);
+        let mut b = ColorWheels::new(ColorMode::Oklch, [0.9, 0.15, 33.0]);
+        assert!(Arc::ptr_eq(
+            &a.lightness_bar_image(),
+            &b.lightness_bar_image()
+        ));
     }
 }

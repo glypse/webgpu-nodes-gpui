@@ -1,9 +1,78 @@
 //! Pixels of an OKLch plane, as the colour picker's wheel and lightness bar draw them.
 
+use std::hash::Hash;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+
+use gpui::RenderImage;
 use graph_math::color::{
     ColorSpace, Lch, encode_in, in_gamut, oklch_to_linear, oklch_to_linear_unmapped,
 };
 use image::{Frame, RgbaImage};
+use lru::LruCache;
+
+/// What the pixels of a generated plane depend on. The components are
+/// quantised here and the plane is generated from the quantised values, so
+/// equal keys always paint equal images.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PlaneKey {
+    /// Lightness in 1/400ths.
+    Wheel { lightness: i32, gamut: ColorSpace },
+    /// Chroma in 1/1000ths, hue in 1/10ths of a degree.
+    Bar {
+        chroma: i32,
+        hue: i32,
+        gamut: ColorSpace,
+    },
+}
+
+/// Room for the wheels and bars of a few groups' colour nodes. A drag through
+/// lightness or chroma makes a new key per step, so the bound keeps those from
+/// piling up.
+const PLANE_CACHE_CAPACITY: usize = 64;
+
+static PLANES: LazyLock<Mutex<ImageCache<PlaneKey>>> =
+    LazyLock::new(|| Mutex::new(ImageCache::new(PLANE_CACHE_CAPACITY)));
+
+/// The image of `key` from the process-wide cache, generated with `generate` on a miss.
+pub fn plane_image(key: PlaneKey, generate: impl FnOnce() -> Frame) -> Arc<RenderImage> {
+    PLANES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(key, generate)
+}
+
+/// Rendered images by key, least recently used evicted beyond `capacity`.
+pub struct ImageCache<K: Hash + Eq> {
+    entries: LruCache<K, Arc<RenderImage>>,
+}
+
+impl<K: Hash + Eq> ImageCache<K> {
+    pub fn new(capacity: usize) -> Self {
+        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::MIN);
+        Self {
+            entries: LruCache::new(capacity),
+        }
+    }
+
+    pub fn get_or_insert_with(
+        &mut self,
+        key: K,
+        generate: impl FnOnce() -> Frame,
+    ) -> Arc<RenderImage> {
+        if let Some(image) = self.entries.get(&key) {
+            return image.clone();
+        }
+        let image = Arc::new(RenderImage::new(vec![generate()]));
+        self.entries.put(key, image.clone());
+        image
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
 
 /// Sub-samples per side for the pixels on the gamut's edge.
 const EDGE_SAMPLES: u32 = 4;
@@ -154,6 +223,8 @@ pub fn paint_gamut(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
 
     fn pixel(frame: &Frame, x: u32, y: u32) -> [u8; 4] {
@@ -216,5 +287,39 @@ mod tests {
         let darkest = (0..64).map(sum).min().unwrap_or(0);
         // The line is dark on this light colour, much darker than the colours around.
         assert!(darkest * 10 < sum(0) * 6, "{darkest} vs {}", sum(0));
+    }
+
+    fn get(cache: &mut ImageCache<u32>, generated: &Cell<u32>, key: u32) -> Arc<RenderImage> {
+        cache.get_or_insert_with(key, || {
+            generated.set(generated.get() + 1);
+            paint_gamut(2, 2, ColorSpace::Srgb, |_, _| None)
+        })
+    }
+
+    #[test]
+    fn a_hit_returns_the_same_image_without_generating_it() {
+        let generated = Cell::new(0);
+        let mut cache = ImageCache::new(4);
+        let first = get(&mut cache, &generated, 1);
+        let again = get(&mut cache, &generated, 1);
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(generated.get(), 1);
+    }
+
+    #[test]
+    fn the_least_recently_used_image_is_evicted_past_capacity() {
+        let generated = Cell::new(0);
+        let mut cache = ImageCache::new(2);
+        let one = get(&mut cache, &generated, 1);
+        get(&mut cache, &generated, 2);
+        // Using 1 again makes 2 the least recently used.
+        get(&mut cache, &generated, 1);
+        get(&mut cache, &generated, 3);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(generated.get(), 3);
+        assert!(Arc::ptr_eq(&one, &get(&mut cache, &generated, 1)));
+        assert_eq!(generated.get(), 3);
+        get(&mut cache, &generated, 2);
+        assert_eq!(generated.get(), 4);
     }
 }
