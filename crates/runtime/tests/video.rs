@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use ffmpeg_next as ffmpeg;
+use ffmpeg::codec::Id;
 use ffmpeg::format::Pixel;
 use ffmpeg::software::scaling::{Context as Scaler, Flags};
 use ffmpeg::util::rational::Rational;
@@ -28,28 +29,37 @@ const FRAMES: usize = 8;
 const TOLERANCE: i32 = 12;
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Encodes the test video with FFmpeg's MPEG-4 encoder, one solid colour per two frames.
+/// Encodes the test video with FFmpeg's MPEG-4 encoder in an MP4, one solid colour per two frames.
 fn generated_video() -> Vec<u8> {
+    encoded_video(Id::MPEG4, Pixel::YUV420P, "mp4")
+}
+
+/// The test video as PNG frames with alpha in a QuickTime file.
+fn generated_png_mov() -> Vec<u8> {
+    encoded_video(Id::PNG, Pixel::RGBA, "mov")
+}
+
+fn encoded_video(codec: Id, pixel: Pixel, extension: &str) -> Vec<u8> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let name = format!("runtime-video-test-{}-{}.mp4", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+    let name = format!("runtime-video-test-{}-{}.{extension}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
     let path = std::env::temp_dir().join(name);
-    write_video(&path);
+    write_video(&path, codec, pixel);
     let bytes = std::fs::read(&path).expect("reads the written video");
     let _ = std::fs::remove_file(&path);
     bytes
 }
 
-fn write_video(path: &std::path::Path) {
+fn write_video(path: &std::path::Path, id: Id, pixel: Pixel) {
     ffmpeg::init().expect("FFmpeg starts");
     let mut output = ffmpeg::format::output(&path).expect("opens the output");
-    let codec = ffmpeg::encoder::find(ffmpeg::codec::Id::MPEG4).expect("FFmpeg has an MPEG-4 encoder");
+    let codec = ffmpeg::encoder::find(id).expect("FFmpeg has the encoder");
     let encoder_time_base = Rational::new(1, FPS_RATIONAL);
     let global_header = output.format().flags().contains(ffmpeg::format::Flags::GLOBAL_HEADER);
     let mut stream = output.add_stream(codec).expect("adds a stream");
     let mut encoder = ffmpeg::codec::context::Context::new_with_codec(codec).encoder().video().expect("a video encoder");
     encoder.set_width(WIDTH);
     encoder.set_height(HEIGHT);
-    encoder.set_format(Pixel::YUV420P);
+    encoder.set_format(pixel);
     encoder.set_time_base(encoder_time_base);
     encoder.set_frame_rate(Some(Rational::new(FPS_RATIONAL, 1)));
     if global_header {
@@ -60,8 +70,8 @@ fn write_video(path: &std::path::Path) {
     output.write_header().expect("writes the header");
     let stream_time_base = output.stream(0).expect("the stream").time_base();
 
-    let mut scaler = Scaler::get(Pixel::BGRA, WIDTH, HEIGHT, Pixel::YUV420P, WIDTH, HEIGHT, Flags::BILINEAR)
-        .expect("converts to YUV");
+    let mut scaler = Scaler::get(Pixel::BGRA, WIDTH, HEIGHT, pixel, WIDTH, HEIGHT, Flags::BILINEAR)
+        .expect("converts to the encoder's format");
     for index in 0..FRAMES {
         let colour = COLOURS[index / 2];
         let mut bgra = ffmpeg::util::frame::Video::new(Pixel::BGRA, WIDTH, HEIGHT);
@@ -201,6 +211,17 @@ fn a_video_shows_the_frame_for_each_time_and_loops() {
     harness.shows(&playback, "view", 0.1, COLOURS[0]);
     harness.shows(&playback, "view", 2.1, COLOURS[0]);
     harness.shows(&playback, "view", 2.6, COLOURS[1]);
+}
+
+#[test]
+fn a_png_video_in_a_mov_shows_its_frames() {
+    let bytes = generated_png_mov();
+    let mut harness = Harness::new();
+    harness.library.sync(&std::collections::BTreeMap::from([("clip".to_owned(), source(&bytes))]));
+    let playback = VideoPlayback { start: 0.0, speed: 1.0, end: VideoEnd::Loop };
+    for (time, colour) in [(0.1, COLOURS[0]), (1.1, COLOURS[2]), (1.6, COLOURS[3])] {
+        harness.shows(&playback, "view", time, colour);
+    }
 }
 
 #[test]

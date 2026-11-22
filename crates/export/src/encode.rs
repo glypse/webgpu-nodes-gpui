@@ -36,6 +36,7 @@ fn format(settings: &Settings) -> Format {
             (Depth::Bits16, false) => (Pixel::GBRP16LE, false),
             (Depth::Bits16, true) => (Pixel::GBRAP16LE, false),
         },
+        Codec::Png => (if alpha { Pixel::RGBA } else { Pixel::RGB24 }, false),
         Codec::QuickTimeAnimation => (if alpha { Pixel::ARGB } else { Pixel::RGB24 }, false),
     };
     Format { pixel, yuv }
@@ -46,6 +47,7 @@ fn encoder_for(codec: Codec) -> Option<ffmpeg::Codec> {
         Codec::ProRes(_) => ffmpeg::encoder::find_by_name("prores_ks"),
         Codec::Dnxhr(_) => ffmpeg::encoder::find(Id::DNXHD),
         Codec::Ffv1(_) => ffmpeg::encoder::find(Id::FFV1),
+        Codec::Png => ffmpeg::encoder::find(Id::PNG),
         Codec::QuickTimeAnimation => ffmpeg::encoder::find(Id::QTRLE),
     }
 }

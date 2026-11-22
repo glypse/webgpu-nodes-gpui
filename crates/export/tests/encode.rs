@@ -134,7 +134,10 @@ fn read_back(path: &PathBuf, name: &str) -> Readback {
 }
 
 fn is_yuv(pixel: Pixel) -> bool {
-    !matches!(pixel, Pixel::BGRZ | Pixel::BGRA | Pixel::ARGB | Pixel::RGB24 | Pixel::GBRP16LE | Pixel::GBRAP16LE)
+    !matches!(
+        pixel,
+        Pixel::BGRZ | Pixel::BGRA | Pixel::ARGB | Pixel::RGB24 | Pixel::RGBA | Pixel::GBRP16LE | Pixel::GBRAP16LE
+    )
 }
 
 fn encode(name: &str, settings: Settings, size: Size) -> Readback {
@@ -165,6 +168,8 @@ fn every_codec_in_every_container_writes_its_frames_at_the_even_size() {
         (Codec::Ffv1(Depth::Bits8), false, Pixel::BGRZ, Id::FFV1),
         (Codec::Ffv1(Depth::Bits8), true, Pixel::BGRA, Id::FFV1),
         (Codec::Ffv1(Depth::Bits16), false, Pixel::GBRP16LE, Id::FFV1),
+        (Codec::Png, false, Pixel::RGB24, Id::PNG),
+        (Codec::Png, true, Pixel::RGBA, Id::PNG),
         (Codec::QuickTimeAnimation, false, Pixel::RGB24, Id::QTRLE),
         (Codec::QuickTimeAnimation, true, Pixel::ARGB, Id::QTRLE),
     ];

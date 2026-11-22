@@ -288,6 +288,7 @@ impl ExportForm {
             Codec::ProRes(ProResProfile::Hq),
             Codec::Dnxhr(DnxhrProfile::Hq),
             Codec::Ffv1(Depth::Bits8),
+            Codec::Png,
             Codec::QuickTimeAnimation,
         ]
         .map(|codec| (codec, codec.label(), codec.supports_container(self.container)));
@@ -359,7 +360,7 @@ impl ExportForm {
                     .into_any_element(),
                 )
             }
-            Codec::QuickTimeAnimation => None,
+            Codec::Png | Codec::QuickTimeAnimation => None,
         };
 
         let alpha = self.codec.supports_alpha().then(|| {

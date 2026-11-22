@@ -14,7 +14,7 @@ use runtime::{MediaSource, Size};
 use shader_graph::codegen::Program;
 use thiserror::Error;
 
-/// The file's container. Each one takes every `Codec`.
+/// The file's container. Which codecs it takes is given by `Codec::supports_container`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Container {
     Mov,
@@ -145,6 +145,7 @@ pub enum Codec {
     ProRes(ProResProfile),
     Dnxhr(DnxhrProfile),
     Ffv1(Depth),
+    Png,
     QuickTimeAnimation,
 }
 
@@ -156,6 +157,7 @@ impl Codec {
             Self::ProRes(_) => "ProRes",
             Self::Dnxhr(_) => "DNxHR",
             Self::Ffv1(_) => "FFV1",
+            Self::Png => "PNG",
             Self::QuickTimeAnimation => "QuickTime Animation",
         }
     }
@@ -172,7 +174,7 @@ impl Codec {
     pub fn supports_container(self, container: Container) -> bool {
         match self {
             Self::QuickTimeAnimation => container == Container::Mov,
-            Self::ProRes(_) | Self::Dnxhr(_) | Self::Ffv1(_) => true,
+            Self::ProRes(_) | Self::Dnxhr(_) | Self::Ffv1(_) | Self::Png => true,
         }
     }
 
@@ -180,7 +182,7 @@ impl Codec {
         match self {
             Self::ProRes(profile) => profile.is_4444(),
             Self::Dnxhr(_) => false,
-            Self::Ffv1(_) | Self::QuickTimeAnimation => true,
+            Self::Ffv1(_) | Self::Png | Self::QuickTimeAnimation => true,
         }
     }
 }

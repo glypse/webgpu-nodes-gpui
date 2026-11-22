@@ -1,6 +1,6 @@
 # Video export: spec
 
-**Decision (2026-11-22):** export offers only FFmpeg's built-in encoders: ProRes, FFV1, DNxHD/DNxHR, PNG and QuickTime Animation, in MOV and MKV. No H.264, H.265, VP9 or AV1, and no external encoder crates. The default is ProRes 422 HQ in MOV. Sections 2 and 3 below are the research that led here; where they propose openh264 or rav1e, this decision overrides them.
+**Decision (2026-11-22):** export offers only FFmpeg's built-in encoders: ProRes, FFV1, DNxHD/DNxHR, PNG (MOV and MKV, with alpha) and QuickTime Animation (MOV only). PNG needs zlib in FFmpeg, which the patched `ffmpeg-sys-next` build enables (README, "Building"). No H.264, H.265, VP9 or AV1, and no external encoder crates. The default is ProRes 422 HQ in MOV. Sections 2 and 3 below are the research that led here; where they propose openh264 or rav1e, this decision overrides them.
 
 Sources: Blender `main` (fetched 2026-11-22), `source/blender/imbuf/movie/intern/movie_write.cc`, `movie_util.cc`, `MOV_enums.hh`, `source/blender/makesdna/DNA_scene_types.h`, the RNA is `source/blender/makesrna/intern/rna_scene.cc`, the UI is `scripts/startup/bl_ui/properties_output.py`, presets are `scripts/presets/ffmpeg/`, and FFmpeg's encoder list is `libavcodec/allcodecs.c` on FFmpeg master.
 
@@ -68,7 +68,7 @@ Sources: Blender `main` (fetched 2026-11-22), `source/blender/imbuf/movie/intern
 
 ## 2. Constraints for this app
 
-FFmpeg is built from source and statically linked (`ffmpeg-next` 9.1.0 / `ffmpeg-sys-next` 9.1.1, `build` feature), with no system libraries. Its `build-lib-*` features only link libraries already installed, so libx264, libx265, libvpx, libaom, libsvtav1, librav1e, libtheora and libopenh264 are not available unless built separately. Blender's FFmpeg enables them (`build_files/build_environment/cmake/ffmpeg.cmake`), which we cannot copy.
+FFmpeg is built from source and statically linked (`ffmpeg-next` 9.1.0 / `ffmpeg-sys-next` 9.1.1, `build` feature), with zlib from the system (`build-zlib`), and no other system libraries. Its `build-lib-*` features only link libraries already installed, so libx264, libx265, libvpx, libaom, libsvtav1, librav1e, libtheora and libopenh264 are not available unless built separately. Blender's FFmpeg enables them (`build_files/build_environment/cmake/ffmpeg.cmake`), which we cannot copy.
 
 **Encoders FFmpeg builds in** (non-external entries in `allcodecs.c`):
 - Video: `prores_ks`, `prores_aw`, `ffv1`, `dnxhd`, `dvvideo`, `huffyuv`, `ffvhuff`, `png`, `qtrle`, `utvideo`, `mjpeg`, `mpeg1video`, `mpeg2video`, `mpeg4`, `flv`, `gif`, `jpeg2000`, `exr`, `dpx`, `magicyuv`, `rawvideo`, `vc2`, `cfhd`, `hap`.
