@@ -585,11 +585,6 @@ mod tests {
         cx.run_until_parked();
     }
 
-    fn settle(cx: &mut gpui::VisualTestContext) {
-        cx.executor().advance_clock(crate::playback::SETTLE * 2);
-        redraw(cx);
-    }
-
     #[gpui::test]
     fn frames_follow_the_preview_area_while_following(cx: &mut TestAppContext) {
         cx.update(theme::init);
@@ -614,9 +609,7 @@ mod tests {
             cx.notify();
         });
         redraw(cx);
-        assert_eq!(size(cx), device_size(400.0, 300.0, scale).expect("a pane"), "a resize is drawn once it settles");
-        settle(cx);
-        assert_eq!(size(cx), device_size(500.0, 300.0, scale).expect("a pane"));
+        assert_eq!(size(cx), device_size(500.0, 300.0, scale).expect("a pane"), "a resize is drawn at once");
 
         cx.update(|window, cx| {
             playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx));
@@ -677,7 +670,6 @@ mod tests {
             cx.notify();
         });
         redraw(cx);
-        settle(cx);
         assert_eq!(sizes(cx), [pane(400.0)], "areas of the same size share a render");
 
         cx.update(|window, cx| playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx)));

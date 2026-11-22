@@ -31,6 +31,12 @@ pub(crate) struct Target {
 }
 
 impl Target {
+    /// A target for `size` made out of one for another size: the program's blocks and the
+    /// textures that don't depend on the size are kept, everything else starts over.
+    pub fn resized(self, device: &wgpu::Device, size: Size) -> Self {
+        Self { transients: self.transients, blocks: self.blocks, ..Self::new(device, size) }
+    }
+
     pub fn new(device: &wgpu::Device, size: Size) -> Self {
         Self {
             size,

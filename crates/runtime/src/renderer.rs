@@ -992,7 +992,7 @@ impl Renderer {
     }
 
     /// Draws a frame into one surface per distinct size of `sizes`, all in one submit. Targets of
-    /// other sizes are dropped, with their simulation state.
+    /// other sizes are dropped, with their simulation state; a size that is new takes over what it can of one.
     #[cfg(target_os = "macos")]
     fn start_surfaces(&mut self, program: &Program, inputs: FrameInputs, sizes: &[Size]) -> Result<Submitted> {
         let mut distinct: Vec<Size> = Vec::new();
@@ -1003,13 +1003,20 @@ impl Renderer {
             }
         }
         anyhow::ensure!(!distinct.is_empty(), "there is no canvas to draw");
-        self.targets.retain(|size, _| distinct.contains(size));
+        let gone: Vec<Size> = self.targets.keys().filter(|size| !distinct.contains(size)).copied().collect();
+        let mut stale: Vec<Target> = gone.iter().filter_map(|size| self.targets.remove(size)).collect();
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut surfaces = Vec::with_capacity(distinct.len());
         let last = distinct.len() - 1;
         for (i, size) in distinct.into_iter().enumerate() {
-            let mut target = self.take_target(size);
+            let mut target = match self.targets.remove(&size) {
+                Some(target) => target,
+                None => match stale.pop() {
+                    Some(old) => old.resized(&self.device, size),
+                    None => Target::new(&self.device, size),
+                },
+            };
             let surface = self.encode_surface(&mut encoder, program, inputs, &mut target, (i == 0, i == last));
             self.targets.insert(size, target);
             surfaces.push((size, surface?));
@@ -1350,6 +1357,24 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         assert_eq!(renderer.target_count(), 2);
         draw_surfaces(&mut renderer, &program, inputs, &[b]);
         assert_eq!(renderer.target_count(), 1, "the target of a size no frame asks for is dropped");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_run_of_size_changes_keeps_one_target_and_draws_each_size() {
+        let mut renderer = Renderer::new().unwrap();
+        let program = renderer.compile(&plan(CODE)).unwrap();
+        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let mut worst = std::time::Duration::ZERO;
+        for width in 300..360 {
+            let size = Size::new(width, 200);
+            let started = std::time::Instant::now();
+            let surfaces = draw_surfaces(&mut renderer, &program, inputs, &[size]);
+            worst = worst.max(started.elapsed());
+            assert_eq!(surfaces[0].0, size);
+            assert_eq!(renderer.target_count(), 1);
+        }
+        eprintln!("worst of 60 resized frames: {worst:?}");
     }
 
     #[test]

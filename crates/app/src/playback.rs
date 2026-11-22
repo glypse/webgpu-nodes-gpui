@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Task, Window};
+use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Window};
 use shader_graph::assets::{AssetKind, asset_hash};
 use shader_graph::codegen::{RenderPlan, ResourceDecl};
 use shader_graph::graph::MAX_CANVAS_SIZE;
@@ -15,9 +15,6 @@ use runtime::{
 
 /// Seconds' worth of samples before the display's refresh rate is judged.
 const REFRESH_SAMPLES: usize = 20;
-/// How long a preview area's size must hold still before frames are drawn at it, so that
-/// dragging a divider doesn't allocate a render for every size on the way.
-pub(crate) const SETTLE: Duration = Duration::from_millis(150);
 /// How often the preview's frame timing is logged at debug level.
 const STATS_PERIOD: Duration = Duration::from_secs(5);
 pub const DEFAULT_RESOLUTION: Size = Size::new(512, 512);
@@ -68,13 +65,6 @@ impl Failure {
     }
 }
 
-/// A preview area's size in device pixels: the latest reported, and the one frames are drawn at.
-#[derive(Clone, Copy)]
-struct Pane {
-    reported: Size,
-    settled: Size,
-}
-
 /// A drawn frame, as the window shows it.
 #[derive(Clone)]
 pub enum Shown {
@@ -104,10 +94,8 @@ pub struct Playback {
     /// The canvas size from the project, which frames render at unless following a preview area.
     pub resolution: Size,
     follow: bool,
-    /// Each preview area's size, by its entity.
-    panes: HashMap<EntityId, Pane>,
-    /// Applies the sizes the areas have reported once they hold still.
-    settling: Option<Task<()>>,
+    /// Each preview area's size in device pixels, by its entity.
+    panes: HashMap<EntityId, Size>,
     /// The preview area whose size exports and the canvas readouts use: the one last used, else the first laid out.
     followed: Option<EntityId>,
     /// The latest frame drawn at each size, as the window shows it.
@@ -151,7 +139,6 @@ impl Playback {
             resolution: DEFAULT_RESOLUTION,
             follow: false,
             panes: HashMap::new(),
-            settling: None,
             followed: None,
             frames: HashMap::new(),
             #[cfg(target_os = "macos")]
@@ -343,7 +330,6 @@ impl Playback {
         let before = self.render_sizes();
         self.follow = follow;
         self.resolution = resolution;
-        self.settle_now();
         if self.render_sizes() != before {
             self.player.invalidate();
         }
@@ -356,13 +342,13 @@ impl Playback {
 
     /// The size frames render at for exports and the canvas readouts: the followed preview area's, while following it.
     pub fn render_size(&self) -> Size {
-        let pane = self.followed.and_then(|area| self.panes.get(&area)).map(|p| p.settled);
+        let pane = self.followed.and_then(|area| self.panes.get(&area)).copied();
         canvas_size(self.follow, pane, self.resolution)
     }
 
     /// The size frames render at for a preview area: its own, while following.
     pub fn size_of(&self, area: EntityId) -> Size {
-        canvas_size(self.follow, self.panes.get(&area).map(|p| p.settled), self.resolution)
+        canvas_size(self.follow, self.panes.get(&area).copied(), self.resolution)
     }
 
     /// The distinct sizes each frame is drawn at.
@@ -371,7 +357,7 @@ impl Playback {
             return vec![self.render_size()];
         }
         let mut sizes: Vec<Size> = Vec::new();
-        for size in self.followed.iter().filter_map(|a| self.panes.get(a)).chain(self.panes.values()).map(|p| p.settled) {
+        for size in self.followed.iter().filter_map(|a| self.panes.get(a)).chain(self.panes.values()).copied() {
             if !sizes.contains(&size) {
                 sizes.push(size);
             }
@@ -388,49 +374,14 @@ impl Playback {
         cx: &mut Context<Self>,
     ) {
         let before = self.render_sizes();
-        match self.panes.get_mut(&area) {
-            None => {
-                self.panes.insert(area, Pane { reported: size, settled: size });
-                self.followed.get_or_insert(area);
-            }
-            Some(pane) if pane.reported == size => return,
-            Some(pane) => {
-                pane.reported = size;
-                if !self.follow {
-                    pane.settled = size;
-                } else if pane.settled != size {
-                    self.settle_later(window, cx);
-                }
-            }
+        if self.panes.insert(area, size) == Some(size) {
+            return;
         }
+        self.followed.get_or_insert(area);
         if self.follow && self.render_sizes() != before {
             self.player.invalidate();
             self.changed(window, cx);
         }
-    }
-
-    /// Takes every area's reported size as the one frames are drawn at.
-    fn settle_now(&mut self) -> bool {
-        self.settling = None;
-        let mut moved = false;
-        for pane in self.panes.values_mut().filter(|p| p.settled != p.reported) {
-            pane.settled = pane.reported;
-            moved = true;
-        }
-        moved
-    }
-
-    fn settle_later(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settling = Some(cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor().timer(SETTLE).await;
-            this.update_in(cx, |p, window, cx| {
-                if p.settle_now() && p.follow {
-                    p.player.invalidate();
-                    p.changed(window, cx);
-                }
-            })
-            .ok();
-        }));
     }
 
     /// Makes `area` the one the canvas readouts follow: the one last used.
