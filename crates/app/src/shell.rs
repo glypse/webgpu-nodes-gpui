@@ -171,7 +171,7 @@ pub enum Start {
     Launch(Option<PathBuf>),
     Blank,
     /// A project already read, which the window takes over.
-    Loaded(PathBuf, Loaded),
+    Loaded(PathBuf, Box<Loaded>),
 }
 
 impl Shell {
@@ -203,7 +203,7 @@ impl Shell {
             Start::Blank => None,
             Start::Loaded(path, loaded) => {
                 project::remember(Some(&path));
-                Some((path, loaded))
+                Some((path, *loaded))
             }
         };
         if let Some((last, Loaded { project: loaded, files })) = opening {
@@ -587,7 +587,7 @@ impl Shell {
             return;
         }
         match project::read(&path) {
-            Ok(loaded) => self.open_window(Start::Loaded(path, loaded), window, cx),
+            Ok(loaded) => self.open_window(Start::Loaded(path, Box::new(loaded)), window, cx),
             Err(e) => {
                 let message = format!("Couldn't open {}", project::file_name(&path));
                 Self::report(window, &message, &e, cx);
