@@ -1,11 +1,15 @@
-//! Renders a small graph on the real GPU and encodes it: the file's container
-//! is read back for its frame count and size.
+//! Renders a small graph on the real GPU and encodes it, then reads each file
+//! back with FFmpeg: frame count, size, codec, pixel format and colour tags.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use export::{Export, ExportError, Format, Quality, Scene, Settings};
+use export::{Codec, Container, Depth, DnxhrProfile, Export, ExportError, ProResProfile, Scene, Settings};
+use ffmpeg_next as ffmpeg;
+use ffmpeg::codec::Id;
+use ffmpeg::format::Pixel;
+use ffmpeg::util::color;
 use runtime::Size;
 use shader_graph::graph::{Connection, FRAG_OUTPUT, GraphModel, Point};
 use shader_graph::types::{InputValue, WgslType};
@@ -54,43 +58,175 @@ fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name)
 }
 
-fn settings(duration: f64, fps: f64, start: f64) -> Settings {
+fn settings(container: Container, codec: Codec, alpha: bool, duration: f64, fps: f64, start: f64) -> Settings {
     Settings {
-        format: Format::Mp4,
-        quality: Quality::Medium,
+        container,
+        codec,
+        alpha,
         start,
         duration,
         fps,
     }
 }
 
-#[test]
-fn a_range_is_encoded_at_the_even_size_with_its_frame_count() {
-    let path = output_path("range.mp4");
-    let _ = std::fs::remove_file(&path);
-    // 33 by 17 is odd on both sides, so the video is 32 by 16.
-    let export = Export::start(scene(Size::new(33, 17)), settings(1.0, 30.0, 0.5), path.clone())
-        .expect("starts");
-    let written = export.wait().expect("encodes");
-    assert_eq!(written, path);
+/// What the file's first video stream and its frames say once decoded.
+#[derive(Debug)]
+struct Readback {
+    codec: Id,
+    width: u32,
+    height: u32,
+    pixel: Pixel,
+    frames: usize,
+    primaries: color::Primaries,
+    transfer: color::TransferCharacteristic,
+    space: color::Space,
+    range: color::Range,
+}
 
-    let bytes = std::fs::read(&path).expect("the file exists");
-    let mp4 = re_mp4::Mp4::read_bytes(&bytes).expect("an MP4 file");
-    let track = mp4
-        .tracks()
-        .values()
-        .find(|track| track.width != 0)
-        .expect("a video track");
-    assert_eq!((track.width, track.height), (32, 16));
-    assert_eq!(track.samples.len(), 30, "one sample per frame of the range");
+fn read_back(path: &PathBuf, name: &str) -> Readback {
+    ffmpeg::init().expect("FFmpeg starts");
+    let mut input = ffmpeg::format::input(path).expect("the file opens");
+    let stream = input.streams().best(ffmpeg::media::Type::Video).expect("a video stream");
+    let index = stream.index();
+    let mut decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+        .unwrap_or_else(|error| panic!("{name}: {error}"))
+        .decoder()
+        .video()
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
+    let codec = decoder.id();
+    let primaries = decoder.color_primaries();
+    let transfer = decoder.color_transfer_characteristic();
+    let space = decoder.color_space();
+    let range = decoder.color_range();
+
+    let mut frames = 0;
+    let mut first = None;
+    let mut frame = ffmpeg::util::frame::Video::empty();
+    let mut count = |frame: &ffmpeg::util::frame::Video| {
+        frames += 1;
+        first.get_or_insert((frame.width(), frame.height(), frame.format()));
+    };
+    for (packet_stream, packet) in input.packets() {
+        if packet_stream.index() != index {
+            continue;
+        }
+        decoder.send_packet(&packet).expect("a packet decodes");
+        while decoder.receive_frame(&mut frame).is_ok() {
+            count(&frame);
+        }
+    }
+    decoder.send_eof().expect("the decoder flushes");
+    while decoder.receive_frame(&mut frame).is_ok() {
+        count(&frame);
+    }
+    let (width, height, pixel) = first.expect("at least one frame");
+    Readback {
+        codec,
+        width,
+        height,
+        pixel,
+        frames,
+        primaries,
+        transfer,
+        space,
+        range,
+    }
+}
+
+fn is_yuv(pixel: Pixel) -> bool {
+    !matches!(pixel, Pixel::BGRZ | Pixel::BGRA | Pixel::ARGB | Pixel::RGB24 | Pixel::GBRP16LE | Pixel::GBRAP16LE)
+}
+
+fn encode(name: &str, settings: Settings, size: Size) -> Readback {
+    let path = output_path(name);
+    let _ = std::fs::remove_file(&path);
+    let export = Export::start(scene(size), settings, path.clone()).expect("starts");
+    let written = export.wait().unwrap_or_else(|error| panic!("{name}: {error}"));
+    assert_eq!(written, path);
+    read_back(&path, name)
+}
+
+#[test]
+fn every_codec_in_every_container_writes_its_frames_at_the_even_size() {
+    // The canvas is 33 by 17, odd on both sides, so most codecs get 32 by 16. DNxHR needs
+    // frames of at least 256 by 120, so its cases use a canvas of 257 by 121. A 1 second range at 30 fps is 30 frames.
+    let small = Size::new(33, 17);
+    let large = Size::new(257, 121);
+    let cases = [
+        (Codec::ProRes(ProResProfile::Proxy), false, Pixel::YUV422P10LE, Id::PRORES),
+        (Codec::ProRes(ProResProfile::Standard), false, Pixel::YUV422P10LE, Id::PRORES),
+        (Codec::ProRes(ProResProfile::Hq), false, Pixel::YUV422P10LE, Id::PRORES),
+        // FFmpeg's prores_ks stores the 4444 profiles at 12 bits whatever the input depth.
+        (Codec::ProRes(ProResProfile::P4444), false, Pixel::YUV444P12LE, Id::PRORES),
+        (Codec::ProRes(ProResProfile::P4444Xq), true, Pixel::YUVA444P12LE, Id::PRORES),
+        (Codec::Dnxhr(DnxhrProfile::Lb), false, Pixel::YUV422P, Id::DNXHD),
+        (Codec::Dnxhr(DnxhrProfile::Hqx), false, Pixel::YUV422P10LE, Id::DNXHD),
+        (Codec::Dnxhr(DnxhrProfile::P444), false, Pixel::YUV444P10LE, Id::DNXHD),
+        (Codec::Ffv1(Depth::Bits8), false, Pixel::BGRZ, Id::FFV1),
+        (Codec::Ffv1(Depth::Bits8), true, Pixel::BGRA, Id::FFV1),
+        (Codec::Ffv1(Depth::Bits16), false, Pixel::GBRP16LE, Id::FFV1),
+        (Codec::QuickTimeAnimation, false, Pixel::RGB24, Id::QTRLE),
+        (Codec::QuickTimeAnimation, true, Pixel::ARGB, Id::QTRLE),
+    ];
+    for container in Container::ALL {
+        for (codec, alpha, pixel, id) in cases {
+            if !codec.supports_container(container) {
+                continue;
+            }
+            let canvas = if matches!(codec, Codec::Dnxhr(_)) { large } else { small };
+            let name = format!("{codec:?}-{alpha}-{container:?}.{}", container.extension());
+            let readback = encode(&name, settings(container, codec, alpha, 1.0, 30.0, 0.5), canvas);
+            assert_eq!(readback.frames, 30, "{name}: one frame per frame of the range");
+            let expected = if canvas == large { (256, 120) } else { (32, 16) };
+            assert_eq!((readback.width, readback.height), expected, "{name}");
+            assert_eq!(readback.pixel, pixel, "{name}");
+            assert_eq!(readback.codec, id, "{name}");
+            assert_eq!(readback.primaries, color::Primaries::BT709, "{name}: sRGB is tagged BT.709");
+            assert_eq!(readback.transfer, color::TransferCharacteristic::IEC61966_2_1, "{name}: sRGB transfer");
+            if is_yuv(pixel) {
+                assert_eq!(readback.space, color::Space::BT709, "{name}: YUV matrix");
+                assert_eq!(readback.range, color::Range::MPEG, "{name}: limited range");
+            } else {
+                assert_eq!(readback.space, color::Space::RGB, "{name}: RGB has no matrix");
+            }
+        }
+    }
+}
+
+#[test]
+fn quicktime_animation_is_refused_in_matroska() {
+    let path = output_path("qtrle.mkv");
+    let refused = Export::start(
+        scene(Size::new(32, 16)),
+        settings(Container::Matroska, Codec::QuickTimeAnimation, false, 1.0, 30.0, 0.0),
+        path.clone(),
+    );
+    assert!(matches!(refused, Err(ExportError::Invalid(_))));
+    assert!(!path.exists());
+}
+
+#[test]
+fn dnxhr_refuses_frames_below_its_minimum_size() {
+    let path = output_path("too-small.mov");
+    let refused = Export::start(
+        scene(Size::new(32, 16)),
+        settings(Container::Mov, Codec::Dnxhr(DnxhrProfile::Sq), false, 1.0, 30.0, 0.0),
+        path.clone(),
+    );
+    assert!(matches!(refused, Err(ExportError::Invalid(_))));
+    assert!(!path.exists());
 }
 
 #[test]
 fn progress_counts_the_frames_and_cancel_removes_the_file() {
-    let path = output_path("cancelled.mp4");
+    let path = output_path("cancelled.mov");
     let _ = std::fs::remove_file(&path);
-    let export = Export::start(scene(Size::new(32, 16)), settings(60.0, 60.0, 0.0), path.clone())
-        .expect("starts");
+    let export = Export::start(
+        scene(Size::new(32, 16)),
+        settings(Container::Mov, Codec::DEFAULT, false, 60.0, 60.0, 0.0),
+        path.clone(),
+    )
+    .expect("starts");
 
     let started = Instant::now();
     while export.progress().done == 0 {

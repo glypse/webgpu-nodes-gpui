@@ -8,7 +8,7 @@ use std::time::Duration;
 use runtime::{FrameInputs, MediaSource, MediaStatus, PixelFormat, RenderOptions, Renderer, Size};
 use shader_graph::codegen::Program;
 
-use crate::encode::{AvFoundationEncoder, VideoEncoder};
+use crate::encode::Encoder;
 use crate::{ExportError, Scene, Settings, Shared, first_frame, frame_count, video_size};
 
 /// Frames simulated between checks for cancellation.
@@ -49,16 +49,10 @@ fn encode(scene: Scene, settings: Settings, path: &Path, shared: &Shared) -> Res
     renderer.sync_media(&scene.media);
     wait_for_media(&mut renderer, &scene.media, shared)?;
 
-    let mut encoder = AvFoundationEncoder::open(path, settings.format, settings.quality, size, fps)?;
+    let mut encoder = Encoder::open(path, &settings, size)?;
     let range = Range { size, first, total, fps };
-    let frames = draw_frames(&mut renderer, &compiled, simulates(&scene.program), range, &mut encoder, shared);
-    match frames {
-        Ok(()) => encoder.finish(),
-        Err(error) => {
-            encoder.abandon();
-            Err(error)
-        }
-    }
+    draw_frames(&mut renderer, &compiled, simulates(&scene.program), range, &mut encoder, shared)?;
+    encoder.finish()
 }
 
 /// The frames to export: `total` of them, the first at index `first`, at `fps`.
@@ -79,7 +73,7 @@ fn draw_frames(
     compiled: &runtime::Program,
     simulates: bool,
     range: Range,
-    encoder: &mut AvFoundationEncoder,
+    encoder: &mut Encoder,
     shared: &Shared,
 ) -> Result<(), ExportError> {
     let Range { size, first, total, fps } = range;

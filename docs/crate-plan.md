@@ -54,12 +54,11 @@ Recommendation: **use for a future feature** (auto-layout), not now. The `elk-la
 
 ## Media encode and decode
 
-The original exports video via mediabunny (WebCodecs, MP4/WebM) and imports via `runtime/src/media.ts` (630 lines). The Rust side has `image` only (`crates/runtime/src/media.rs` 106 lines, `crates/shader-graph/src/nodes/media.rs` 97). No video export yet.
+The original exports video via mediabunny (WebCodecs, MP4/WebM) and imports via `runtime/src/media.ts` (630 lines). The Rust side uses FFmpeg (`ffmpeg-next`, built statically) as the single media backend: video import decodes in `crates/runtime/src/media/ffmpeg_decoder.rs`, and export encodes in `crates/export` (ProRes, DNxHR, FFV1 and QuickTime Animation into MOV or MKV; see `docs/video-export.md`). `image` covers still images.
 
 | Option | Crate(s) and version | Downloads | License | Platform | Fit |
 |---|---|---|---|---|---|
-| AVFoundation via objc2 | `objc2-av-foundation` 0.3.2, `objc2-video-toolbox` 0.3.2, `objc2-core-media` 0.3.2 | 3.0M / 350k / 3.5M | MIT | macOS only | Hardware H.264/HEVC, AVAssetWriter for MP4/MOV, AVAssetReader for import. Already on objc2 in `runtime`. **Best for macOS-first.** |
-| FFmpeg bindings | `ffmpeg-next` 9.1.0 (2026-11-11); `video-rs` 0.13.0 | 9.2M / 517k | MIT (FFmpeg is LGPL/GPL, build-dependent) | system FFmpeg libs | Broadest codecs and containers. Needs a system dependency. **Best cross-platform fallback.** |
+| FFmpeg bindings (chosen) | `ffmpeg-next` 9.1.0 (2026-11-11) | 9.2M | MIT (FFmpeg is LGPL/GPL, build-dependent) | built from source (`build` feature), cross-platform | The one media backend for import and export. Export is limited to FFmpeg's built-in encoders. |
 | `openh264` | 0.9.10 (2026-11-10), `openh264-sys2` | 2.4M | BSD-2-Clause | builds Cisco's C source (`source` feature) | H.264 encode and decode, no system dependency. Needs the H.264 licence position checked for distribution. |
 | `muxide` | 0.5.0 (2026-10-19) | 44k | MIT OR Apache-2.0 | pure Rust | MP4 muxer for already-encoded H.264. Pairs with openh264. Young. |
 | `mp4-atom` | 0.17.1 (2026-11-04) | 742k | MIT OR Apache-2.0 | pure Rust | Lower-level MP4 box reader/writer (kixelated). Alternative muxer. |
@@ -70,7 +69,7 @@ The original exports video via mediabunny (WebCodecs, MP4/WebM) and imports via 
 | `gif` / `gifski` | 0.14.2 / 1.34.0 | 185M / 707k | MIT OR Apache-2.0 / AGPL-3.0-or-later | pure Rust | GIF encode via `gifski` (best quality, AGPL matches the project). `gif` for plain encode. |
 | `image` | 0.25.10 (already used) | 261M | MIT OR Apache-2.0 | pure Rust | Keep for PNG/JPEG/EXR decode. |
 
-Recommendation: **future feature**. Add a `VideoEncoder` trait in `runtime`. Implement it with AVFoundation on macOS first, with `ffmpeg-next` behind a cargo feature as the cross-platform path. Use `gifski` for GIF export. Do not add `mp4` (stale). Risks: AVFoundation is macOS-only; FFmpeg adds a system dependency and LGPL/GPL build choices; H.264 patent and licence terms for distributed binaries need a decision. Effort: medium to large per encoder.
+Decision: FFmpeg is the only media backend. Export offers only FFmpeg's built-in encoders, so the rows for `openh264`, `rav1e`, `muxide`, `mp4-atom` and `re_mp4` are not used. Use `gifski` for GIF export. Do not add `mp4` (stale). Risks: FFmpeg's build choices (LGPL/GPL) and the built-in encoders' licences need a check before distribution. The PNG encoder is unavailable in this static build because zlib is off in `ffmpeg-sys-next`.
 
 ## Colour maths
 
@@ -164,9 +163,9 @@ Other dependencies match the original's: `sha2` and `uuid` are used here. `valib
 10. **Future features, each its own task:**
     - WGSL code view via `gpui-component` Editor and a WGSL grammar.
     - Auto-layout via `elk-layout`, behind a trait.
-    - Video export: `VideoEncoder` trait, AVFoundation first, `ffmpeg-next` behind a feature.
+    - Video export: FFmpeg built-in encoders (done in `crates/export`); PNG needs zlib in the FFmpeg build.
     - GIF export via `gifski`.
-    - Video import: AVFoundation (macOS) or `ffmpeg-next`.
+    - Video import: `ffmpeg-next` (in place; see `runtime/src/media/ffmpeg_decoder.rs`).
     - Fuzzy search kernel swap (optional, last).
 
 ## Risks
@@ -175,5 +174,4 @@ Other dependencies match the original's: `sha2` and `uuid` are used here. `valib
 - gpui-component's widgets have their own event models. Parity tests are needed for every replacement.
 - `elk-layout` has low download counts and a dual licence (EPL-2.0 or GPL-3.0-or-later). Verify licence compatibility with AGPL-3.0-or-later.
 - `gifski` is AGPL-3.0-or-later: compatible with this project.
-- H.264 via `openh264` or FFmpeg: codec licence and patent terms for distributed binaries.
-- AVFoundation is macOS-only: keep a cross-platform path before committing.
+- Export has no H.264 or H.265: FFmpeg's built-in encoders cover the codecs offered, and no external encoder crate is used.

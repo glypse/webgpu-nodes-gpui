@@ -3,7 +3,7 @@ name = "export"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Renders a shader graph frame by frame at a fixed timestep and encodes it as an MP4"
+description = "Renders a shader graph frame by frame at a fixed timestep and encodes it as a MOV or MKV with FFmpeg"
 
 [dependencies]
 runtime = { path = "../runtime" }
@@ -11,15 +11,4 @@ shader-graph = { path = "../shader-graph" }
 log.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-block2 = "=0.6.2"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSString", "NSURL", "NSValue"] }
-objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFBase"] }
-objc2-core-media = { version = "=0.3.2", default-features = false, features = ["std", "CMTime"] }
-objc2-core-video = { version = "=0.3.2", default-features = false, features = ["CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
-objc2-av-foundation = { version = "=0.3.2", default-features = false, features = ["std", "block2", "objc2-core-media", "objc2-core-video", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings"] }
-
-[dev-dependencies]
-re_mp4 = "=0.5.1"
+ffmpeg-next = { version = "=9.1.0", default-features = false, features = ["codec", "format", "software-scaling", "build"] }

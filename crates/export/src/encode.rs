@@ -1,341 +1,220 @@
-//! Video encoders. The export drives one through `VideoEncoder`, so another
-//! encoder can be swapped in without touching the frame loop.
+//! Encodes BGRA frames with FFmpeg's built-in encoders into a MOV or Matroska file.
 
 use std::path::Path;
+
+use ffmpeg_next as ffmpeg;
+use ffmpeg::codec::{self, Id};
+use ffmpeg::format::Pixel;
+use ffmpeg::software::scaling::{Context as Scaler, Flags};
+use ffmpeg::util::color;
+use ffmpeg::util::frame::Video as Frame;
 use runtime::Size;
 
-use crate::{ExportError, Format, Quality};
+use crate::{Codec, Depth, DnxhrProfile, ExportError, Settings};
 
-/// Takes frames of BGRA pixels, top row first, at the size it was opened with.
-pub trait VideoEncoder: Sized {
-    fn open(path: &Path, format: Format, quality: Quality, size: Size, fps: f64) -> Result<Self, ExportError>;
-
-    /// Frames are appended in order, each one frame apart.
-    fn push(&mut self, bgra: &[u8]) -> Result<(), ExportError>;
-
-    /// Writes the file out completely.
-    fn finish(self) -> Result<(), ExportError>;
-
-    /// Stops without finishing the file; the caller removes it.
-    fn abandon(self);
+/// The pixel format a codec stores, and whether it is YUV (tagged BT.709) or RGB.
+#[derive(Clone, Copy)]
+struct Format {
+    pixel: Pixel,
+    yuv: bool,
 }
 
-/// The average bitrate in bits per second for `quality` at `size`: mediabunny's
-/// H.264 estimate, which the original's export uses. It scales with the frame's
-/// pixels and not with its frame rate.
-pub fn average_bitrate(quality: Quality, size: Size) -> i64 {
-    const REFERENCE_PIXELS: f64 = 1920.0 * 1080.0;
-    const REFERENCE_BITRATE: f64 = 3_000_000.0;
-    let pixels = f64::from(size.width) * f64::from(size.height);
-    let scaled = REFERENCE_BITRATE * (pixels / REFERENCE_PIXELS).powf(0.95);
-    let bitrate = scaled * quality_factor(quality);
-    ((bitrate / 1000.0).ceil() * 1000.0) as i64
-}
-
-/// The multiplier of mediabunny's `Quality` levels (0.5, 0.75 and 1 on its 0-1 scale).
-fn quality_factor(quality: Quality) -> f64 {
-    let level: f64 = match quality {
-        Quality::Medium => 0.5,
-        Quality::High => 0.75,
-        Quality::VeryHigh => 1.0,
+fn format(settings: &Settings) -> Format {
+    let alpha = settings.alpha;
+    let (pixel, yuv) = match settings.codec {
+        Codec::ProRes(profile) if profile.is_4444() => {
+            (if alpha { Pixel::YUVA444P10LE } else { Pixel::YUV444P10LE }, true)
+        }
+        Codec::ProRes(_) => (Pixel::YUV422P10LE, true),
+        Codec::Dnxhr(DnxhrProfile::Hqx) => (Pixel::YUV422P10LE, true),
+        Codec::Dnxhr(DnxhrProfile::P444) => (Pixel::YUV444P10LE, true),
+        Codec::Dnxhr(_) => (Pixel::YUV422P, true),
+        Codec::Ffv1(depth) => match (depth, alpha) {
+            // FFV1 in FFmpeg takes 8-bit RGB only packed.
+            (Depth::Bits8, false) => (Pixel::BGRZ, false),
+            (Depth::Bits8, true) => (Pixel::BGRA, false),
+            (Depth::Bits16, false) => (Pixel::GBRP16LE, false),
+            (Depth::Bits16, true) => (Pixel::GBRAP16LE, false),
+        },
+        Codec::QuickTimeAnimation => (if alpha { Pixel::ARGB } else { Pixel::RGB24 }, false),
     };
-    0.3 * (2.5538 * level).exp()
+    Format { pixel, yuv }
 }
 
-/// The frame timestamps' timescale: milliframes, so fractional rates stay exact.
-pub fn timescale(fps: f64) -> i32 {
-    (fps * 1000.0).round() as i32
+fn encoder_for(codec: Codec) -> Option<ffmpeg::Codec> {
+    match codec {
+        Codec::ProRes(_) => ffmpeg::encoder::find_by_name("prores_ks"),
+        Codec::Dnxhr(_) => ffmpeg::encoder::find(Id::DNXHD),
+        Codec::Ffv1(_) => ffmpeg::encoder::find(Id::FFV1),
+        Codec::QuickTimeAnimation => ffmpeg::encoder::find(Id::QTRLE),
+    }
 }
 
-#[cfg(target_os = "macos")]
-pub use av::AvFoundationEncoder;
-
-#[cfg(target_os = "macos")]
-mod av {
-    use std::ptr::{self, NonNull};
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    use block2::RcBlock;
-    use objc2::AnyThread;
-    use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2_av_foundation::{
-        AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVAssetWriterStatus,
-        AVFileTypeMPEG4, AVMediaTypeVideo, AVVideoAverageBitRateKey, AVVideoCodecKey,
-        AVVideoCodecTypeH264, AVVideoColorPrimariesKey, AVVideoColorPrimaries_ITU_R_709_2,
-        AVVideoColorPropertiesKey, AVVideoCompressionPropertiesKey, AVVideoHeightKey,
-        AVVideoMaxKeyFrameIntervalKey, AVVideoTransferFunctionKey,
-        AVVideoTransferFunction_IEC_sRGB, AVVideoWidthKey, AVVideoYCbCrMatrixKey,
-        AVVideoYCbCrMatrix_ITU_R_709_2,
-    };
-    use objc2_core_foundation::CFRetained;
-    use objc2_core_media::CMTime;
-    use objc2_core_video::{
-        CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
-        CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-        kCVPixelFormatType_32BGRA, kCVReturnSuccess,
-    };
-    use objc2_foundation::{NSDictionary, NSError, NSNumber, NSString, NSURL};
-
-    use super::{VideoEncoder, average_bitrate, timescale};
-    use std::path::Path;
-
-    use runtime::Size;
-
-    use crate::{ExportError, Format, Quality};
-
-    /// H.264 in an MP4, through AVAssetWriter: hardware encoding on macOS.
-    pub struct AvFoundationEncoder {
-        writer: Retained<AVAssetWriter>,
-        input: Retained<AVAssetWriterInput>,
-        adaptor: Retained<AVAssetWriterInputPixelBufferAdaptor>,
-        size: Size,
-        timescale: i32,
-        next_frame: i64,
+fn encoder_options(codec: Codec) -> ffmpeg::Dictionary<'static> {
+    let mut options = ffmpeg::Dictionary::new();
+    match codec {
+        Codec::ProRes(profile) => options.set("profile", profile.ffmpeg_name()),
+        Codec::Dnxhr(profile) => options.set("profile", profile.ffmpeg_name()),
+        _ => {}
     }
+    options
+}
 
-    fn write_error(message: impl Into<String>) -> ExportError {
-        ExportError::Encode(message.into())
-    }
+fn ff(error: ffmpeg::Error) -> ExportError {
+    ExportError::Encode(error.to_string())
+}
 
-    fn ns_error(error: &NSError) -> String {
-        error.localizedDescription().to_string()
-    }
+/// Writes frames of BGRA pixels, top row first, one frame apart.
+pub struct Encoder {
+    output: ffmpeg::format::context::Output,
+    encoder: ffmpeg::encoder::Video,
+    stream: usize,
+    encoder_time_base: ffmpeg::Rational,
+    stream_time_base: ffmpeg::Rational,
+    scaler: Scaler,
+    format: Format,
+    size: Size,
+    next_pts: i64,
+}
 
-    fn key(name: Option<&'static NSString>, what: &str) -> Result<&'static NSString, ExportError> {
-        name.ok_or_else(|| write_error(format!("AVFoundation has no {what} key")))
-    }
+impl Encoder {
+    /// Opens `path` for frames of `size` (which must have even sides) at `settings.fps`.
+    pub fn open(path: &Path, settings: &Settings, size: Size) -> Result<Self, ExportError> {
+        ffmpeg::init().map_err(ff)?;
+        let codec = encoder_for(settings.codec)
+            .ok_or_else(|| ExportError::Encode(format!("FFmpeg has no {} encoder", settings.codec.label())))?;
+        let format = format(settings);
+        let mut output = ffmpeg::format::output_as(path, settings.container.muxer()).map_err(ff)?;
+        let global_header = output.format().flags().contains(ffmpeg::format::flag::Flags::GLOBAL_HEADER);
 
-    impl VideoEncoder for AvFoundationEncoder {
-        fn open(path: &Path, format: Format, quality: Quality, size: Size, fps: f64) -> Result<Self, ExportError> {
-            if format != Format::Mp4 {
-                return Err(ExportError::Unsupported(format!("{} export isn't available yet", format.label())));
-            }
-            let size = crate::video_size(size);
-            let path_text = NSString::from_str(&path.to_string_lossy());
-            let url = NSURL::fileURLWithPath(&path_text);
-            let file_type = unsafe { AVFileTypeMPEG4 }
-                .ok_or_else(|| write_error("AVFoundation has no MP4 file type"))?;
-            let writer = unsafe {
-                AVAssetWriter::initWithURL_fileType_error(AVAssetWriter::alloc(), &url, file_type)
-            }
-            .map_err(|error| write_error(ns_error(&error)))?;
+        let index = {
+            let stream = output.add_stream(codec).map_err(ff)?;
+            stream.index()
+        };
+        let mut context = codec::context::Context::new_with_codec(codec).encoder().video().map_err(ff)?;
+        context.set_width(size.width);
+        context.set_height(size.height);
+        context.set_format(format.pixel);
+        // Frame n is at n / fps: the time base is 1 / fps, with fractional rates kept exact in thousandths.
+        let frame_rate = ffmpeg::Rational::new((settings.fps * 1000.0).round() as i32, 1000);
+        context.set_frame_rate(Some(frame_rate));
+        context.set_time_base(ffmpeg::Rational::new(1000, (settings.fps * 1000.0).round() as i32));
+        if global_header {
+            context.set_flags(codec::Flags::GLOBAL_HEADER);
+        }
+        tag_colour(&mut context, format.yuv);
 
-            let bitrate = average_bitrate(quality, size);
-            let compression = NSDictionary::<NSString, AnyObject>::from_slices(
-                &[
-                    key(unsafe { AVVideoAverageBitRateKey }, "average bitrate")?,
-                    key(unsafe { AVVideoMaxKeyFrameIntervalKey }, "keyframe interval")?,
-                ],
-                &[
-                    &*NSNumber::new_i64(bitrate) as &AnyObject,
-                    &*NSNumber::new_i64(fps.round().max(1.0) as i64) as &AnyObject,
-                ],
-            );
-            // The frames are sRGB: BT.709 primaries with the sRGB transfer, as the original tags them.
-            let colour = NSDictionary::<NSString, AnyObject>::from_slices(
-                &[
-                    key(unsafe { AVVideoColorPrimariesKey }, "colour primaries")?,
-                    key(unsafe { AVVideoTransferFunctionKey }, "transfer function")?,
-                    key(unsafe { AVVideoYCbCrMatrixKey }, "YCbCr matrix")?,
-                ],
-                &[
-                    key(unsafe { AVVideoColorPrimaries_ITU_R_709_2 }, "BT.709 primaries")? as &AnyObject,
-                    key(unsafe { AVVideoTransferFunction_IEC_sRGB }, "sRGB transfer")? as &AnyObject,
-                    key(unsafe { AVVideoYCbCrMatrix_ITU_R_709_2 }, "BT.709 matrix")? as &AnyObject,
-                ],
-            );
-            let codec = unsafe { AVVideoCodecTypeH264 }
-                .ok_or_else(|| write_error("AVFoundation has no H.264 codec"))?;
-            let settings = NSDictionary::<NSString, AnyObject>::from_slices(
-                &[
-                    key(unsafe { AVVideoCodecKey }, "codec")?,
-                    key(unsafe { AVVideoWidthKey }, "width")?,
-                    key(unsafe { AVVideoHeightKey }, "height")?,
-                    key(unsafe { AVVideoCompressionPropertiesKey }, "compression")?,
-                    key(unsafe { AVVideoColorPropertiesKey }, "colour properties")?,
-                ],
-                &[
-                    codec as &AnyObject,
-                    &*NSNumber::new_i64(i64::from(size.width)) as &AnyObject,
-                    &*NSNumber::new_i64(i64::from(size.height)) as &AnyObject,
-                    &*compression as &AnyObject,
-                    &*colour as &AnyObject,
-                ],
-            );
-            let media = unsafe { AVMediaTypeVideo }.ok_or_else(|| write_error("AVFoundation has no video type"))?;
-            let input = unsafe { AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(media, Some(&settings)) };
-            unsafe { input.setExpectsMediaDataInRealTime(false) };
-            let adaptor = unsafe {
-                AVAssetWriterInputPixelBufferAdaptor::assetWriterInputPixelBufferAdaptorWithAssetWriterInput_sourcePixelBufferAttributes(
-                    &input, None,
+        let encoder = context.open_as_with(codec, encoder_options(settings.codec)).map_err(ff)?;
+        if let Some(mut stream) = output.stream_mut(index) {
+            stream.set_parameters(&encoder);
+        }
+        output.write_header().map_err(ff)?;
+        let stream_time_base = output
+            .stream(index)
+            .map(|stream| stream.time_base())
+            .ok_or_else(|| ExportError::Encode("the file has no video stream".into()))?;
+
+        let mut scaler = Scaler::get(
+            Pixel::BGRA,
+            size.width,
+            size.height,
+            format.pixel,
+            size.width,
+            size.height,
+            Flags::BILINEAR,
+        )
+        .map_err(ff)?;
+        if format.yuv {
+            use ffmpeg::ffi::{SWS_CS_DEFAULT, SWS_CS_ITU709, sws_getCoefficients, sws_setColorspaceDetails};
+            // SAFETY: the scaler is valid for the call, and the coefficient tables are static FFmpeg data.
+            let applied = unsafe {
+                sws_setColorspaceDetails(
+                    scaler.as_mut_ptr(),
+                    sws_getCoefficients(SWS_CS_DEFAULT),
+                    1,
+                    sws_getCoefficients(SWS_CS_ITU709),
+                    0,
+                    0,
+                    1 << 16,
+                    1 << 16,
                 )
             };
-            if !unsafe { writer.canAddInput(&input) } {
-                return Err(write_error("the writer refuses the video input"));
+            if applied < 0 {
+                return Err(ExportError::Encode("the scaler can't convert to BT.709".into()));
             }
-            unsafe { writer.addInput(&input) };
-            if !unsafe { writer.startWriting() } {
-                let detail = unsafe { writer.error() }.map(|e| ns_error(&e)).unwrap_or_default();
-                return Err(write_error(detail));
-            }
-            unsafe { writer.startSessionAtSourceTime(CMTime::new(0, 1)) };
-
-            Ok(Self {
-                writer,
-                input,
-                adaptor,
-                size,
-                timescale: timescale(fps),
-                next_frame: 0,
-            })
         }
 
-        fn push(&mut self, bgra: &[u8]) -> Result<(), ExportError> {
-            let Size { width, height } = self.size;
-            let row_bytes = width as usize * 4;
-            if bgra.len() != row_bytes * height as usize {
-                return Err(write_error("a frame's pixels don't match the export's size"));
-            }
-            self.wait_until_ready()?;
-            let buffer = new_pixel_buffer(width, height)?;
-            copy_into(&buffer, bgra, row_bytes, height as usize)?;
-            // Frame n is shown at n / fps: its value counts milliframes against the timescale.
-            let time = unsafe { CMTime::new(self.next_frame * 1000, self.timescale) };
-            let appended = unsafe { self.adaptor.appendPixelBuffer_withPresentationTime(&buffer, time) };
-            if !appended {
-                return Err(self.failure("a frame couldn't be appended"));
-            }
-            self.next_frame += 1;
-            Ok(())
-        }
-
-        fn finish(self) -> Result<(), ExportError> {
-            unsafe { self.input.markAsFinished() };
-            let (done, finished) = mpsc::channel::<()>();
-            let block = RcBlock::new(move || {
-                let _ = done.send(());
-            });
-            unsafe { self.writer.finishWritingWithCompletionHandler(&block) };
-            finished.recv().map_err(|_| write_error("the writer never finished"))?;
-            if unsafe { self.writer.status() } != AVAssetWriterStatus::Completed {
-                return Err(self.failure("the file wasn't written"));
-            }
-            Ok(())
-        }
-
-        fn abandon(self) {
-            unsafe { self.writer.cancelWriting() };
-        }
+        Ok(Self {
+            output,
+            encoder,
+            stream: index,
+            encoder_time_base: ffmpeg::Rational::new(1000, (settings.fps * 1000.0).round() as i32),
+            stream_time_base,
+            scaler,
+            format,
+            size,
+            next_pts: 0,
+        })
     }
 
-    impl AvFoundationEncoder {
-        /// Waits for the input to take another frame, failing if the writer does first.
-        fn wait_until_ready(&self) -> Result<(), ExportError> {
-            while !unsafe { self.input.isReadyForMoreMediaData() } {
-                if unsafe { self.writer.status() } == AVAssetWriterStatus::Failed {
-                    return Err(self.failure("the writer stopped"));
+    pub fn push(&mut self, bgra: &[u8]) -> Result<(), ExportError> {
+        let Size { width, height } = self.size;
+        let row_bytes = width as usize * 4;
+        if bgra.len() != row_bytes * height as usize {
+            return Err(ExportError::Encode("a frame's pixels don't match the export's size".into()));
+        }
+        let mut source = Frame::new(Pixel::BGRA, width, height);
+        let stride = source.stride(0);
+        for (line, destination) in bgra.chunks_exact(row_bytes).zip(source.data_mut(0).chunks_mut(stride)) {
+            if let Some(destination) = destination.get_mut(..row_bytes) {
+                destination.copy_from_slice(line);
+            }
+        }
+        // A new frame each time: the encoder may still hold the last one.
+        let mut converted = Frame::new(self.format.pixel, width, height);
+        self.scaler.run(&source, &mut converted).map_err(ff)?;
+        converted.set_pts(Some(self.next_pts));
+        self.next_pts += 1;
+        self.encoder.send_frame(&converted).map_err(ff)?;
+        self.receive()
+    }
+
+    /// Flushes the encoder and writes the file's trailer. A dropped encoder leaves an unfinished file.
+    pub fn finish(mut self) -> Result<(), ExportError> {
+        self.encoder.send_eof().map_err(ff)?;
+        self.receive()?;
+        self.output.write_trailer().map_err(ff)
+    }
+
+    fn receive(&mut self) -> Result<(), ExportError> {
+        let mut packet = ffmpeg::Packet::empty();
+        loop {
+            match self.encoder.receive_packet(&mut packet) {
+                Ok(()) => {
+                    packet.set_stream(self.stream);
+                    // The MOV muxer drops a final packet that has no duration.
+                    packet.set_duration(1);
+                    packet.rescale_ts(self.encoder_time_base, self.stream_time_base);
+                    packet.write_interleaved(&mut self.output).map_err(ff)?;
                 }
-                std::thread::sleep(Duration::from_millis(1));
+                Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::error::EAGAIN => return Ok(()),
+                Err(ffmpeg::Error::Eof) => return Ok(()),
+                Err(error) => return Err(ff(error)),
             }
-            Ok(())
-        }
-
-        fn failure(&self, what: &str) -> ExportError {
-            let detail = unsafe { self.writer.error() }.map(|e| ns_error(&e)).unwrap_or_default();
-            write_error(format!("{what}: {detail}"))
-        }
-    }
-
-    fn new_pixel_buffer(width: u32, height: u32) -> Result<CFRetained<CVPixelBuffer>, ExportError> {
-        let mut buffer = ptr::null_mut();
-        // SAFETY: no allocator or attributes are passed, and the output is writable.
-        let status = unsafe {
-            CVPixelBufferCreate(
-                None,
-                width as usize,
-                height as usize,
-                kCVPixelFormatType_32BGRA,
-                None,
-                NonNull::from(&mut buffer),
-            )
-        };
-        if status != kCVReturnSuccess {
-            return Err(write_error(format!("a pixel buffer wasn't created: status {status}")));
-        }
-        let buffer = NonNull::new(buffer).ok_or_else(|| write_error("a pixel buffer wasn't created"))?;
-        // SAFETY: the successful call hands over one retained reference.
-        Ok(unsafe { CFRetained::from_raw(buffer) })
-    }
-
-    /// Copies packed rows into a buffer, row by row, since the buffer may pad its rows.
-    fn copy_into(buffer: &CVPixelBuffer, bgra: &[u8], row_bytes: usize, rows: usize) -> Result<(), ExportError> {
-        // SAFETY: the buffer is locked for writing until it is unlocked below, and
-        // every row written is inside its base address and bytes-per-row.
-        unsafe {
-            if CVPixelBufferLockBaseAddress(buffer, CVPixelBufferLockFlags(0)) != kCVReturnSuccess {
-                return Err(write_error("a pixel buffer couldn't be locked"));
-            }
-            let base = CVPixelBufferGetBaseAddress(buffer).cast::<u8>();
-            let stride = CVPixelBufferGetBytesPerRow(buffer);
-            let usable = !base.is_null() && stride >= row_bytes;
-            if usable {
-                for (row, source) in bgra.chunks_exact(row_bytes).take(rows).enumerate() {
-                    std::ptr::copy_nonoverlapping(source.as_ptr(), base.add(row * stride), row_bytes);
-                }
-            }
-            CVPixelBufferUnlockBaseAddress(buffer, CVPixelBufferLockFlags(0));
-            if usable { Ok(()) } else { Err(write_error("a pixel buffer has no usable memory")) }
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bitrates_follow_mediabunny() {
-        // 1080p medium: 3 Mbit/s x 0.3 x e^(2.5538 x 0.5), rounded up to the kilobit.
-        assert_eq!(average_bitrate(Quality::Medium, Size::new(1920, 1080)), 3_227_000);
-        assert_eq!(average_bitrate(Quality::High, Size::new(1920, 1080)), 6_111_000);
-        assert_eq!(average_bitrate(Quality::VeryHigh, Size::new(1920, 1080)), 11_571_000);
+/// Frames are sRGB: BT.709 primaries with the sRGB transfer, as the original tags them. YUV uses
+/// the BT.709 matrix and limited range; RGB has no matrix and full range.
+fn tag_colour(context: &mut codec::encoder::video::Video, yuv: bool) {
+    if yuv {
+        context.set_colorspace(color::Space::BT709);
+        context.set_color_range(color::Range::MPEG);
+    } else {
+        context.set_colorspace(color::Space::RGB);
+        context.set_color_range(color::Range::JPEG);
     }
-
-    #[test]
-    fn bitrates_scale_with_pixels_not_frame_rate() {
-        let hd = average_bitrate(Quality::High, Size::new(1280, 720));
-        let full = average_bitrate(Quality::High, Size::new(1920, 1080));
-        assert!(hd < full, "{hd} >= {full}");
-        let ratio = full as f64 / hd as f64;
-        let expected = (1920.0_f64 * 1080.0 / (1280.0 * 720.0)).powf(0.95);
-        assert!((ratio - expected).abs() < 0.01, "{ratio}");
-    }
-
-    /// Finds the `colr` box in an MP4 and returns its `nclx` primaries, transfer and matrix.
-    fn colour_tags(bytes: &[u8]) -> Option<(u16, u16, u16)> {
-        let at = bytes.windows(4).position(|w| w == b"colr")? + 4;
-        if bytes.get(at..at + 4)? != b"nclx" {
-            return None;
-        }
-        let value = |i: usize| Some(u16::from_be_bytes([*bytes.get(at + 4 + 2 * i)?, *bytes.get(at + 5 + 2 * i)?]));
-        Some((value(0)?, value(1)?, value(2)?))
-    }
-
-    #[test]
-    fn mp4_is_tagged_srgb() {
-        let path = std::env::temp_dir().join(format!("export-colour-{}.mp4", std::process::id()));
-        let size = Size::new(64, 64);
-        let mut encoder = AvFoundationEncoder::open(&path, Format::Mp4, Quality::Medium, size, 30.0)
-            .expect("the encoder opens");
-        for _ in 0..3 {
-            encoder.push(&vec![0u8; 64 * 64 * 4]).expect("a frame is pushed");
-        }
-        encoder.finish().expect("the file is written");
-        let bytes = std::fs::read(&path).expect("the file is readable");
-        std::fs::remove_file(&path).ok();
-        // ISO/IEC 23001-8 code points: 1 is BT.709 (primaries, matrix), 13 the sRGB transfer.
-        assert_eq!(colour_tags(&bytes), Some((1, 13, 1)));
-    }
+    context.set_color_primaries(color::Primaries::BT709);
+    context.set_color_transfer_characteristic(color::TransferCharacteristic::IEC61966_2_1);
 }
