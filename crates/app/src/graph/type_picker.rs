@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use gpui::{App, Context, Pixels, Point, SharedString, WeakEntity};
+use gpui::{App, Context, WeakEntity};
 use shader_graph::types::{ScalarKind, WgslType};
 
 use crate::editor::{Editor, ListItem, OnSelect};
@@ -48,8 +48,8 @@ fn type_item(weak: &WeakEntity<Editor>, picker: &Rc<TypePicker>, ty: WgslType) -
         .detail(WIDTHS.get(ty.components()).copied().unwrap_or_default())
 }
 
-/// The entries of a picker's menu; kinds with several types open a menu of them at `at`.
-pub fn items(weak: &WeakEntity<Editor>, at: Point<Pixels>, picker: Rc<TypePicker>) -> Vec<ListItem> {
+/// The entries of a picker's menu; kinds with several types open a submenu of them.
+pub fn items(weak: &WeakEntity<Editor>, picker: Rc<TypePicker>) -> Vec<ListItem> {
     let mut items = picker.extra.clone();
     if let Some(inferred) = picker.inferred {
         let reset = picker.on_reset.clone();
@@ -87,16 +87,11 @@ pub fn items(weak: &WeakEntity<Editor>, at: Point<Pixels>, picker: Rc<TypePicker
                 continue;
             }
             let current = picker.value.filter(|v| !v.is_texture() && v.kind() == kind);
-            let (w, p) = (weak.clone(), picker.clone());
-            let mut entry = ListItem::new(
-                label,
-                None,
-                on_editor(weak, move |e, cx| {
-                    let sub: Vec<ListItem> = members.iter().map(|&t| type_item(&w, &p, t)).collect();
-                    e.open_list(at, sub, cx);
-                }),
-            )
-            .detail(current.map_or_else(|| SharedString::from("›"), |v| SharedString::from(v.id())));
+            let sub: Vec<ListItem> = members.iter().map(|&t| type_item(weak, &picker, t)).collect();
+            let mut entry = ListItem::group(label, sub);
+            if let Some(current) = current {
+                entry = entry.detail(current.id());
+            }
             if first_of_values == items.len() && !items.is_empty() {
                 entry = entry.separated();
             }
@@ -111,4 +106,36 @@ pub fn items(weak: &WeakEntity<Editor>, at: Point<Pixels>, picker: Rc<TypePicker
         items.push(item);
     }
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
+    use shader_graph::types::WgslType;
+
+    use crate::editor::Editor;
+
+    fn frame(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn hovering_a_kind_opens_its_types_beside_it_and_the_kinds_stay(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let (editor, cx) = cx.add_window_view(Editor::new);
+        editor.update(cx, |e, cx| e.open_type_list(point(px(300.0), px(120.0)), "none".to_owned(), true, cx));
+        frame(cx);
+        let kind = cx.debug_bounds("menu-row Float").expect("the kinds are drawn");
+        cx.simulate_mouse_move(kind.center(), None, Modifiers::none());
+        cx.executor().advance_clock(Duration::from_millis(400));
+        frame(cx);
+
+        let type_row: &'static str = Box::leak(format!("menu-row {}", WgslType::F32.id()).into_boxed_str());
+        assert!(cx.debug_bounds(type_row).is_some(), "the float types open beside Float");
+        assert!(cx.debug_bounds("menu-row Integer").is_some(), "the other kinds stay open");
+    }
 }

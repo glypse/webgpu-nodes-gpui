@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use gpui::{Pixels, Point, SharedString, WeakEntity};
+use gpui::{Pixels, Point, WeakEntity};
 use shader_graph::types::{TYPE_SETS, WgslType, type_set_of, with_default_type};
 use gpui::Context;
 
@@ -46,38 +46,27 @@ pub fn items(weak: &WeakEntity<Editor>, at: Point<Pixels>, types: Vec<WgslType>,
         .collect();
     for (index, set) in TYPE_SETS.iter().take(KINDS).enumerate() {
         let chosen = set.types.iter().filter(|t| types.contains(t)).count();
-        let (w, ts, ch) = (weak.clone(), types.clone(), change.clone());
-        let mut entry = ListItem::new(
-            set.label,
-            None,
-            on_editor(weak, move |e, cx| {
-                let sub = kind_items(&w, at, ts.clone(), index, ch.clone());
-                e.open_list(at, sub, cx);
-            }),
-        )
-        .detail(if chosen > 0 { SharedString::from(chosen.to_string()) } else { SharedString::from("›") });
+        let sub = kind_items(weak, at, types.clone(), index, change.clone());
+        let mut entry = ListItem::group(set.label, sub);
+        if chosen > 0 {
+            entry = entry.detail(chosen.to_string());
+        }
         if index == 0 {
             entry = entry.separated();
         }
         items.push(entry);
     }
-    let (w, ts, ch) = (weak.clone(), types.clone(), change);
-    items.push(
-        ListItem::new(
-            "Default",
-            None,
-            on_editor(weak, move |e, cx| {
-                let sub = default_items(&w, ts.clone(), ch.clone());
-                e.open_list(at, sub, cx);
-            }),
-        )
-        .detail(default.map_or("", |d| d.id()))
-        .separated(),
-    );
+    let sub = default_items(weak, types, change);
+    let mut entry = ListItem::group("Default", sub).separated();
+    if let Some(default) = default {
+        entry = entry.detail(default.id());
+    }
+    items.push(entry);
     items
 }
 
-/// One type per entry of a kind, each toggled in place: the menu stays open.
+/// One type per entry of a kind. Toggling one changes the variable and reopens the menu with the
+/// kind's submenu still open, so the checks show the new types.
 fn kind_items(weak: &WeakEntity<Editor>, at: Point<Pixels>, types: Vec<WgslType>, kind: usize, change: Change) -> Vec<ListItem> {
     let Some(set) = TYPE_SETS.get(kind) else { return Vec::new() };
     sorted(set.types)
@@ -95,8 +84,8 @@ fn kind_items(weak: &WeakEntity<Editor>, at: Point<Pixels>, types: Vec<WgslType>
                         ts.iter().copied().chain([ty]).collect()
                     };
                     ch(next.clone(), e, cx);
-                    let sub = kind_items(&w, at, next, kind, ch.clone());
-                    e.open_list(at, sub, cx);
+                    let root = items(&w, at, next, ch.clone());
+                    e.open_list_at(at, root, vec![TYPE_SETS.len() + kind], cx);
                 }),
             )
             .disabled(checked && types.len() == 1)

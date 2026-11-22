@@ -200,7 +200,7 @@ fn socket_row(
             if !locked {
                 let (at, picker) = (e.position, picker.clone());
                 weak.update(cx, |ed, cx| {
-                    let items = super::type_picker::items(&cx.entity().downgrade(), at, picker);
+                    let items = super::type_picker::items(&cx.entity().downgrade(), picker);
                     ed.open_list(at, items, cx);
                 })
                 .ok();

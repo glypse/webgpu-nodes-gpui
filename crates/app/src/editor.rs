@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use handle::{ModelHandle, ModelMut};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
+    AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EventEmitter, ExternalPaths, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Pixels,
-    Point, Render, SharedString, Styled as _, Window, div,
+    Point, Render, SharedString, Styled as _, Subscription, Window, div,
     px,
 };
 use gpui_flow::{
@@ -30,7 +30,7 @@ use shader_graph::graph::{
 use shader_graph::layout::{LayoutError, LayoutOptions, NodeGeometry};
 use shader_graph::types::{HandleType, InputValue, WgslType};
 use shader_graph::UniformValue;
-use gpui_component::menu::PopupMenu;
+use theme::popup::{Action, Cascade, Row};
 use theme::{ActiveTheme as _, popup};
 
 use crate::assets::{self, AssetDrag};
@@ -133,6 +133,8 @@ pub struct ListItem {
     pub destructive: bool,
     /// A separator goes above the entry.
     pub separated: bool,
+    /// Entries of a submenu beside the entry, which `on_select` does not run for.
+    pub submenu: Option<Vec<ListItem>>,
 }
 
 impl ListItem {
@@ -149,7 +151,18 @@ impl ListItem {
             disabled: false,
             destructive: false,
             separated: false,
+            submenu: None,
         }
+    }
+
+    /// A row that only opens `items` as a submenu.
+    pub fn group(label: impl Into<SharedString>, items: Vec<ListItem>) -> Self {
+        Self::new(label, None, Rc::new(|_: &mut Window, _: &mut App| {})).submenu(items)
+    }
+
+    pub fn submenu(mut self, items: Vec<ListItem>) -> Self {
+        self.submenu = Some(items);
+        self
     }
 
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
@@ -176,10 +189,12 @@ impl ListItem {
 struct Popup {
     at: Point<Pixels>,
     items: Vec<ListItem>,
-    /// Which list this is: a selection can open another, which the first's dismissal mustn't close.
+    /// The submenus open when the list shows, as `Cascade::new` takes them.
+    path: Vec<usize>,
+    /// Which list this is: a list replaced by another must not dismiss the new one.
     serial: u64,
     /// Built from `items` on the first draw, which is when a window is at hand.
-    menu: Option<popup::Open>,
+    menu: Option<(Entity<Cascade>, Subscription)>,
 }
 
 pub struct Editor {
@@ -1016,8 +1031,13 @@ impl Editor {
     }
 
     pub(crate) fn open_list(&mut self, at: Point<Pixels>, items: Vec<ListItem>, cx: &mut Context<Self>) {
+        self.open_list_at(at, items, Vec::new(), cx);
+    }
+
+    /// Opens a list with the submenus along `path` (see `Cascade::new`) already showing.
+    pub(crate) fn open_list_at(&mut self, at: Point<Pixels>, items: Vec<ListItem>, path: Vec<usize>, cx: &mut Context<Self>) {
         self.popup_serial += 1;
-        self.popup = Some(Popup { at, items, serial: self.popup_serial, menu: None });
+        self.popup = Some(Popup { at, items, path, serial: self.popup_serial, menu: None });
         cx.notify();
     }
 
@@ -1058,7 +1078,7 @@ impl Editor {
     }
 
     pub(crate) fn open_type_picker(&mut self, at: Point<Pixels>, picker: TypePicker, cx: &mut Context<Self>) {
-        let items = type_picker::items(&cx.entity().downgrade(), at, Rc::new(picker));
+        let items = type_picker::items(&cx.entity().downgrade(), Rc::new(picker));
         self.open_list(at, items, cx);
     }
 
@@ -1771,30 +1791,62 @@ impl Editor {
         let popup = self.popup.as_mut()?;
         if popup.menu.is_none() {
             let serial = popup.serial;
-            let items = std::mem::take(&mut popup.items);
-            let menu = PopupMenu::build(window, cx, move |menu, _, _| {
-                items.into_iter().fold(menu.min_w(px(176.0)), |menu, item| {
-                    let on_select = item.on_select;
-                    let entry = popup::row(item.label, item.detail, item.destructive)
-                        .checked(item.checked.unwrap_or(false))
-                        .disabled(item.disabled)
-                        .on_click(popup::on_select(move |window, cx| on_select(window, cx)));
-                    let menu = if item.separated { menu.separator() } else { menu };
-                    menu.item(entry)
-                })
-            });
-            let opened = popup::open(window, cx, menu, move |e: &mut Editor, cx| {
+            let rows = popup_rows(std::mem::take(&mut popup.items));
+            let path = std::mem::take(&mut popup.path);
+            let cascade = cx.new(|cx| Cascade::new(rows, px(200.0), path, cx));
+            let focus = cascade.read(cx).focus_handle(cx);
+            window.defer(cx, move |window, cx| window.focus(&focus, cx));
+            let dismissed = cx.subscribe_in(&cascade, window, move |e: &mut Editor, _, _: &DismissEvent, _, cx| {
                 if e.popup.as_ref().is_some_and(|p| p.serial == serial) {
                     e.popup = None;
                     cx.notify();
                 }
             });
             if let Some(popup) = self.popup.as_mut() {
-                popup.menu = Some(opened);
+                popup.menu = Some((cascade, dismissed));
             }
         }
         let popup = self.popup.as_ref()?;
-        Some(popup.menu.as_ref()?.draw(window, popup.at).into_any_element())
+        let (cascade, _) = popup.menu.as_ref()?;
+        let weak = cascade.downgrade();
+        let dismiss = move |_: &mut Window, cx: &mut App| {
+            weak.update(cx, |_, cx| cx.emit(DismissEvent)).ok();
+        };
+        Some(popup::layer(window, cx, popup.at, dismiss, cascade.clone()).into_any_element())
+    }
+}
+
+/// The rows of a list popup: a list entry with a submenu becomes a row that opens it.
+fn popup_rows(items: Vec<ListItem>) -> Vec<Row> {
+    items
+        .into_iter()
+        .map(|item| {
+            let action = match item.submenu {
+                Some(items) => Action::Submenu(popup_rows(items)),
+                None => Action::Pick(item.on_select),
+            };
+            Row {
+                label: item.label,
+                detail: item.detail,
+                checked: item.checked,
+                disabled: item.disabled,
+                destructive: item.destructive,
+                separated: item.separated,
+                action,
+                trailing: None,
+            }
+        })
+        .collect()
+}
+
+/// The graph canvas is black in dark mode and white in light mode.
+fn canvas_theme(appearance: theme::Appearance) -> gpui_flow::FlowTheme {
+    match appearance {
+        theme::Appearance::Dark => gpui_flow::FlowTheme {
+            background: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+            ..gpui_flow::FlowTheme::dark()
+        },
+        theme::Appearance::Light => gpui_flow::FlowTheme::light(),
     }
 }
 
