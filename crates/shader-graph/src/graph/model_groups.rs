@@ -937,7 +937,7 @@ impl GraphModel {
 
     /// "<label> - Copy", then "<label> - Copy 2", ... whichever no library or
     /// user group has yet.
-    fn unique_copy_label(&self, source: Option<&str>) -> String {
+    pub(super) fn unique_copy_label(&self, source: Option<&str>) -> String {
         let Some(source) = source.filter(|s| !s.is_empty()) else {
             return "Group".to_owned();
         };
