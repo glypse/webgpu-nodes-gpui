@@ -2,19 +2,21 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Window};
+use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Task, Window};
 use shader_graph::assets::{AssetKind, asset_hash};
 use shader_graph::codegen::{RenderPlan, ResourceDecl};
 use shader_graph::graph::MAX_CANVAS_SIZE;
 
 use crate::project::AssetFiles;
 use runtime::{
-    Frame, MediaSource, MediaStatus, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
+    CompileQueue, Compiled, Frame, MediaSource, MediaStatus, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
     RenderOptions, Renderer, Size, Timing,
 };
 
 /// Seconds' worth of samples before the display's refresh rate is judged.
 const REFRESH_SAMPLES: usize = 20;
+/// How often a running compile is checked for.
+const COMPILE_POLL: Duration = Duration::from_millis(4);
 /// How often the preview's frame timing is logged at debug level.
 const STATS_PERIOD: Duration = Duration::from_secs(5);
 pub const DEFAULT_RESOLUTION: Size = Size::new(512, 512);
@@ -90,6 +92,15 @@ pub enum PlaybackEvent {
 pub struct Playback {
     renderer: Option<Renderer>,
     program: Option<Program>,
+    /// Compiles the programs generated, off the UI thread.
+    compiler: Option<CompileQueue>,
+    /// Collects the compiles while one is running. It polls: a wake-up from the compile
+    /// thread could drop this foreground task on that thread.
+    compile_poll: Option<Task<()>>,
+    /// Compiles with an id up to this one are out of date: a newer source replaced them.
+    discarded: u64,
+    /// The uniform values of the latest program, which a program takes when it arrives.
+    uniforms: Vec<(String, shader_graph::UniformValue)>,
     pub player: Player,
     /// The canvas size from the project, which frames render at unless following a preview area.
     pub resolution: Size,
@@ -132,9 +143,14 @@ impl Playback {
             ),
         };
         let player = Player::new(DEFAULT_TIMING);
+        let compiler = renderer.as_ref().map(|r| CompileQueue::new(r.compiler(), || {}));
         Self {
             renderer,
             program: None,
+            compiler,
+            compile_poll: None,
+            discarded: 0,
+            uniforms: Vec::new(),
             player,
             resolution: DEFAULT_RESOLUTION,
             follow: false,
@@ -250,39 +266,105 @@ impl Playback {
         }
     }
 
-    /// Takes a newly generated program: shows it once it compiles, keeping the last working one until then.
+    /// Takes a newly generated program: compiles it off the UI thread and shows it once it is
+    /// ready, keeping the last working one until then.
     pub fn set_source(
         &mut self,
         generated: Result<shader_graph::codegen::Program, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let _span = tracing::info_span!("set_source").entered();
         match generated {
             Ok(source) => {
                 self.code = source.program.code.clone().into();
-                if let Some(renderer) = &mut self.renderer {
-                    match renderer.compile(&source.plan) {
-                        Ok(program) => {
-                            let values = source
-                                .uniforms
-                                .iter()
-                                .map(|(name, v)| {
-                                    (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect())
-                                })
-                                .collect();
-                            renderer.set_uniforms(&program, &values);
-                            self.program = Some(program);
-                            self.sync_media();
-                            self.failure = None;
-                            self.player.invalidate();
-                        }
-                        Err(error) => self.failure = Some(Failure::from_program(&error)),
-                    }
+                self.uniforms = source.uniforms;
+                if let Some(compiler) = &mut self.compiler {
+                    compiler.submit(*source.plan);
+                    self.watch_compiles(window, cx);
                 }
             }
-            Err(message) => self.failure = Some(Failure::text(message)),
+            Err(message) => {
+                if let Some(compiler) = &self.compiler {
+                    self.discarded = compiler.latest();
+                }
+                self.failure = Some(Failure::text(message));
+            }
         }
         self.changed(window, cx);
+    }
+
+    /// Starts collecting finished compiles, unless that is already going on.
+    fn watch_compiles(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.compile_poll.is_some() {
+            return;
+        }
+        self.compile_poll = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(COMPILE_POLL).await;
+                let more = this.update_in(cx, |p, window, cx| {
+                    p.compiles_ready(window, cx);
+                    let more = p.compiling();
+                    if !more {
+                        p.compile_poll = None;
+                    }
+                    more
+                });
+                if !more.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn compiles_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut changed = false;
+        while let Some(done) = self.compiler.as_mut().and_then(CompileQueue::try_next) {
+            changed |= self.take_compiled(done);
+        }
+        if changed {
+            self.changed(window, cx);
+        }
+    }
+
+    /// Waits for the program of the latest source, which an export draws with.
+    fn finish_compiling(&mut self) {
+        while let Some(done) = self.compiler.as_mut().and_then(CompileQueue::wait_next) {
+            self.take_compiled(done);
+        }
+    }
+
+    /// Whether the latest source is still compiling.
+    pub fn compiling(&self) -> bool {
+        self.compiler.as_ref().is_some_and(CompileQueue::busy)
+    }
+
+    /// Shows a program that has compiled, or its error. A source newer than the compile only
+    /// has its program shown early: whatever it says about the latest source is for the latest.
+    fn take_compiled(&mut self, done: Compiled) -> bool {
+        if done.id <= self.discarded {
+            return false;
+        }
+        let latest = !self.compiling();
+        match done.result {
+            Ok(program) => {
+                if let Some(renderer) = &self.renderer {
+                    renderer.set_uniforms(&program, &uniform_values(&self.uniforms));
+                }
+                self.program = Some(program);
+                self.sync_media();
+                if latest {
+                    self.failure = None;
+                }
+                self.player.invalidate();
+                true
+            }
+            Err(error) if latest => {
+                self.failure = Some(Failure::from_program(&error));
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Writes new uniform values into the running program, without compiling it again.
@@ -292,12 +374,14 @@ impl Playback {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        for (name, value) in uniforms {
+            match self.uniforms.iter_mut().find(|(n, _)| n == name) {
+                Some((_, held)) => *held = value.clone(),
+                None => self.uniforms.push((name.clone(), value.clone())),
+            }
+        }
         if let (Some(renderer), Some(program)) = (&self.renderer, &self.program) {
-            let values = uniforms
-                .iter()
-                .map(|(name, v)| (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect()))
-                .collect();
-            renderer.set_uniforms(program, &values);
+            renderer.set_uniforms(program, &uniform_values(uniforms));
             self.player.invalidate();
             self.changed(window, cx);
         }
@@ -440,6 +524,7 @@ impl Playback {
 
     /// Renders the current frame at the canvas size, for export.
     pub fn export_frame(&mut self) -> anyhow::Result<Frame> {
+        self.finish_compiling();
         let size = self.render_size();
         let inputs = self.player.clock.inputs();
         let (renderer, program) = self
@@ -621,6 +706,10 @@ fn media_sources(
     sources
 }
 
+fn uniform_values(uniforms: &[(String, shader_graph::UniformValue)]) -> BTreeMap<String, Vec<f64>> {
+    uniforms.iter().map(|(name, v)| (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect())).collect()
+}
+
 fn canvas_size(follow: bool, pane: Option<Size>, stored: Size) -> Size {
     match (follow, pane) {
         (true, Some(pane)) => pane,
@@ -699,7 +788,108 @@ impl FrameStats {
 
 #[cfg(test)]
 mod tests {
+    use gpui::{AppContext as _, Entity, IntoElement, Render, TestAppContext};
+    use shader_graph::graph::GraphModel;
+
     use super::*;
+
+    struct Harness(Entity<Playback>);
+
+    impl Render for Harness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            gpui::div()
+        }
+    }
+
+    fn scene() -> shader_graph::codegen::Program {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scenes/default.json");
+        let loaded = crate::project::read(&path).expect("the default scene loads");
+        GraphModel::new(loaded.project).generate().expect("the default scene generates")
+    }
+
+    fn set_source(
+        cx: &mut gpui::VisualTestContext,
+        playback: &Entity<Playback>,
+        source: Result<shader_graph::codegen::Program, String>,
+    ) {
+        cx.update(|window, cx| playback.update(cx, |p, cx| p.set_source(source, window, cx)));
+    }
+
+    /// Lets the compile thread finish, as the app's event loop would.
+    fn wait_for_compile(cx: &mut gpui::VisualTestContext, playback: &Entity<Playback>) {
+        cx.executor().allow_parking();
+        for _ in 0..2000 {
+            cx.executor().advance_clock(COMPILE_POLL);
+            cx.run_until_parked();
+            if !playback.read_with(cx, |p, _| p.compiling()) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("the compile never finished");
+    }
+
+    #[gpui::test]
+    fn a_source_is_compiled_in_the_background_and_then_shown(cx: &mut TestAppContext) {
+        let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
+        let playback = harness.read_with(cx, |h, _| h.0.clone());
+        set_source(cx, &playback, Ok(scene()));
+        assert!(playback.read_with(cx, |p, _| !p.code.is_empty()), "the code is known at once");
+        wait_for_compile(cx, &playback);
+        playback.read_with(cx, |p, _| {
+            assert!(p.program.is_some(), "the compiled program was swapped in");
+            assert!(p.failure.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn a_program_that_fails_to_compile_keeps_the_last_one_and_reports_the_error(cx: &mut TestAppContext) {
+        let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
+        let playback = harness.read_with(cx, |h, _| h.0.clone());
+        set_source(cx, &playback, Ok(scene()));
+        wait_for_compile(cx, &playback);
+        let good = playback.read_with(cx, |p, _| p.program.as_ref().map(|p| p.id()));
+
+        let mut broken = scene();
+        for pass in &mut broken.plan.passes {
+            pass.program.code.push_str("\nfn broken( {");
+        }
+        set_source(cx, &playback, Ok(broken));
+        wait_for_compile(cx, &playback);
+        playback.read_with(cx, |p, _| {
+            assert!(p.failure.is_some(), "the error is reported");
+            assert_eq!(p.program.as_ref().map(|p| p.id()), good, "the last working program stays");
+        });
+
+        set_source(cx, &playback, Ok(scene()));
+        wait_for_compile(cx, &playback);
+        playback.read_with(cx, |p, _| {
+            assert!(p.failure.is_none());
+            assert_ne!(p.program.as_ref().map(|p| p.id()), good);
+        });
+    }
+
+    #[gpui::test]
+    fn a_generation_error_is_not_cleared_by_an_older_compile(cx: &mut TestAppContext) {
+        let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
+        let playback = harness.read_with(cx, |h, _| h.0.clone());
+        set_source(cx, &playback, Ok(scene()));
+        set_source(cx, &playback, Err("no output".into()));
+        wait_for_compile(cx, &playback);
+        playback.read_with(cx, |p, _| {
+            assert_eq!(p.failure.as_ref().map(|f| f.message.to_string()).as_deref(), Some("no output"));
+            assert!(p.program.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn an_export_waits_for_the_program_of_the_latest_source(cx: &mut TestAppContext) {
+        let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
+        let playback = harness.read_with(cx, |h, _| h.0.clone());
+        set_source(cx, &playback, Ok(scene()));
+        let frame = playback.update(cx, |p, _| p.export_frame()).expect("a frame");
+        assert!(!frame.pixels.is_empty());
+    }
 
     #[test]
     fn pane_sizes_are_whole_device_pixels() {

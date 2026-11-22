@@ -10,6 +10,7 @@ mod mips;
 mod player;
 mod present;
 mod refresh_rate;
+mod compile;
 mod renderer;
 mod simulation;
 mod target;
@@ -22,8 +23,9 @@ pub use frame_meter::{FrameMeter, FrameRate};
 pub use media::{DecodedFrame, MediaError, MediaLibrary, MediaSource, MediaStatus, SystemVideoProbe, VideoDecoder, open_decoder};
 pub use player::Player;
 pub use refresh_rate::RefreshRateMeter;
+pub use compile::{CompileQueue, Compiled};
 pub use renderer::{
-    Frame, PixelFormat, Presented, Program, ProgramDiagnostic, ProgramError, RenderOptions,
+    Compiler, Frame, PixelFormat, Presented, Program, ProgramDiagnostic, ProgramError, RenderOptions,
     Renderer, Size,
 };
 #[cfg(target_os = "macos")]

@@ -78,6 +78,11 @@ impl Program {
     pub fn plan(&self) -> &RenderPlan {
         &self.plan
     }
+
+    /// Tells compiled programs apart.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -332,70 +337,15 @@ pub struct Renderer {
     in_flight: VecDeque<Submitted>,
 }
 
-fn filter_mode(filter: SamplerFilter) -> wgpu::FilterMode {
-    match filter {
-        SamplerFilter::Linear => wgpu::FilterMode::Linear,
-        SamplerFilter::Nearest => wgpu::FilterMode::Nearest,
-    }
+/// Compiles plans on a renderer's device. The programs it makes are drawn by that renderer.
+#[derive(Clone)]
+pub struct Compiler {
+    device: wgpu::Device,
 }
 
-fn address_mode(address: SamplerAddress) -> wgpu::AddressMode {
-    match address {
-        SamplerAddress::Clamp => wgpu::AddressMode::ClampToEdge,
-        SamplerAddress::Repeat => wgpu::AddressMode::Repeat,
-        SamplerAddress::Mirror => wgpu::AddressMode::MirrorRepeat,
-    }
-}
-
-impl Renderer {
-    pub fn new() -> Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-                .context("no GPU adapter")?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
-                // Sizes are bound by the adapter's limit, not the default.
-                required_limits: wgpu::Limits {
-                    max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
-                    ..Default::default()
-                },
-                ..Default::default()
-            }))?;
-        // wgpu's default handler panics on errors outside an error scope.
-        device.on_uncaptured_error(std::sync::Arc::new(|error| log::error!("GPU error: {error}")));
-        let timer = GpuTimer::new(&device, &queue);
-        let empty = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("empty"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: LINEAR_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let media = MediaLibrary::new(&device, &queue);
-        Ok(Self {
-            presenter: Presenter::new(&device),
-            mips: MipGenerator::new(&device),
-            device,
-            queue,
-            timer,
-            empty,
-            samplers: HashMap::new(),
-            targets: HashMap::new(),
-            media,
-            output: None,
-            free_pixels: Vec::new(),
-            free_timing: Vec::new(),
-            in_flight: VecDeque::new(),
-        })
-    }
-
-    /// Compiles a plan's programs; their uniform blocks stay zero until `set_uniforms`.
-    pub fn compile(&mut self, plan: &RenderPlan) -> Result<Program, ProgramError> {
+impl Compiler {
+    /// Compiles a plan's programs; their uniform blocks stay zero until `Renderer::set_uniforms`.
+    pub fn compile(&self, plan: &RenderPlan) -> Result<Program, ProgramError> {
         let mut passes = Vec::with_capacity(plan.passes.len());
         for decl in &plan.passes {
             let formats: Vec<wgpu::TextureFormat> = decl
@@ -526,6 +476,79 @@ impl Renderer {
             return Err(fail(error.to_string(), None));
         }
         Ok(CompiledPass { decl: decl.clone(), pipeline, layout, uniform_buffer })
+    }
+}
+
+fn filter_mode(filter: SamplerFilter) -> wgpu::FilterMode {
+    match filter {
+        SamplerFilter::Linear => wgpu::FilterMode::Linear,
+        SamplerFilter::Nearest => wgpu::FilterMode::Nearest,
+    }
+}
+
+fn address_mode(address: SamplerAddress) -> wgpu::AddressMode {
+    match address {
+        SamplerAddress::Clamp => wgpu::AddressMode::ClampToEdge,
+        SamplerAddress::Repeat => wgpu::AddressMode::Repeat,
+        SamplerAddress::Mirror => wgpu::AddressMode::MirrorRepeat,
+    }
+}
+
+impl Renderer {
+    pub fn new() -> Result<Self> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .context("no GPU adapter")?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                // Sizes are bound by the adapter's limit, not the default.
+                required_limits: wgpu::Limits {
+                    max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }))?;
+        // wgpu's default handler panics on errors outside an error scope.
+        device.on_uncaptured_error(std::sync::Arc::new(|error| log::error!("GPU error: {error}")));
+        let timer = GpuTimer::new(&device, &queue);
+        let empty = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("empty"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: LINEAR_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let media = MediaLibrary::new(&device, &queue);
+        Ok(Self {
+            presenter: Presenter::new(&device),
+            mips: MipGenerator::new(&device),
+            device,
+            queue,
+            timer,
+            empty,
+            samplers: HashMap::new(),
+            targets: HashMap::new(),
+            media,
+            output: None,
+            free_pixels: Vec::new(),
+            free_timing: Vec::new(),
+            in_flight: VecDeque::new(),
+        })
+    }
+
+    /// Compiles a plan's programs; their uniform blocks stay zero until `set_uniforms`.
+    pub fn compile(&mut self, plan: &RenderPlan) -> Result<Program, ProgramError> {
+        self.compiler().compile(plan)
+    }
+
+    /// A handle that compiles on the renderer's device from any thread.
+    pub fn compiler(&self) -> Compiler {
+        Compiler { device: self.device.clone() }
     }
 
     /// Writes the values of a program's uniform blocks, e.g. after an edit that doesn't change its code.
