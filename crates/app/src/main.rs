@@ -7,6 +7,7 @@ mod graph;
 mod group_bundles;
 mod layout;
 mod output;
+mod perf;
 mod playback;
 mod preferences;
 mod preview;

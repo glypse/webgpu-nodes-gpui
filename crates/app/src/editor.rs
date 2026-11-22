@@ -496,8 +496,22 @@ impl Editor {
     }
 
     pub fn update_settings(&mut self, settings: ProjectSettings, cx: &mut Context<Self>) {
+        let space = self.settings.color_space;
         if self.model_mut().update_settings(settings) {
-            self.sync(cx);
+            // Only the colour space is drawn on the cards, so any other setting skips rebuilding them.
+            if settings.color_space != space {
+                self.sync(cx);
+            } else {
+                self.announce_settings(cx);
+            }
+        }
+    }
+
+    fn announce_settings(&mut self, cx: &mut Context<Self>) {
+        let settings = self.model.borrow().settings();
+        if settings != self.settings {
+            self.settings = settings;
+            cx.emit(EditorEvent::Settings(settings));
         }
     }
 
@@ -691,18 +705,18 @@ impl Editor {
             portals: Vec::new(),
         };
         self.flow.update(cx, |flow, cx| {
-            flow.options.strokes = strokes;
+            // A locked group can still be selected and viewed; nothing in it moves or links.
+            flow.options.strokes = !locked;
+            flow.options.nodes_draggable = !locked;
+            flow.options.nodes_connectable = !locked;
+            flow.options.nodes_keyboard_move = !locked;
             flow.set_nodes(nodes, cx);
             flow.set_edges(edges, cx);
             flow.set_layers(layers, cx);
         });
         self.place_frames(cx);
         self.settle_frames(cx);
-        let settings = self.model.borrow().settings();
-        if settings != self.settings {
-            self.settings = settings;
-            cx.emit(EditorEvent::Settings(settings));
-        }
+        self.announce_settings(cx);
         cx.notify();
     }
 
