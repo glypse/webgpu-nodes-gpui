@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::model::GraphModel;
 use super::Point;
-use crate::assets::{Asset, DEFAULT_PLAYBACK, ImportError, ImportFile, VideoEnd, VideoPlayback, MAX_ASSETS, describe_asset};
+use crate::assets::{Asset, DEFAULT_PLAYBACK, ImportError, ImportFile, VideoEnd, VideoPlayback, VideoProbe, MAX_ASSETS, describe_asset};
 use crate::library::is_library_ref;
 use crate::nodes::{MEDIA_NODE_TYPES, VIDEO, media_node_of};
 use crate::types::NodeData;
@@ -55,8 +55,8 @@ impl GraphModel {
 
     /// Adds a file as an asset with a new id, or finds the asset that has its
     /// hash, so importing the same file twice keeps one asset.
-    pub fn import_file(&mut self, file: ImportFile) -> Result<Imported, ImportError> {
-        let asset = describe_asset(&uuid::Uuid::new_v4().to_string(), file)?;
+    pub fn import_file(&mut self, file: ImportFile, probe: &dyn VideoProbe) -> Result<Imported, ImportError> {
+        let asset = describe_asset(&uuid::Uuid::new_v4().to_string(), file, probe)?;
         if let Some(existing) = self.asset_by_hash(asset.hash()) {
             return Ok(Imported { asset: existing.clone(), reused: true });
         }
@@ -199,7 +199,7 @@ impl GraphModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{ImportError, ImportFile};
+    use crate::assets::{ImportError, ImportFile, NoVideos};
     use crate::nodes::IMAGE;
 
     fn png() -> Vec<u8> {
@@ -214,9 +214,9 @@ mod tests {
         let mut model = GraphModel::default();
         let bytes = png();
         let file = ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
-        let first = model.import_file(file).expect("imports");
+        let first = model.import_file(file, &NoVideos).expect("imports");
         assert!(!first.reused);
-        let second = model.import_file(file).expect("imports");
+        let second = model.import_file(file, &NoVideos).expect("imports");
         assert!(second.reused);
         assert_eq!(second.asset.id(), first.asset.id());
         assert_eq!(model.assets().len(), 1);
@@ -226,7 +226,7 @@ mod tests {
     fn a_file_that_cant_be_read_adds_no_asset() {
         let mut model = GraphModel::default();
         let file = ImportFile { name: "notes.txt", mime: "text/plain", bytes: b"hello" };
-        assert_eq!(model.import_file(file), Err(ImportError::Unreadable));
+        assert_eq!(model.import_file(file, &NoVideos), Err(ImportError::Unreadable));
         assert!(model.assets().is_empty());
     }
 
@@ -240,7 +240,7 @@ mod tests {
     fn import_width(model: &mut GraphModel, width: u32) -> String {
         let bytes = png_of_width(width);
         let file = ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
-        model.import_file(file).expect("imports").asset.id().to_owned()
+        model.import_file(file, &NoVideos).expect("imports").asset.id().to_owned()
     }
 
     #[test]

@@ -9,9 +9,12 @@ use thiserror::Error;
 
 use crate::Size;
 
+mod ffmpeg_decoder;
 mod library;
+mod video;
 
 pub use library::{MediaLibrary, MediaSource, MediaStatus};
+pub use video::{DecodedFrame, SystemVideoProbe, VideoDecoder, open_decoder};
 
 #[derive(Debug, Error)]
 pub enum MediaError {
@@ -21,8 +24,8 @@ pub enum MediaError {
     TooLarge { width: u32, height: u32, max: u32 },
     #[error("the image's pixels don't match its size")]
     Size,
-    #[error("videos can't be decoded yet")]
-    VideoUnsupported,
+    #[error("the video can't be decoded: {0}")]
+    Video(String),
 }
 
 /// An image as the texels of a texture: linear RGBA half floats, rows top first.

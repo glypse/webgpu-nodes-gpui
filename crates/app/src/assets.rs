@@ -14,7 +14,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::Sizable as _;
-use runtime::MediaStatus;
+use runtime::{MediaStatus, SystemVideoProbe};
 use shader_graph::assets::{Asset, AssetKind, ImportFile, describe_asset};
 use shader_graph::graph::GraphModel;
 use theme::{ActiveTheme as _, Icon, IconName, popup};
@@ -52,7 +52,7 @@ pub fn import(model: &mut GraphModel, picked: &[PickedFile]) -> Imports {
     model.batched(|model| {
         for file in picked {
             let input = ImportFile { name: &file.name, mime: &file.mime, bytes: &file.bytes };
-            match model.import_file(input) {
+            match model.import_file(input, &SystemVideoProbe) {
                 Ok(imported) => imports.files.push((imported.asset.id().to_owned(), file.bytes.clone())),
                 Err(error) => imports.problems.push(format!("{}: {error}", file.name)),
             }
@@ -497,7 +497,7 @@ fn replace_file(
         Err(problem) => return report_problems(window, &[problem], cx),
     };
     let kind = editor.read(cx).model().asset(id).map(Asset::kind);
-    let replacement = describe_asset(id, ImportFile { name: &file.name, mime: &file.mime, bytes: &file.bytes });
+    let replacement = describe_asset(id, ImportFile { name: &file.name, mime: &file.mime, bytes: &file.bytes }, &SystemVideoProbe);
     match (kind, replacement) {
         (Some(kind), Ok(asset)) if asset.kind() == kind => {
             editor.update(cx, |e, cx| e.edit_model(cx, |m| m.replace_asset(asset)));

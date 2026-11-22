@@ -2382,7 +2382,7 @@ mod tests {
         editor.update(vcx, |e, cx| {
             e.edit_model(cx, |m| {
                 let file = shader_graph::assets::ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
-                asset = m.import_file(file).expect("imports").asset.id().to_owned();
+                asset = m.import_file(file, &runtime::SystemVideoProbe).expect("imports").asset.id().to_owned();
             })
         });
         vcx.run_until_parked();

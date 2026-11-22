@@ -12,7 +12,7 @@ What the port still lacks compared with the original (packages/core, packages/ru
 2. **Assets panel**: `Assets.svelte` area type (grid, rename, replace, delete), drag an asset onto the graph, drop files on the window.
 3. **Asset widget** on nodes (picker, speed, after-end, format) and missing-file warnings.
 4. **Group bundles**: Export selected group, Import groups (with bundled assets).
-5. **Video decode** (AVFoundation first, per crate-plan.md).
+5. **Video decode** (FFmpeg, statically built through `ffmpeg-next`, one backend on every platform).
 
 ## 3. Output
 1. **Video export**: `VideoExportDialog.svelte` and `exports.ts` (format, quality, range, fps, progress).

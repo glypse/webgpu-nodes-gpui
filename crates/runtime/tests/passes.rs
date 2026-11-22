@@ -576,11 +576,25 @@ fn an_image_asset_is_decoded_and_sampled() {
 }
 
 #[test]
-fn a_video_asset_cant_be_given_yet() {
+fn a_video_that_cant_be_decoded_fails_when_it_opens() {
     let mut scene = Scene::new();
+    let (wake, woken) = mpsc::channel();
+    scene.renderer.set_media_waker(move || {
+        let _ = wake.send(());
+    });
     let sources = BTreeMap::from([("clip".to_owned(), source(AssetKind::Video, b"bytes"))]);
     scene.renderer.sync_media(&sources);
-    assert!(matches!(scene.renderer.media_status("clip"), MediaStatus::Failed(m) if m.contains("video")));
+    loop {
+        scene.renderer.poll_media();
+        match scene.renderer.media_status("clip") {
+            MediaStatus::Failed(message) => {
+                assert!(message.starts_with("A video can't be used."), "{message}");
+                return;
+            }
+            MediaStatus::Loading => woken.recv_timeout(Duration::from_secs(20)).expect("the video fails"),
+            other => panic!("a video that isn't a video: {other:?}"),
+        }
+    }
 }
 
 fn source(kind: AssetKind, bytes: &[u8]) -> MediaSource {

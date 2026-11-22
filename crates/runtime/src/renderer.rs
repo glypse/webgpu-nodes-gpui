@@ -638,6 +638,7 @@ impl Renderer {
         // State is sized like any other texture, so it's kept once sizes can be resolved.
         let steps = self.simulation.advance(&self.device, plan, inputs, &mut |id| sizes.get(id));
         let mut textures = HashMap::new();
+        let mut frame_values = None;
         for resource in &plan.resources {
             let texture = match resource {
                 ResourceDecl::Transient { id, format, mips, .. } => {
@@ -646,7 +647,14 @@ impl Renderer {
                 ResourceDecl::State { texture, read, .. } => {
                     self.simulation.texture(texture, *read).unwrap_or(&self.empty).clone()
                 }
-                ResourceDecl::Media { asset, .. } => self.media.texture(asset).unwrap_or(&self.empty).clone(),
+                ResourceDecl::Media { id, asset, video, time } => match video {
+                    Some(playback) => {
+                        let values = frame_values.get_or_insert_with(|| sizes.frame_values(sizes.canvas()));
+                        let at = time.as_ref().map_or(inputs.time, |arg| values.arg(arg));
+                        self.media.video_texture(asset, id, playback, at).unwrap_or_else(|| self.empty.clone())
+                    }
+                    None => self.media.texture(asset).unwrap_or(&self.empty).clone(),
+                },
                 ResourceDecl::Empty { .. } => self.empty.clone(),
             };
             textures.insert(resource.id().to_owned(), texture);
@@ -670,10 +678,10 @@ impl Renderer {
             .resources
             .iter()
             .filter_map(|r| match r {
-                ResourceDecl::Media { id, asset, .. } => {
-                    let texture = self.media.texture(asset)?;
-                    Some((id.clone(), Size::new(texture.width(), texture.height())))
-                }
+                ResourceDecl::Media { id, asset, .. } => match self.media.status(asset) {
+                    MediaStatus::Ready(size) => Some((id.clone(), size)),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect();
