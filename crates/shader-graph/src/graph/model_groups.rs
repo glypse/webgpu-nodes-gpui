@@ -114,8 +114,10 @@ impl GraphModel {
         {
             return None;
         }
+        let locked = is_library_ref(definition_ref)
+            || self.project.definitions.get(definition_ref).is_some_and(|def| def.locked);
         let mut node = GraphNode::new(NODE_GROUP, position);
-        node.group = Some(GroupRef { definition_ref: definition_ref.to_owned(), locked: false });
+        node.group = Some(GroupRef { definition_ref: definition_ref.to_owned(), locked });
         let id = node.id.clone();
         let key = self.active_definition_ref();
         self.project.definitions.get_mut(&key)?.nodes.push(node);
