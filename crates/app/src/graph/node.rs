@@ -497,7 +497,7 @@ pub fn render_node(
                 .items_center()
                 .justify_between()
                 .gap(s(8.0))
-                .child(div().min_w_0().truncate().text_size(s(14.0)).font_weight(gpui::FontWeight::MEDIUM).child(view.label.clone()))
+                .child(div().min_w_0().flex_1().text_size(s(14.0)).font_weight(gpui::FontWeight::MEDIUM).child(view.label.clone()))
                 .children(view.outdated.as_ref().map(|label| {
                     let message = format!(
                         "Saved with an older version of {label}, which isn't available: the latest version is used instead, so its links may not match."
