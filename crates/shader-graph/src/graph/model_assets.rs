@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use super::model::GraphModel;
 use super::Point;
-use crate::assets::{Asset, DEFAULT_PLAYBACK, ImportError, ImportFile, VideoEnd, VideoPlayback, VideoProbe, MAX_ASSETS, describe_asset};
+use super::limits::MAX_ASSETS;
+use crate::assets::{Asset, DEFAULT_PLAYBACK, ImportError, ImportFile, VideoEnd, VideoPlayback, VideoProbe, describe_asset};
 use crate::library::is_library_ref;
 use crate::nodes::{MEDIA_NODE_TYPES, VIDEO, media_node_of};
 use crate::types::NodeData;

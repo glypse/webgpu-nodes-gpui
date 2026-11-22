@@ -5,8 +5,8 @@ use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use zip::write::SimpleFileOptions;
 
-use super::asset::{Asset, MAX_ASSETS, is_asset_path};
-use crate::graph::MAX_JSON_BYTES;
+use super::asset::{Asset, is_asset_path};
+use crate::graph::{MAX_ASSETS, MAX_BUNDLE_BYTES, MAX_JSON_BYTES};
 
 /// What a bundle holds: a whole project, or groups exported to be imported
 /// into others. Either way, its JSON sits beside the files of the assets it uses.
@@ -32,8 +32,6 @@ impl BundleKind {
         }
     }
 }
-
-pub const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 /// How much more a bundle's assets can weigh than the bundle. We store media
 /// as it is, so anything near this was made to inflate; some room is left for

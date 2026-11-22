@@ -6,10 +6,9 @@ use std::io::Cursor;
 use image::{ImageDecoder as _, ImageReader, metadata::Orientation};
 use thiserror::Error;
 
-use super::asset::{
-    Asset, AssetFile, AssetKind, MAX_ASSET_SIDE, VideoFile, asset_file, asset_kind_of, asset_name,
-};
+use super::asset::{Asset, AssetFile, AssetKind, VideoFile, asset_file, asset_kind_of, asset_name};
 use super::bundle::asset_hash;
+use crate::graph::MAX_ASSET_SIDE;
 
 /// A file picked to import: its name and media type as the platform gave them, and its bytes.
 #[derive(Clone, Copy, Debug)]

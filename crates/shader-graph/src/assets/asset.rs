@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const MAX_ASSETS: usize = 4096;
-pub const MAX_ID_LENGTH: usize = 256;
-pub const MAX_ASSET_SIDE: u32 = 65536;
+use crate::graph::{MAX_ASSET_SIDE, MAX_ID_LENGTH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
