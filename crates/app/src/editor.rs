@@ -895,8 +895,8 @@ impl Editor {
             self.after_edit(cx);
             return;
         }
+        // The path doesn't change what the project generates, so the program stays as it is.
         self.sync(cx);
-        self.regenerate(cx);
         let saved = self.viewports.get(&key).copied();
         self.flow.update(cx, |flow, cx| match saved {
             Some(vp) => flow.set_viewport(vp, None, cx),
