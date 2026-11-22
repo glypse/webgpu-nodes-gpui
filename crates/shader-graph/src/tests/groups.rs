@@ -133,3 +133,53 @@ fn a_node_on_an_older_library_version_is_outdated() {
     let user = model.create_group(Point::new(400.0, 0.0)).expect("creates");
     assert_eq!(model.outdated_library_label(&user), None);
 }
+
+#[test]
+fn a_groups_fallback_inputs_follow_edits_to_its_definition() {
+    use super::builders::{edge, instance, node, root_project};
+    use crate::graph::GraphDocument;
+    use crate::types::{GroupHandleDef, HandleType, NodeData, WgslType};
+
+    let mut project = root_project(vec![instance("g", "def", NodeData::default())], &[]);
+    let link = edge(("in", "a", "fallback", "value"));
+    project.definitions.insert(
+        "def".to_owned(),
+        GraphDocument {
+            inputs: vec![GroupHandleDef::new("a", "A", HandleType::Fixed(WgslType::F32))],
+            nodes: vec![node("in", "group-input"), node("fallback", "fallback"), node("out", "group-output")],
+            edges: vec![link.clone()],
+            ..Default::default()
+        },
+    );
+    let mut model = GraphModel::new(project);
+    let falls_back = |model: &GraphModel| {
+        let group = model.node("g").expect("the group node");
+        model.resolve_descriptor(group).input("a").is_some_and(|i| i.fallback)
+    };
+    assert!(falls_back(&model), "an input feeding a Fallback is one");
+
+    model.edit(|p| {
+        if let Some(def) = p.definitions.get_mut("def") {
+            def.edges.clear();
+        }
+    });
+    assert!(!falls_back(&model), "the answer isn't remembered past an edit");
+}
+
+#[test]
+fn unsaved_changes_follow_edits_undo_and_saving() {
+    let mut model = GraphModel::default();
+    assert!(!model.has_unsaved_changes());
+    let node = model.add_node("time", Point::default()).expect("adds");
+    assert!(model.has_unsaved_changes());
+    model.mark_saved();
+    assert!(!model.has_unsaved_changes());
+    model.delete_nodes(&[node], &[]);
+    assert!(model.has_unsaved_changes());
+    model.undo();
+    assert!(!model.has_unsaved_changes(), "undoing back to the saved state is unsaved no more");
+    model.batched(|m| {
+        m.add_node("time", Point::default());
+        assert!(m.has_unsaved_changes(), "edits inside a batch count");
+    });
+}

@@ -2,6 +2,7 @@
 //! Index Switch, Custom WGSL, group nodes and their boundaries.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::enums::{CASES_FAMILY, MATCH, MATCH_SELECTOR, WIDTH_SWITCH, WIDTH_SWITCH_VALUE, case_handle, widths};
 use crate::graph::{GraphDocument, GraphNode, GraphProject, MAX_CASES};
@@ -273,9 +274,12 @@ pub fn fallback_handle_ids(
                 is_fallback(definition, project, visiting, &e.target, &e.target_handle, depth + 1)
             });
         }
-        let Some(inner) = node.definition_ref().and_then(|r| project.document(r)) else {
+        let Some((reference, inner)) = node.definition_ref().and_then(|r| Some((r, project.document(r)?))) else {
             return false;
         };
+        if let Some(known) = project.cached_fallbacks(reference) {
+            return known.contains(handle);
+        }
         if visiting.contains(&std::ptr::from_ref(inner)) {
             return false;
         }
@@ -293,6 +297,17 @@ pub fn fallback_handle_ids(
     result
 }
 
+/// `fallback_handle_ids` of the definition `reference`, which every resolution of a group node
+/// asks for, so it is worked out once per project state.
+fn fallback_handles_of(reference: &str, definition: &GraphDocument, project: &GraphProject) -> Arc<BTreeSet<String>> {
+    if let Some(known) = project.cached_fallbacks(reference) {
+        return known;
+    }
+    let handles = Arc::new(fallback_handle_ids(definition, project, &mut Vec::new()));
+    project.remember_fallbacks(reference, handles.clone());
+    handles
+}
+
 pub fn build_group_descriptor(node: &GraphNode, project: &GraphProject) -> NodeDescriptor {
     let definition_ref = node.definition_ref();
     let Some((reference, definition)) =
@@ -300,7 +315,7 @@ pub fn build_group_descriptor(node: &GraphNode, project: &GraphProject) -> NodeD
     else {
         return NodeDescriptor::new("node-group", "Missing group", NodeCategory::Misc).static_outputs();
     };
-    let fallbacks = fallback_handle_ids(definition, project, &mut Vec::new());
+    let fallbacks = fallback_handles_of(reference, definition, project);
     // The group's defaults are what instances hold until they're edited.
     let mut data = NodeData::default();
     for h in &definition.inputs {

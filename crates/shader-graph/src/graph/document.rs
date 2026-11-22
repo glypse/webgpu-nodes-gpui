@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -280,6 +281,31 @@ pub struct GraphProject {
     pub extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
     index: HashMap<String, String>,
+    #[serde(skip)]
+    fallbacks: FallbackCache,
+}
+
+/// The fallback input handles of each group definition, remembered until the next `reindex`.
+/// It is derived data: copies start empty and it never makes two projects differ.
+#[derive(Default)]
+struct FallbackCache(Mutex<HashMap<String, Arc<BTreeSet<String>>>>);
+
+impl Clone for FallbackCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for FallbackCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for FallbackCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FallbackCache")
+    }
 }
 
 impl Default for GraphProject {
@@ -294,6 +320,7 @@ impl Default for GraphProject {
             assets: Vec::new(),
             extra: BTreeMap::new(),
             index: HashMap::new(),
+            fallbacks: FallbackCache::default(),
         };
         project.reindex();
         project
@@ -302,7 +329,7 @@ impl Default for GraphProject {
 
 impl GraphProject {
     pub fn from_definitions(definitions: BTreeMap<String, GraphDocument>) -> Self {
-        let mut project = Self { definitions, assets: Vec::new(), extra: BTreeMap::new(), index: HashMap::new() };
+        let mut project = Self { definitions, assets: Vec::new(), extra: BTreeMap::new(), index: HashMap::new(), fallbacks: FallbackCache::default() };
         project.reindex();
         project
     }
@@ -310,11 +337,20 @@ impl GraphProject {
     /// Rebuild the node lookup; call after nodes were added or removed
     /// through the public fields.
     pub fn reindex(&mut self) {
+        self.fallbacks.0.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         self.index = self
             .definitions
             .iter()
             .flat_map(|(key, doc)| doc.nodes.iter().map(move |n| (n.id.clone(), key.clone())))
             .collect();
+    }
+
+    pub(crate) fn cached_fallbacks(&self, reference: &str) -> Option<Arc<BTreeSet<String>>> {
+        self.fallbacks.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(reference).cloned()
+    }
+
+    pub(crate) fn remember_fallbacks(&self, reference: &str, handles: Arc<BTreeSet<String>>) {
+        self.fallbacks.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(reference.to_owned(), handles);
     }
 
     pub fn root(&self) -> &GraphDocument {

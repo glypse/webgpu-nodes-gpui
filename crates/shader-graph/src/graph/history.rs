@@ -40,6 +40,11 @@ impl History {
         !self.future.is_empty()
     }
 
+    /// The state the history is at.
+    pub fn current(&self) -> Option<&str> {
+        self.current.as_deref()
+    }
+
     /// Forget everything and start from `state`.
     pub fn reset(&mut self, state: String) {
         self.past.clear();

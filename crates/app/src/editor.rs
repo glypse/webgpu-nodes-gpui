@@ -538,6 +538,7 @@ impl Editor {
     }
 
     fn sync_view(&mut self, cx: &mut Context<Self>) {
+        let _span = tracing::info_span!("sync view").entered();
         if let Some(playback) = &self.playback {
             self.files = playback.read(cx).asset_files().clone();
         }
@@ -849,7 +850,10 @@ impl Editor {
             }
             return;
         }
-        let result = self.model.borrow().generate_hoisted().map_err(|e| e.to_string());
+        let result = {
+            let _span = tracing::info_span!("generate program").entered();
+            self.model.borrow().generate_hoisted().map_err(|e| e.to_string())
+        };
         match result {
             Ok(program) => {
                 if program.program.code == self.code {

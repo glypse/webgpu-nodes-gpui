@@ -209,7 +209,12 @@ impl GraphModel {
 
     /// Whether the project differs from how it was last marked saved.
     pub fn has_unsaved_changes(&self) -> bool {
-        Self::snapshot_of(&self.project) != self.saved
+        // The history holds the project's snapshot as of its last change, so no new one is needed
+        // except in the middle of a batch, whose edits aren't recorded yet.
+        match self.history.current() {
+            Some(current) if self.batch_depth == 0 => current != self.saved,
+            _ => Self::snapshot_of(&self.project) != self.saved,
+        }
     }
 
     pub fn mark_saved(&mut self) {
