@@ -39,6 +39,10 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub profile: Option<PathBuf>,
 
+    /// Open an output window beside the project window; --screenshot then captures it.
+    #[arg(long)]
+    pub output: bool,
+
     /// Zoom the first graph area to FACTOR on startup (1 is 100%), centred on its nodes.
     #[arg(long, value_name = "FACTOR", value_parser = parse_zoom)]
     pub zoom: Option<f32>,

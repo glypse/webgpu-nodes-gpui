@@ -73,9 +73,9 @@ pub fn report() -> Option<String> {
     Some(recorded.summary())
 }
 
-/// Writes the window's pixels to `path` as a PNG. Captures the window even
-/// when other windows cover it.
-pub fn save_window(path: &Path) -> Result<()> {
+/// Writes a window's pixels to `path` as a PNG: the one titled `title` if given, else the largest.
+/// Captures the window even when other windows cover it.
+pub fn save_window(path: &Path, title: Option<&str>) -> Result<()> {
     let pid = std::process::id();
     let mut best: Option<(u64, xcap::Window)> = None;
     for window in xcap::Window::all().context("listing windows")? {
@@ -83,6 +83,11 @@ pub fn save_window(path: &Path) -> Result<()> {
             continue;
         };
         if owner != pid || minimized {
+            continue;
+        }
+        if let Some(title) = title
+            && window.title().map_or(true, |t| t != title)
+        {
             continue;
         }
         let area = u64::from(window.width().unwrap_or(0)) * u64::from(window.height().unwrap_or(0));

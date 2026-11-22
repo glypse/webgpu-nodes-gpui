@@ -1,0 +1,489 @@
+//! The app's windows: project windows, each owning its project, plus the
+//! settings window and the output windows that belong to one of them.
+
+use std::path::Path;
+
+use anyhow::Result;
+use gpui::{
+    AnyWindowHandle, App, AppContext as _, Bounds, Entity, EntityId, Global, KeyBinding, SharedString, TitlebarOptions,
+    WindowBounds, WindowOptions, actions, point, px, size,
+};
+use gpui_component::Root;
+
+use crate::playback::Playback;
+use crate::editor::Editor;
+use crate::settings::{Page, SettingsDialog};
+use crate::shell::{Shell, Start};
+
+actions!(windows, [NewOutputWindow, ToggleFullscreen, ToggleOutputStretch, CloseWindow]);
+
+const DEFAULT_SIZE: (f32, f32) = (1400.0, 860.0);
+/// How far a new project window sits from the one it opens beside.
+const CASCADE: f32 = 28.0;
+
+struct SettingsWindow {
+    handle: AnyWindowHandle,
+    dialog: Entity<SettingsDialog>,
+    /// The project window whose project the settings edit.
+    owner: EntityId,
+}
+
+struct OutputWindow {
+    handle: AnyWindowHandle,
+    owner: EntityId,
+}
+
+#[derive(Default)]
+struct Registry {
+    settings: Option<SettingsWindow>,
+    outputs: Vec<OutputWindow>,
+}
+
+impl Global for Registry {}
+
+pub fn init(cx: &mut App) {
+    cx.set_global(Registry::default());
+    cx.bind_keys([
+        KeyBinding::new("cmd-w", CloseWindow, None),
+        KeyBinding::new("ctrl-cmd-f", ToggleFullscreen, None),
+        KeyBinding::new("cmd-alt-o", NewOutputWindow, None),
+        KeyBinding::new("cmd-alt-s", ToggleOutputStretch, Some("Output")),
+    ]);
+    // Actions the focused window doesn't handle end up here. Global listeners run while the focused
+    // window is being updated, so they act on windows once that is done.
+    cx.on_action(|_: &ToggleFullscreen, cx| {
+        cx.defer(|cx| {
+            if let Some(active) = cx.active_window() {
+                cx.update_window(active, |_, window, _| window.toggle_fullscreen()).ok();
+            }
+        });
+    });
+    cx.on_action(|_: &CloseWindow, cx| {
+        cx.defer(|cx| {
+            if let Some(active) = cx.active_window()
+                && shell_in(active, cx).is_none()
+            {
+                cx.update_window(active, |_, window, _| window.remove_window()).ok();
+            }
+        });
+    });
+    for_each_settings_action(cx);
+}
+
+/// A settings window the focus is in has no project to open it for, so opening it again shows it.
+fn for_each_settings_action(cx: &mut App) {
+    fn show(cx: &mut App) {
+        cx.defer(|cx| {
+            if let Some(window) = open_settings_window(cx) {
+                cx.update_window(window, |_, window, _| window.activate_window()).ok();
+            }
+        });
+    }
+    cx.on_action(|_: &crate::shell::OpenSettings, cx| show(cx));
+    cx.on_action(|_: &crate::shell::OpenProjectSettings, cx| show(cx));
+    cx.on_action(|_: &crate::shell::OpenPreferences, cx| show(cx));
+}
+
+/// The shell a window's root view is, or the root's content.
+pub fn shell_of_view(view: &gpui::AnyView, cx: &App) -> Option<Entity<Shell>> {
+    if let Ok(shell) = view.clone().downcast::<Shell>() {
+        return Some(shell);
+    }
+    view.clone().downcast::<Root>().ok()?.read(cx).view().clone().downcast::<Shell>().ok()
+}
+
+/// The shell a window shows, if it is a project window.
+pub fn shell_in(handle: AnyWindowHandle, cx: &App) -> Option<Entity<Shell>> {
+    if let Some(root) = handle.downcast::<Root>() {
+        return root.read(cx).ok()?.view().clone().downcast::<Shell>().ok();
+    }
+    handle.downcast::<Shell>()?.entity(cx).ok()
+}
+
+/// The project windows. A window being updated right now can't be read, so is left out.
+pub fn project_windows(cx: &App) -> Vec<(AnyWindowHandle, Entity<Shell>)> {
+    cx.windows().into_iter().filter_map(|handle| Some((handle, shell_in(handle, cx)?))).collect()
+}
+
+/// The window of another project window that has `path` open.
+pub fn find_project(path: &Path, except: EntityId, cx: &App) -> Option<AnyWindowHandle> {
+    project_windows(cx)
+        .into_iter()
+        .find(|(_, shell)| shell.entity_id() != except && shell.read(cx).path() == Some(path))
+        .map(|(handle, _)| handle)
+}
+
+pub fn activate(handle: AnyWindowHandle, cx: &mut App) {
+    cx.update_window(handle, |_, window, _| window.activate_window()).ok();
+}
+
+/// Opens a project window beside the one with bounds `beside`, or else centred at `size` (in points).
+pub fn open_project(
+    start: Start,
+    zoom: Option<f32>,
+    beside: Option<Bounds<gpui::Pixels>>,
+    size: Option<(f32, f32)>,
+    cx: &mut App,
+) -> Result<gpui::WindowHandle<Root>> {
+    let bounds = match beside {
+        Some(bounds) => Bounds::new(bounds.origin + point(px(CASCADE), px(CASCADE)), bounds.size),
+        None => {
+            let (width, height) = size.unwrap_or(DEFAULT_SIZE);
+            Bounds::centered(None, gpui::size(px(width), px(height)), cx)
+        }
+    };
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions { title: Some("webgpu-nodes".into()), ..Default::default() }),
+        // Playback is driven by this window's frames, which must not slow down while another window,
+        // such as an output on a second display, has the focus.
+        inactive_frame_interval: None,
+        ..Default::default()
+    };
+    // The root hosts the window's dialogs, which the shell opens.
+    cx.open_window(options, |window, cx| {
+        let shell = cx.new(|cx| Shell::start(start, zoom, window, cx));
+        cx.new(|cx| Root::new(gpui::AnyView::from(shell), window, cx))
+    })
+}
+
+fn live(handle: AnyWindowHandle, cx: &App) -> bool {
+    cx.windows().contains(&handle)
+}
+
+/// The settings window, if it is open.
+fn open_settings_window(cx: &mut App) -> Option<AnyWindowHandle> {
+    let registry = cx.global_mut::<Registry>();
+    let handle = registry.settings.as_ref()?.handle;
+    if live(handle, cx) {
+        Some(handle)
+    } else {
+        cx.global_mut::<Registry>().settings = None;
+        None
+    }
+}
+
+/// Shows the settings window on `page`, editing the project of `owner`'s window. There is one settings
+/// window: opening it from another project window makes it edit that window's project.
+pub fn open_settings(
+    page: Page,
+    editor: &Entity<Editor>,
+    playback: &Entity<Playback>,
+    owner: EntityId,
+    name: SharedString,
+    cx: &mut App,
+) {
+    if let Some(handle) = open_settings_window(cx) {
+        let dialog = cx.global::<Registry>().settings.as_ref().map(|s| (s.dialog.clone(), s.owner));
+        if let Some((dialog, current)) = dialog {
+            if current != owner {
+                dialog.update(cx, |d, cx| d.set_target(editor.clone(), playback.clone(), name, cx));
+                if let Some(settings) = cx.global_mut::<Registry>().settings.as_mut() {
+                    settings.owner = owner;
+                }
+            }
+            dialog.update(cx, |d, cx| d.show_page(page, cx));
+        }
+        activate(handle, cx);
+        return;
+    }
+    let bounds = Bounds::centered(None, size(px(768.0), px(576.0)), cx);
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions { title: Some("Settings".into()), ..Default::default() }),
+        ..Default::default()
+    };
+    let (editor, playback) = (editor.clone(), playback.clone());
+    let dialog = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let made = dialog.clone();
+    let opened = cx.open_window(options, move |window, cx| {
+        let settings = cx.new(|cx| SettingsDialog::new(editor, playback, name, window, cx));
+        settings.update(cx, |d, cx| d.show_page(page, cx));
+        *made.borrow_mut() = Some(settings.clone());
+        cx.new(|cx| Root::new(gpui::AnyView::from(settings), window, cx))
+    });
+    match (opened, dialog.take()) {
+        (Ok(handle), Some(dialog)) => {
+            cx.global_mut::<Registry>().settings = Some(SettingsWindow { handle: handle.into(), dialog, owner });
+        }
+        (Err(error), _) => log::error!("failed to open the settings window: {error:#}"),
+        (Ok(_), None) => {}
+    }
+}
+
+/// Keeps the settings window's project name current.
+pub fn project_renamed(owner: EntityId, name: SharedString, cx: &mut App) {
+    let dialog = match cx.try_global::<Registry>().and_then(|r| r.settings.as_ref()) {
+        Some(settings) if settings.owner == owner => settings.dialog.clone(),
+        _ => return,
+    };
+    dialog.update(cx, |d, cx| d.set_project_name(name, cx));
+}
+
+/// Registers an output window opened for the project window `owner`.
+pub fn add_output(handle: AnyWindowHandle, owner: EntityId, cx: &mut App) {
+    let registry = cx.global_mut::<Registry>();
+    registry.outputs.push(OutputWindow { handle, owner });
+}
+
+/// The output windows of a project window.
+#[cfg(test)]
+pub fn outputs_of(owner: EntityId, cx: &App) -> Vec<AnyWindowHandle> {
+    cx.try_global::<Registry>()
+        .map(|r| r.outputs.iter().filter(|o| o.owner == owner).map(|o| o.handle).filter(|h| live(*h, cx)).collect())
+        .unwrap_or_default()
+}
+
+/// Closes what belongs to a project window that is gone: its settings window and its outputs.
+pub fn owner_closed(owner: EntityId, cx: &mut App) {
+    let Some(registry) = cx.try_global::<Registry>() else { return };
+    let mut gone: Vec<AnyWindowHandle> =
+        registry.outputs.iter().filter(|o| o.owner == owner).map(|o| o.handle).collect();
+    if let Some(settings) = &registry.settings
+        && settings.owner == owner
+    {
+        gone.push(settings.handle);
+    }
+    for handle in gone {
+        cx.update_window(handle, |_, window, _| window.remove_window()).ok();
+    }
+    let registry = cx.global_mut::<Registry>();
+    registry.outputs.retain(|o| o.owner != owner);
+    if registry.settings.as_ref().is_some_and(|s| s.owner == owner) {
+        registry.settings = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+    use crate::output::OutputView;
+    use crate::preferences;
+    use crate::shell::{self, NewProject, OpenSettings, TogglePlayback};
+
+    /// A project window that starts without a project file.
+    fn project_window(cx: &mut TestAppContext) -> (Entity<Shell>, VisualTestContext) {
+        let missing = PathBuf::from("/nonexistent/untitled.wgnodes");
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(missing), None, window, cx));
+        cx.run_until_parked();
+        (shell, cx.clone())
+    }
+
+    fn app(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            theme::init(cx);
+            preferences::init(cx);
+            shell::init(cx);
+            init(cx);
+        });
+    }
+
+    fn make_dirty(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+        shell.update(cx, |shell, cx| {
+            shell.editor().update(cx, |editor, cx| {
+                let mut settings = editor.settings();
+                settings.canvas.width += 1;
+                editor.update_settings(settings, cx);
+            });
+        });
+    }
+
+    fn dirty(shell: &Entity<Shell>, cx: &VisualTestContext) -> bool {
+        shell.read_with(cx, |s, cx| s.editor().read(cx).has_unsaved_changes())
+    }
+
+    fn playing(shell: &Entity<Shell>, cx: &VisualTestContext) -> bool {
+        shell.read_with(cx, |s, cx| s.playback().read(cx).playing())
+    }
+
+    /// Closes the window as its close button does: it goes unless the shell asks first.
+    fn close(cx: &mut VisualTestContext) -> bool {
+        let closes = cx.simulate_close();
+        if closes {
+            cx.update(|window, _| window.remove_window());
+        }
+        closes
+    }
+
+    /// The windows open once what a closed window releases has been closed in turn.
+    fn window_count(cx: &mut TestAppContext) -> usize {
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update(|_| {});
+        }
+        cx.update(|cx| cx.windows().len())
+    }
+
+    #[gpui::test]
+    fn project_windows_keep_their_own_state(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        let (b, mut cb) = project_window(cx);
+        assert_ne!(a.read_with(&ca, |s, _| s.playback().entity_id()), b.read_with(&cb, |s, _| s.playback().entity_id()));
+
+        make_dirty(&a, &mut ca);
+        assert!(dirty(&a, &ca));
+        assert!(!dirty(&b, &cb), "editing one project leaves the other alone");
+
+        ca.dispatch_action(TogglePlayback);
+        assert!(playing(&a, &ca));
+        assert!(!playing(&b, &cb), "playback is per window");
+        cb.dispatch_action(TogglePlayback);
+        cb.dispatch_action(TogglePlayback);
+        assert!(playing(&a, &ca) && !playing(&b, &cb), "a menu action goes to the window it is dispatched in");
+        assert_eq!(window_count(cx), 2);
+    }
+
+    #[gpui::test]
+    fn closing_asks_only_for_the_window_with_unsaved_changes(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        let (_, mut cb) = project_window(cx);
+        make_dirty(&a, &mut ca);
+
+        assert!(close(&mut cb), "a saved project closes without asking");
+        assert!(!cb.has_pending_prompt());
+        assert!(!close(&mut ca));
+        assert!(ca.has_pending_prompt());
+        ca.simulate_prompt_answer("Cancel");
+        ca.run_until_parked();
+        assert_eq!(window_count(cx), 1);
+    }
+
+    #[gpui::test]
+    fn quitting_asks_each_window_with_unsaved_changes(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        let (b, mut cb) = project_window(cx);
+        let (_, cc) = project_window(cx);
+        make_dirty(&a, &mut ca);
+        make_dirty(&b, &mut cb);
+        let quit = Rc::new(Cell::new(false));
+        let done = quit.clone();
+        cx.update(|cx| shell::confirm_all_discards(cx, move |_| done.set(true)));
+
+        for _ in 0..2 {
+            let ask = if ca.has_pending_prompt() { &mut ca } else { &mut cb };
+            assert!(ask.has_pending_prompt(), "each dirty window asks in turn");
+            assert!(!quit.get());
+            ask.simulate_prompt_answer("Discard");
+            ask.run_until_parked();
+        }
+        assert!(!cc.has_pending_prompt(), "a saved project isn't asked");
+        assert!(quit.get(), "quitting goes on once every window has agreed");
+    }
+
+    #[gpui::test]
+    fn one_window_refusing_stops_the_quit(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        let (b, mut cb) = project_window(cx);
+        make_dirty(&a, &mut ca);
+        make_dirty(&b, &mut cb);
+        let quit = Rc::new(Cell::new(false));
+        let done = quit.clone();
+        cx.update(|cx| shell::confirm_all_discards(cx, move |_| done.set(true)));
+        let ask = if ca.has_pending_prompt() { &mut ca } else { &mut cb };
+        ask.simulate_prompt_answer("Cancel");
+        ask.run_until_parked();
+        assert!(!quit.get());
+        assert!(!ca.has_pending_prompt() && !cb.has_pending_prompt(), "nothing else is asked");
+    }
+
+    #[gpui::test]
+    fn new_replaces_nothing_in_an_untouched_window_and_opens_a_window_otherwise(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        ca.dispatch_action(NewProject);
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 1, "a new project is already what New would open");
+
+        make_dirty(&a, &mut ca);
+        ca.dispatch_action(NewProject);
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 2, "New opens a window beside a project with changes");
+        assert!(dirty(&a, &ca), "and keeps them");
+    }
+
+    #[gpui::test]
+    fn there_is_one_settings_window_editing_the_project_it_was_opened_from(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        let (b, mut cb) = project_window(cx);
+        let settings_of = |cx: &mut TestAppContext| cx.update(|cx| cx.global::<Registry>().settings.as_ref().map(|s| s.owner));
+
+        ca.dispatch_action(OpenSettings);
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 3);
+        assert_eq!(settings_of(cx), Some(a.entity_id()));
+
+        cb.dispatch_action(OpenSettings);
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 3, "opening it again shows the one that is open");
+        assert_eq!(settings_of(cx), Some(b.entity_id()), "and points it at the project it was asked from");
+
+        let dialog = cx.update(|cx| cx.global::<Registry>().settings.as_ref().map(|s| s.dialog.clone())).expect("open");
+        let width = b.read_with(&cb, |s, cx| s.editor().read(cx).settings().canvas.width);
+        dialog.update(&mut cb, |d, cx| {
+            d.update(cx, |s| s.canvas.width = width + 5);
+        });
+        assert_eq!(b.read_with(&cb, |s, cx| s.editor().read(cx).settings().canvas.width), width + 5, "it updates live");
+        assert_eq!(a.read_with(&ca, |s, cx| s.editor().read(cx).settings().canvas.width), width);
+
+        assert!(close(&mut ca));
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 2, "closing a window that doesn't own the settings leaves them");
+        // The project has a change now, so closing asks first.
+        drop((a, b));
+        assert!(!close(&mut cb));
+        cb.simulate_prompt_answer("Discard");
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 0, "the settings close with their project window");
+        assert_eq!(settings_of(cx), None);
+    }
+
+    #[gpui::test]
+    fn an_output_window_shows_its_projects_playback_without_drawing_frames(cx: &mut TestAppContext) {
+        app(cx);
+        let (a, mut ca) = project_window(cx);
+        let (b, mut cb) = project_window(cx);
+        ca.dispatch_action(NewOutputWindow);
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 3);
+        let outputs = cx.update(|cx| outputs_of(a.entity_id(), cx));
+        assert_eq!(outputs.len(), 1);
+        assert!(cx.update(|cx| outputs_of(b.entity_id(), cx)).is_empty());
+
+        let view = cx.update(|cx| outputs[0].downcast::<OutputView>().and_then(|h| h.entity(cx).ok())).expect("an output view");
+        assert_eq!(
+            view.read_with(&ca, |v, _| v.playback().entity_id()),
+            a.read_with(&ca, |s, _| s.playback().entity_id()),
+            "it shows the playback of the window it was opened from"
+        );
+
+        let submitted = a.read_with(&ca, |s, cx| s.playback().read(cx).submitted());
+        let mut output = VisualTestContext::from_window(outputs[0], cx);
+        for _ in 0..5 {
+            output.update(|window, _| window.refresh());
+            output.run_until_parked();
+        }
+        assert_eq!(a.read_with(&ca, |s, cx| s.playback().read(cx).submitted()), submitted, "drawing the output renders nothing");
+
+        view.update(&mut output, |v, cx| v.toggle_stretch(cx));
+        assert!(view.read_with(&output, |v, _| v.stretch()));
+
+        assert!(close(&mut cb));
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 2, "an output stays when another project closes");
+        drop(a);
+        assert!(close(&mut ca));
+        cx.run_until_parked();
+        assert_eq!(window_count(cx), 0, "the outputs close with their project window");
+    }
+}

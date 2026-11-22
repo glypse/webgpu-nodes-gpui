@@ -1,12 +1,11 @@
-//! The settings dialog: the project's canvas, time and colour settings, and
+//! The settings window: a project's canvas, time and colour settings, and
 //! the user's own appearance preferences.
 
 use guard::SafeListener as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use runtime::Size;
 use shader_graph::graph::{ColorSpace, MAX_CANVAS_SIZE, MAX_FPS, ProjectSettings};
@@ -88,14 +87,12 @@ const RESOLUTION_PRESETS: &[(&str, u32, u32)] = &[
 
 const FRAME_RATES: &[u32] = &[24, 25, 30, 50, 60, 120];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SettingsEvent {
-    Close,
-}
-
+/// The contents of the settings window, editing the project of one editor and its playback.
 pub struct SettingsDialog {
     editor: Entity<Editor>,
     playback: Entity<Playback>,
+    /// The name of the project edited, as its window shows it.
+    project: SharedString,
     /// The size frames render at, as last shown: the preview's while following it.
     shown: Size,
     page: Page,
@@ -104,10 +101,9 @@ pub struct SettingsDialog {
     height: Entity<NumberField>,
     fps: Entity<NumberField>,
     font: Entity<InputState>,
+    watching: Subscription,
     _subscriptions: Vec<Subscription>,
 }
-
-impl EventEmitter<SettingsEvent> for SettingsDialog {}
 
 impl Focusable for SettingsDialog {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -130,6 +126,7 @@ impl SettingsDialog {
     pub fn new(
         editor: Entity<Editor>,
         playback: Entity<Playback>,
+        project: SharedString,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -153,13 +150,8 @@ impl SettingsDialog {
             input.set_value(font_text, window, cx);
             input
         });
+        let watching = Self::watch(&playback, cx);
         let subscriptions = vec![
-            // Playback changes every frame; only a change of the size needs a redraw.
-            cx.observe(&playback, |this, playback, cx| {
-                if playback.read(cx).render_size() != this.shown {
-                    cx.notify();
-                }
-            }),
             cx.subscribe(&width, |this, _, NumberEvent::Change(v), cx| {
                 guard::guard("canvas width", || this.update(cx, |s| s.canvas.width = *v as u32));
             }),
@@ -183,6 +175,7 @@ impl SettingsDialog {
         Self {
             editor,
             playback,
+            project,
             shown,
             page: Page::Canvas,
             focus,
@@ -190,19 +183,48 @@ impl SettingsDialog {
             height,
             fps,
             font,
+            watching,
             _subscriptions: subscriptions,
         }
     }
 
-    fn update(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut ProjectSettings)) {
+    /// Playback changes every frame; only a change of the size needs a redraw.
+    fn watch(playback: &Entity<Playback>, cx: &mut Context<Self>) -> Subscription {
+        cx.observe(playback, |this, playback, cx| {
+            if playback.read(cx).render_size() != this.shown {
+                cx.notify();
+            }
+        })
+    }
+
+    /// Edits another project from now on.
+    pub fn set_target(
+        &mut self,
+        editor: Entity<Editor>,
+        playback: Entity<Playback>,
+        project: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        self.watching = Self::watch(&playback, cx);
+        self.shown = playback.read(cx).render_size();
+        self.editor = editor;
+        self.playback = playback;
+        self.project = project;
+        cx.notify();
+    }
+
+    pub fn set_project_name(&mut self, project: SharedString, cx: &mut Context<Self>) {
+        if self.project != project {
+            self.project = project;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn update(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut ProjectSettings)) {
         let mut settings = self.editor.read(cx).settings();
         f(&mut settings);
         self.editor.update(cx, |e, cx| e.update_settings(settings, cx));
         cx.notify();
-    }
-
-    fn close(&mut self, cx: &mut Context<Self>) {
-        cx.emit(SettingsEvent::Close);
     }
 
     fn field(&self, label: &str, description: Option<String>, child: impl IntoElement, cx: &App) -> AnyElement {
@@ -281,7 +303,7 @@ impl SettingsDialog {
             "Size",
             Some(
                 if follow {
-                    "Frames render at the preview's size, filling it."
+                    "Frames render at the size of the preview or output window used last, filling it."
                 } else {
                     "Frames render at a fixed resolution, fitted into the preview."
                 }
@@ -505,6 +527,15 @@ impl SettingsDialog {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child("Settings"),
             )
+            .child(
+                div()
+                    .px_2()
+                    .text_size(theme.text.xs)
+                    .text_color(c.muted_foreground)
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(self.project.clone()),
+            )
             .children(GROUPS.iter().map(|group| {
                 div()
                     .flex()
@@ -614,7 +645,8 @@ impl GroupListener for Context<'_, SettingsDialog> {
 }
 
 impl Render for SettingsDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("settings", || {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("settings", || {
+        preferences::apply(window, cx);
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let settings = self.editor.read(cx).settings();
@@ -630,29 +662,20 @@ impl Render for SettingsDialog {
             Page::Appearance => self.appearance_page(cx),
         };
         let nav = self.nav(cx);
-        let card = div()
+        div()
             .id("settings-card")
             .track_focus(&self.focus)
             .key_context("SettingsDialog")
-            .occlude()
             .flex()
-            .w(px(768.0))
-            .h(px(576.0))
-            .max_w_full()
-            .max_h_full()
+            .size_full()
             .overflow_hidden()
-            .rounded(theme.radius.xl)
-            .border_1()
-            .border_color(c.foreground.opacity(0.1))
             .bg(c.card)
             .text_color(c.card_foreground)
             .text_size(theme.text.sm)
             .font_family(theme.font.clone())
-            .shadow_lg()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_key_down(cx.safe_listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.safe_listener(|_, event: &KeyDownEvent, window, _| {
                 if event.keystroke.key == "escape" {
-                    this.close(cx);
+                    window.remove_window();
                 }
             }))
             .child(nav)
@@ -666,40 +689,19 @@ impl Render for SettingsDialog {
                     .child(
                         div()
                             .flex()
-                            .items_start()
-                            .justify_between()
+                            .flex_col()
                             .gap_1()
                             .py_4()
-                            .pl_4()
-                            .pr_3()
+                            .px_4()
                             .border_b_1()
                             .border_color(c.border)
                             .child(
                                 div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_size(theme.text.base)
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(info.0),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(theme.text.sm)
-                                            .text_color(c.muted_foreground)
-                                            .child(info.1),
-                                    ),
+                                    .text_size(theme.text.base)
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(info.0),
                             )
-                            .child(
-                                Button::new("close-settings")
-                                    .ghost()
-                                    .small()
-                                    .icon(theme::IconName::X)
-                                    .tooltip("Close")
-                                    .on_click(cx.safe_listener(|this, _, _, cx| this.close(cx))),
-                            ),
+                            .child(div().text_size(theme.text.sm).text_color(c.muted_foreground).child(info.1)),
                     )
                     .child(
                         div()
@@ -713,25 +715,7 @@ impl Render for SettingsDialog {
                             .overflow_y_scroll()
                             .children(body),
                     ),
-            );
-        deferred(
-            div()
-                .id("settings-backdrop")
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p_8()
-                .bg(gpui::black().opacity(0.5))
-                .occlude()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.safe_listener(|this, _, _, cx| this.close(cx)),
-                )
-                .child(card),
-        )
-        .with_priority(10)
+            )
     })
     }
 }
@@ -753,7 +737,7 @@ mod tests {
             let e = cx.new(|cx| Editor::new(window, cx));
             *shared.borrow_mut() = Some(e.clone());
             let playback = cx.new(|_| Playback::new());
-            SettingsDialog::new(e, playback, window, cx)
+            SettingsDialog::new(e, playback, "Untitled".into(), window, cx)
         });
         let editor = editor.borrow().clone().expect("editor");
         let announced = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -787,7 +771,7 @@ mod tests {
         let (dialog, cx) = cx.add_window_view(|window, cx| {
             let e = cx.new(|cx| Editor::new(window, cx));
             let playback = cx.new(|_| Playback::new());
-            SettingsDialog::new(e, playback, window, cx)
+            SettingsDialog::new(e, playback, "Untitled".into(), window, cx)
         });
         for page in [Page::Canvas, Page::Time, Page::Color, Page::Appearance] {
             dialog.update(cx, |d, cx| {

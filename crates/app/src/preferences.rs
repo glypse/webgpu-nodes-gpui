@@ -138,7 +138,8 @@ pub fn apply(window: &mut Window, cx: &mut App) {
     if current.is_none_or(|t| t.appearance != appearance || t.font != wanted.font) {
         cx.set_global(wanted);
         theme::sync_component_theme(appearance, cx);
-        window.refresh();
+        // Every window shows the theme, and this may be a change made in another one.
+        cx.refresh_windows();
     }
 }
 

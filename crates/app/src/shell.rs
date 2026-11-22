@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use gpui::{
-    App, AppContext as _, Context, Entity, ExternalPaths, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding,
+    AnyWindowHandle, App, AppContext as _, Context, Entity, EntityId, ExternalPaths, InteractiveElement as _, IntoElement, KeyBinding,
     ParentElement as _, PathPromptOptions, PromptLevel, Render, Styled as _, StyleRefinement, Window,
     actions, div,
 };
@@ -25,12 +25,14 @@ use crate::export_dialog;
 use crate::group_bundles;
 use crate::graph::breadcrumbs::Breadcrumbs;
 use crate::layout::{self, GraphView};
+use crate::output;
 use crate::playback::{Playback, PlaybackEvent};
 use crate::preferences::{self, Preferences};
-use crate::settings::{Page, SettingsDialog, SettingsEvent};
+use crate::settings::Page;
 use crate::project::{self, AssetFiles, Loaded};
 use crate::preview::{self, PreviewArea, PreviewToolbar};
 use crate::timeline::TimelineBar;
+use crate::windows::{self, CloseWindow, NewOutputWindow};
 
 actions!(
     shell,
@@ -156,9 +158,20 @@ pub struct Shell {
     editor: Entity<Editor>,
     views: Rc<RefCell<AreaViews>>,
     path: Option<PathBuf>,
-    settings: Option<Entity<SettingsDialog>>,
+    id: EntityId,
+    /// The project name the title and the settings window last showed.
+    named: String,
     /// Whether a discard prompt is open, so repeated close or quit requests don't stack prompts.
     confirming: bool,
+}
+
+/// What a new window opens with.
+pub enum Start {
+    /// What the app starts with: the project asked for, else the last one opened.
+    Launch(Option<PathBuf>),
+    Blank,
+    /// A project already read, which the window takes over.
+    Loaded(PathBuf, Loaded),
 }
 
 impl Shell {
@@ -168,23 +181,37 @@ impl Shell {
     }
 
     /// `zoom` opens the first graph area at that zoom, as `--zoom` asks for at launch.
+    #[cfg(test)]
     pub fn new(requested: Option<PathBuf>, zoom: Option<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::start(Start::Launch(requested), zoom, window, cx)
+    }
+
+    pub fn start(start: Start, zoom: Option<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let playback = cx.new(|_| Playback::new());
         let editor = cx.new(|cx| Editor::new(window, cx));
         editor.update(cx, |e, cx| e.attach_playback(&playback, cx));
         let mut path = None;
         let mut layout = None;
-        if let Some(last) = requested.or_else(project::last) {
-            match project::read(&last) {
-                Ok(Loaded { project: loaded, files }) => {
-                    layout = layout::load(&loaded);
-                    assets::report_problems(window, &unusable_files(&loaded, &files), cx);
-                    playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
-                    editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
-                    path = Some(last);
+        let opening = match start {
+            Start::Launch(requested) => requested.or_else(project::last).and_then(|last| match project::read(&last) {
+                Ok(loaded) => Some((last, loaded)),
+                Err(e) => {
+                    log::warn!("couldn't reopen {}: {e:#}", last.display());
+                    None
                 }
-                Err(e) => log::warn!("couldn't reopen {}: {e:#}", last.display()),
+            }),
+            Start::Blank => None,
+            Start::Loaded(path, loaded) => {
+                project::remember(Some(&path));
+                Some((path, loaded))
             }
+        };
+        if let Some((last, Loaded { project: loaded, files })) = opening {
+            layout = layout::load(&loaded);
+            assets::report_problems(window, &unusable_files(&loaded, &files), cx);
+            playback.update(cx, |p, cx| p.set_asset_files(files, window, cx));
+            editor.update(cx, |e, cx| e.load_project(Some(loaded), None, cx));
+            path = Some(last);
         }
 
         playback.update(cx, |p, cx| apply_settings(p, &editor.read(cx).settings(), window, cx));
@@ -212,11 +239,21 @@ impl Shell {
         })
         .detach();
 
-        cx.subscribe_in(&playback, window, |this, playback, event: &PlaybackEvent, _, cx| {
+        cx.subscribe_in(&playback, window, |this, playback, event: &PlaybackEvent, window, cx| {
             let PlaybackEvent::Changed = event;
             guard::guard("playback settings", || this.adopt_playback_settings(playback, cx));
-            let playing = playback.read(cx).playing();
-            crate::set_playing(cx, playing);
+            // The menus show the focused window's playback.
+            if window.is_window_active() {
+                let playing = playback.read(cx).playing();
+                crate::set_playing(cx, playing);
+            }
+        })
+        .detach();
+        cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                let playing = this.playback.read(cx).playing();
+                crate::set_playing(cx, playing);
+            }
         })
         .detach();
 
@@ -304,8 +341,10 @@ impl Shell {
                 }
             }, cx)
         });
-        let shell = Self { screen, playback, editor, views, path, settings: None, confirming: false };
+        let id = cx.entity_id();
+        let mut shell = Self { screen, playback, editor, views, path, id, named: String::new(), confirming: false };
         shell.refresh_title(window, cx);
+        cx.on_release(move |_, cx| windows::owner_closed(id, cx)).detach();
         let shell_weak = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             shell_weak.update(cx, |this, cx| this.close_requested(window, cx)).unwrap_or(true)
@@ -383,32 +422,53 @@ impl Shell {
         }
     }
 
-    /// Opens the settings dialog on `page`, or moves the open one there.
-    fn open_settings(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.settings.clone() {
-            dialog.update(cx, |dialog, cx| dialog.show_page(page, cx));
-            return;
-        }
-        let editor = self.editor.clone();
-        let playback = self.playback.clone();
-        let dialog = cx.new(|cx| SettingsDialog::new(editor, playback, window, cx));
-        dialog.update(cx, |dialog, cx| dialog.show_page(page, cx));
-        cx.subscribe_in(&dialog, window, |this, _, SettingsEvent::Close, window, cx| {
-            this.settings = None;
-            let editor_focus = this.editor.read(cx).focus_handle(cx);
-            window.focus(&editor_focus, cx);
-            cx.notify();
-        })
-        .detach();
-        self.settings = Some(dialog);
-        cx.notify();
+    /// Shows the settings window on `page`, editing this window's project.
+    pub(crate) fn show_settings(&mut self, page: Page, cx: &mut Context<Self>) {
+        let name = self.project_name().into();
+        windows::open_settings(page, &self.editor, &self.playback, cx.entity_id(), name, cx);
     }
 
-    fn refresh_title(&self, window: &mut Window, cx: &App) {
-        let name = self.path.as_deref().map_or_else(|| "Untitled".to_owned(), project::file_name);
+    /// Opens an output window for this project; `window` is the window that draws it.
+    pub(crate) fn new_output(&mut self, window: AnyWindowHandle, cx: &mut Context<Self>) {
+        if let Err(error) = output::open(&cx.entity(), &self.playback, window, cx) {
+            log::error!("failed to open the output window: {error:#}");
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn editor(&self) -> &Entity<Editor> {
+        &self.editor
+    }
+
+    #[cfg(test)]
+    pub(crate) fn playback(&self) -> &Entity<Playback> {
+        &self.playback
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Whether this is a new project nothing was done to, which a project opened or created may replace.
+    fn untouched(&self, cx: &App) -> bool {
+        self.path.is_none() && !self.editor.read(cx).has_unsaved_changes()
+    }
+
+    fn project_name(&self) -> String {
+        self.path.as_deref().map_or_else(|| "Untitled".to_owned(), project::file_name)
+    }
+
+    fn refresh_title(&mut self, window: &mut Window, cx: &mut App) {
+        let name = self.project_name();
         let dirty = self.editor.read(cx).has_unsaved_changes();
         window.set_window_title(&format!("{name}{} - webgpu-nodes", if dirty { " *" } else { "" }));
         window.set_window_edited(dirty);
+        // Only a changed name is passed on: a change made in the settings window comes through here
+        // while that window is being updated, and the name can't change then.
+        if name != self.named {
+            windows::project_renamed(self.id, name.clone().into(), cx);
+            self.named = name;
+        }
     }
 
     fn report(window: &mut Window, message: &str, error: &anyhow::Error, cx: &mut App) {
@@ -470,40 +530,69 @@ impl Shell {
         self.refresh_title(window, cx);
     }
 
+    /// Opens a new project in a new window, or stays here when this one is a new project already.
     fn new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.confirm_discard(window, cx, |this, window, cx| {
-            this.editor.update(cx, |e, cx| e.load_project(None, None, cx));
-            this.show_screen(default_screen(), Vec::new(), cx);
-            this.adopt(None, window, cx);
-        });
+        if self.untouched(cx) {
+            return;
+        }
+        project::remember(None);
+        self.open_window(Start::Blank, window, cx);
+    }
+
+    fn open_window(&mut self, start: Start, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(e) = windows::open_project(start, None, Some(window.bounds()), None, cx) {
+            Self::report(window, "Couldn't open a window", &e, cx);
+        }
     }
 
     fn open_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.confirm_discard(window, cx, |_, window, cx| {
-            let paths = cx.prompt_for_paths(PathPromptOptions {
-                files: true,
-                directories: false,
-                multiple: false,
-                prompt: None,
-            });
-            cx.spawn_in(window, async move |this, cx| {
-                let picked = match paths.await {
-                    Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                    Ok(Err(e)) => {
-                        log::error!("the open dialog failed: {e:#}");
-                        None
-                    }
-                    _ => None,
-                };
-                if let Some(path) = picked {
-                    this.update_in(cx, |this, window, cx| {
-                        guard::guard("open project", || this.load(path, window, cx));
-                    })
-                    .ok();
-                }
-            })
-            .detach();
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
         });
+        cx.spawn_in(window, async move |this, cx| {
+            let picked = match paths.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Ok(Err(e)) => {
+                    log::error!("the open dialog failed: {e:#}");
+                    None
+                }
+                _ => None,
+            };
+            if let Some(path) = picked {
+                this.update_in(cx, |this, window, cx| {
+                    guard::guard("open project", || this.open_path(path, window, cx));
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Opens a project file: a window that has it open comes to the front, a new project here is
+    /// replaced by it, and otherwise it opens in a new window.
+    pub fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.path.as_deref() == Some(path.as_path()) {
+            window.activate_window();
+            return;
+        }
+        if let Some(open) = windows::find_project(&path, cx.entity_id(), cx) {
+            windows::activate(open, cx);
+            return;
+        }
+        if self.untouched(cx) {
+            self.load(path, window, cx);
+            return;
+        }
+        match project::read(&path) {
+            Ok(loaded) => self.open_window(Start::Loaded(path, loaded), window, cx),
+            Err(e) => {
+                let message = format!("Couldn't open {}", project::file_name(&path));
+                Self::report(window, &message, &e, cx);
+            }
+        }
     }
 
     pub fn load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -645,15 +734,32 @@ fn unusable_files(project: &GraphProject, files: &AssetFiles) -> Vec<String> {
         .collect()
 }
 
-/// Asks before a closing or quitting app loses unsaved changes.
 pub fn request_quit(cx: &mut App) {
-    let Some(handle) = cx.windows().into_iter().find_map(|w| w.downcast::<Shell>()) else {
-        cx.quit();
+    confirm_all_discards(cx, |cx| cx.quit());
+}
+
+/// Runs `then` once every project window has agreed to lose its unsaved changes, asking each in turn.
+/// A window that refuses stops it.
+pub(crate) fn confirm_all_discards(cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
+    let windows = windows::project_windows(cx).into_iter().map(|(handle, _)| handle).collect();
+    ask_each(windows, Box::new(then), cx);
+}
+
+fn ask_each(mut remaining: Vec<AnyWindowHandle>, then: Box<dyn FnOnce(&mut App)>, cx: &mut App) {
+    let Some(handle) = remaining.pop() else {
+        then(cx);
         return;
     };
-    if let Err(error) = handle.update(cx, |shell, window, cx| {
-        shell.confirm_discard(window, cx, |_, _, cx| cx.quit());
-    }) {
+    let asked = cx.update_window(handle, |view, window, cx| {
+        let Some(shell) = windows::shell_of_view(&view, cx) else { return };
+        shell.update(cx, |shell, cx| {
+            if shell.editor.read(cx).has_unsaved_changes() {
+                window.activate_window();
+            }
+            shell.confirm_discard(window, cx, move |_, _, cx| ask_each(remaining, then, cx));
+        });
+    });
+    if let Err(error) = asked {
         log::error!("couldn't ask about unsaved changes: {error:#}");
     }
 }
@@ -707,14 +813,22 @@ impl Render for Shell {
             .on_action(cx.safe_listener(|this, _: &ExportVideo, window, cx| {
                 export_dialog::open(this.editor.clone(), this.playback.clone(), window, cx);
             }))
-            .on_action(cx.safe_listener(|this, _: &OpenSettings, window, cx| {
-                this.open_settings(Page::Canvas, window, cx);
+            .on_action(cx.safe_listener(|this, _: &OpenSettings, _, cx| {
+                this.show_settings(Page::Canvas, cx);
             }))
-            .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, window, cx| {
-                this.open_settings(Page::Canvas, window, cx);
+            .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, _, cx| {
+                this.show_settings(Page::Canvas, cx);
             }))
-            .on_action(cx.safe_listener(|this, _: &OpenPreferences, window, cx| {
-                this.open_settings(Page::Appearance, window, cx);
+            .on_action(cx.safe_listener(|this, _: &OpenPreferences, _, cx| {
+                this.show_settings(Page::Appearance, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &NewOutputWindow, window, cx| {
+                this.new_output(window.window_handle(), cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &CloseWindow, window, cx| {
+                if this.close_requested(window, cx) {
+                    window.remove_window();
+                }
             }))
             .on_action(cx.safe_listener(|this, _: &ExportFrame, window, cx| {
                 preview::export_png(&this.playback, window, cx);
@@ -752,7 +866,6 @@ impl Render for Shell {
                 assets::import_paths(&this.editor, &this.playback, &paths.0, window, cx);
             }))
             .child(self.screen.clone().cached(StyleRefinement::default().size_full()))
-            .children(self.settings.clone())
     })
     }
 }
@@ -761,7 +874,7 @@ impl Render for Shell {
 mod tests {
     use std::path::PathBuf;
 
-    use gpui::{Modifiers, TestAppContext};
+    use gpui::{Focusable as _, Modifiers, TestAppContext};
     use shader_graph::assets::{Asset, AssetFile, asset_hash};
 
     use super::*;

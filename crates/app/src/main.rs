@@ -6,6 +6,7 @@ mod export_dialog;
 mod graph;
 mod group_bundles;
 mod layout;
+mod output;
 mod playback;
 mod preferences;
 mod preview;
@@ -16,11 +17,9 @@ mod scenes;
 mod settings;
 mod shell;
 mod timeline;
+mod windows;
 
-use gpui::{
-    App, AppContext as _, Bounds, Global, KeyBinding, Menu, MenuItem, TitlebarOptions,
-    WindowBounds, WindowOptions, actions, px, size,
-};
+use gpui::{App, AppContext as _, Global, KeyBinding, Menu, MenuItem, actions};
 
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,9 +30,10 @@ use gpui::{AsyncApp, WindowHandle};
 use preferences::ToggleDeveloperTools;
 use shell::{
     ExportFrame, ExportVideo, ImportGroups, ImportMedia, MenuActualSizePreview, MenuFitPreview, MenuZoomPreviewIn,
-    MenuZoomPreviewOut, OpenPreferences, OpenProject, OpenProjectSettings, OpenSettings, SaveProject, Shell,
-    ToggleMode, TogglePlayback,
+    MenuZoomPreviewOut, NewProject, OpenPreferences, OpenProject, OpenProjectSettings, OpenSettings, SaveProject,
+    SaveProjectAs, Shell, Start, ToggleMode, TogglePlayback,
 };
+use windows::{CloseWindow, NewOutputWindow, ToggleFullscreen, ToggleOutputStretch};
 
 actions!(app, [Quit]);
 
@@ -80,7 +80,9 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
             name: "File".into(),
             disabled: false,
             items: vec![
+                MenuItem::action("New", NewProject),
                 MenuItem::action("Save", SaveProject),
+                MenuItem::action("Save as…", SaveProjectAs),
                 MenuItem::action("Upload", OpenProject),
                 MenuItem::action("Import media…", ImportMedia),
                 MenuItem::separator(),
@@ -122,6 +124,18 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
             ],
         },
         Menu {
+            name: "Window".into(),
+            disabled: false,
+            items: vec![
+                MenuItem::action("New output window", NewOutputWindow),
+                MenuItem::separator(),
+                MenuItem::action("Toggle full screen", ToggleFullscreen),
+                MenuItem::action("Toggle output stretch", ToggleOutputStretch),
+                MenuItem::separator(),
+                MenuItem::action("Close window", CloseWindow),
+            ],
+        },
+        Menu {
             name: "Display".into(),
             disabled: false,
             items: vec![
@@ -159,26 +173,20 @@ fn main() -> ExitCode {
         theme::init(cx);
         preferences::init(cx);
         shell::init(cx);
+        windows::init(cx);
         editor::init(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        cx.on_action(|_: &Quit, cx| shell::request_quit(cx));
+        // Global listeners run while the focused window is updated, so quitting waits until it is done.
+        cx.on_action(|_: &Quit, cx| cx.defer(shell::request_quit));
         refresh_menus(cx);
         let window_size = launch.window.unwrap_or(cli::Size { width: 1400.0, height: 860.0 });
-        let bounds = Bounds::centered(None, size(px(window_size.width), px(window_size.height)), cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitlebarOptions {
-                title: Some("webgpu-nodes".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let project = launch.project.clone();
-        // The root hosts the window's dialogs, which the shell opens.
-        let opened = cx.open_window(options, |window, cx| {
-            let shell = cx.new(|cx| Shell::new(project, launch.zoom, window, cx));
-            cx.new(|cx| gpui_component::Root::new(gpui::AnyView::from(shell), window, cx))
-        });
+        let opened = windows::open_project(
+            Start::Launch(launch.project.clone()),
+            launch.zoom,
+            None,
+            Some((window_size.width, window_size.height)),
+            cx,
+        );
         match opened {
             Ok(handle) => {
                 if launch.play
@@ -189,6 +197,16 @@ fn main() -> ExitCode {
                     })
                 {
                     log::error!("failed to start playback: {error:#}");
+                }
+                if launch.output
+                    && let Err(error) = handle.update(cx, |root, window, cx| {
+                        if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                            let owner = window.window_handle();
+                            shell.update(cx, |shell, cx| shell.new_output(owner, cx));
+                        }
+                    })
+                {
+                    log::error!("failed to open the output window: {error:#}");
                 }
                 if launch.bounded() || launch.screenshot.is_some() {
                     let launch = launch.clone();
@@ -205,7 +223,12 @@ fn main() -> ExitCode {
             std::future::ready(())
         })
         .detach();
-        cx.on_window_closed(|cx, _| cx.quit()).detach();
+        cx.on_window_closed(|cx, _| {
+            if windows::project_windows(cx).is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
         cx.activate(true);
     });
     if SCREENSHOT_FAILED.load(Ordering::Relaxed) {
@@ -249,7 +272,7 @@ async fn wind_down(launch: cli::Cli, handle: WindowHandle<gpui_component::Root>,
             }
             cx.background_executor().timer(Duration::from_millis(100)).await;
         }
-        if let Err(error) = probe::save_window(path) {
+        if let Err(error) = probe::save_window(path, launch.output.then_some("Output")) {
             log::error!("screenshot failed: {error:#}");
             SCREENSHOT_FAILED.store(true, Ordering::Relaxed);
         }
@@ -283,10 +306,14 @@ mod tests {
         assert_eq!(
             labels(menu(&menus, "File")),
             [
-                "Save", "Upload", "Import media…", "-", "Export selected group", "Import groups", "-",
+                "New", "Save", "Save as…", "Upload", "Import media…", "-", "Export selected group", "Import groups", "-",
                 "Export frame as PNG", "Export video…", "-",
                 "Project settings…", "-", "Developer tools",
             ]
+        );
+        assert_eq!(
+            labels(menu(&menus, "Window")),
+            ["New output window", "-", "Toggle full screen", "Toggle output stretch", "-", "Close window"]
         );
         assert_eq!(
             labels(menu(&menus, "Edit")),

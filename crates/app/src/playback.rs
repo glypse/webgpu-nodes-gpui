@@ -97,6 +97,8 @@ pub struct Playback {
     /// The latest frame drawn, as the window shows it.
     shown: Option<Shown>,
     stats: FrameStats,
+    /// Frames sent to the GPU so far: every window showing the playback shows these, none draws its own.
+    submitted: u64,
     /// The WGSL of the latest program the graph generated, working or not.
     pub code: SharedString,
     pub failure: Option<Failure>,
@@ -133,6 +135,7 @@ impl Playback {
             followed: None,
             shown: None,
             stats: FrameStats::default(),
+            submitted: 0,
             code: SharedString::default(),
             failure,
             refresh_rate: None,
@@ -205,6 +208,11 @@ impl Playback {
             self.player.invalidate();
             self.changed(window, cx);
         }
+    }
+
+    #[cfg(test)]
+    pub fn submitted(&self) -> u64 {
+        self.submitted
     }
 
     pub fn shown(&self) -> Option<Shown> {
@@ -484,7 +492,10 @@ impl Playback {
         );
         self.stats.submitted(started.elapsed());
         match submitted {
-            Ok(()) => true,
+            Ok(()) => {
+                self.submitted += 1;
+                true
+            }
             Err(error) => {
                 self.failure = Some(Failure::text(error.to_string()));
                 false

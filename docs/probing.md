@@ -25,6 +25,7 @@ The PNG is the app window's own pixels, captured even when other windows cover i
 - `--frames N`: quit once N preview frames have been presented. Without `--play` the preview draws a single frame, so use `--seconds` there.
 - `--play`: start playback at launch.
 - `--window WxH`: window size in points.
+- `--output`: open an output window beside the project window. `--screenshot` then captures the output window (the one titled "Output") instead of the project window.
 - No flags: the app runs as before.
 
 Exit status is 0 on a clean quit, 1 if `--screenshot` could not be written.
