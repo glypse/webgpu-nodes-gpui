@@ -183,6 +183,8 @@ pub struct Shell {
     editor: Entity<Editor>,
     /// The Properties area's panel, shared by every area showing it.
     properties: Entity<PropertiesPanel>,
+    /// The output settings as last loaded or saved: the editor's history doesn't track them.
+    saved_output: video_export::OutputSettings,
     views: Rc<RefCell<AreaViews>>,
     path: Option<PathBuf>,
     /// Whether a discard prompt is open, so repeated close or quit requests don't stack prompts.
@@ -285,6 +287,7 @@ impl Shell {
 
         let output = video_export::from_stored(stored_output.as_ref(), editor.read(cx).settings().timing.fps);
         let properties = cx.new(|cx| PropertiesPanel::new(editor.clone(), playback.clone(), output, cx));
+        cx.observe_in(&properties, window, |this, _, window, cx| this.refresh_title(window, cx)).detach();
         let views = Rc::new(RefCell::new(AreaViews { startup_zoom: zoom, ..Default::default() }));
         if let Some(layout) = &layout {
             views.borrow_mut().pending.extend(layout.graphs.iter().cloned());
@@ -372,7 +375,7 @@ impl Shell {
             }, cx)
         });
         let id = cx.entity_id();
-        let mut shell = Self { screen, playback, editor, properties, views, path, confirming: false };
+        let mut shell = Self { screen, playback, editor, properties, saved_output: output, views, path, confirming: false };
         shell.refresh_title(window, cx);
         cx.on_release(move |_, cx| windows::owner_closed(id, cx)).detach();
         let shell_weak = cx.entity().downgrade();
@@ -384,7 +387,7 @@ impl Shell {
 
     /// Whether the window may close now: with unsaved changes it closes only once they are discarded.
     fn close_requested(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if !self.editor.read(cx).has_unsaved_changes() {
+        if !self.has_unsaved_changes(cx) {
             return true;
         }
         self.confirm_discard(window, cx, |_, window, _| window.remove_window());
@@ -499,16 +502,20 @@ impl Shell {
 
     /// Whether this is a new project nothing was done to, which a project opened or created may replace.
     fn untouched(&self, cx: &App) -> bool {
-        self.path.is_none() && !self.editor.read(cx).has_unsaved_changes()
+        self.path.is_none() && !self.has_unsaved_changes(cx)
     }
 
     fn project_name(&self) -> String {
         self.path.as_deref().map_or_else(|| "Untitled".to_owned(), project::file_name)
     }
 
+    fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.editor.read(cx).has_unsaved_changes() || self.properties.read(cx).output() != self.saved_output
+    }
+
     fn refresh_title(&mut self, window: &mut Window, cx: &mut App) {
         let name = self.project_name();
-        let dirty = self.editor.read(cx).has_unsaved_changes();
+        let dirty = self.has_unsaved_changes(cx);
         window.set_window_title(&format!("{name}{} - webgpu-nodes", if dirty { " *" } else { "" }));
         window.set_window_edited(dirty);
     }
@@ -526,7 +533,7 @@ impl Shell {
         cx: &mut Context<Self>,
         then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        if !self.editor.read(cx).has_unsaved_changes() {
+        if !self.has_unsaved_changes(cx) {
             then(self, window, cx);
             return;
         }
@@ -648,6 +655,7 @@ impl Shell {
                 let fps = self.editor.read(cx).settings().timing.fps;
                 let output = video_export::from_stored(stored.as_ref(), fps);
                 self.properties.update(cx, |p, cx| p.set_output(output, cx));
+                self.saved_output = output;
                 let (screen, graphs) = layout.map_or_else(|| (default_screen(), Vec::new()), |l| (l.screen, l.graphs));
                 self.show_screen(screen, graphs, cx);
                 self.adopt(Some(path), window, cx);
@@ -741,12 +749,14 @@ impl Shell {
             let graph = |id: AreaId| views.graphs.get(&id).map(|e| e.read(cx).view(cx)).unwrap_or_default();
             layout::store(&mut project, self.screen.read(cx).screen(), &graph);
         }
-        video_export::store(&mut project, &self.properties.read(cx).output());
+        let output = self.properties.read(cx).output();
+        video_export::store(&mut project, &output);
         let files = self.playback.read(cx).asset_files().clone();
         let result: Result<()> = project::write(&path, &project, &files);
         match result {
             Ok(()) => {
                 self.editor.read(cx).mark_saved();
+                self.saved_output = output;
                 self.adopt(Some(path), window, cx);
             }
             Err(e) => {
@@ -800,7 +810,7 @@ fn ask_each(mut remaining: Vec<AnyWindowHandle>, then: Box<dyn FnOnce(&mut App)>
     let asked = cx.update_window(handle, |view, window, cx| {
         let Some(shell) = windows::shell_of_view(&view, cx) else { return };
         shell.update(cx, |shell, cx| {
-            if shell.editor.read(cx).has_unsaved_changes() {
+            if shell.has_unsaved_changes(cx) {
                 window.activate_window();
             }
             shell.confirm_discard(window, cx, move |_, _, cx| ask_each(remaining, then, cx));
@@ -1191,10 +1201,18 @@ mod tests {
             preferences::init(cx);
             init(cx);
         });
-        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(path), None, window, cx));
+        let opened = path.clone();
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(opened), None, window, cx));
         cx.run_until_parked();
         let panel = shell.read_with(cx, |s, _| s.properties.clone());
         assert_eq!(panel.read_with(cx, |p, _| p.output()), output);
+        assert!(!shell.read_with(cx, |s, cx| s.has_unsaved_changes(cx)), "a loaded project starts saved");
+
+        let changed = video_export::OutputSettings { fps: 30.0, ..output };
+        panel.update(cx, |p, cx| p.set_output(changed, cx));
+        assert!(shell.read_with(cx, |s, cx| s.has_unsaved_changes(cx)), "a changed output is unsaved");
+        shell.update_in(cx, |s, window, cx| s.save_to(path.clone(), window, cx));
+        assert!(!shell.read_with(cx, |s, cx| s.has_unsaved_changes(cx)), "saving keeps the output");
         std::fs::remove_dir_all(dir).ok();
     }
 }
