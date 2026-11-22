@@ -14,6 +14,7 @@ use gpui::{
 };
 use runtime::{Size, Timing};
 use screen::{AreaContent, AreaId, Rect, Screen, ScreenView};
+use shader_graph::assets::BundleKind;
 use shader_graph::graph::{GraphProject, ProjectSettings};
 use theme::{ActiveTheme as _, IconName};
 
@@ -21,6 +22,7 @@ use crate::assets::{self, AssetsPanel};
 use crate::code_view::{self, CodeView};
 use crate::editor::{Editor, EditorEvent};
 use crate::export_dialog;
+use crate::group_bundles;
 use crate::graph::breadcrumbs::Breadcrumbs;
 use crate::layout::{self, GraphView};
 use crate::playback::{Playback, PlaybackEvent};
@@ -55,6 +57,7 @@ actions!(
         MenuFitPreview,
         MenuActualSizePreview,
         ImportMedia,
+        ImportGroups,
         ExportVideo,
     ]
 );
@@ -192,12 +195,16 @@ impl Shell {
         cx.subscribe_in(&editor, window, {
             let playback = playback.clone();
             move |this, _, event: &EditorEvent, window, cx| {
+                if let EditorEvent::ExportGroup = event {
+                    guard::guard("export group", || this.export_selected_group(window, cx));
+                    return;
+                }
                 playback.update(cx, |p, cx| {
                     guard::guard("playback update", || match event {
                         EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
                         EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
                         EditorEvent::Settings(settings) => apply_settings(p, settings, window, cx),
-                        EditorEvent::Edited => {}
+                        EditorEvent::Edited | EditorEvent::ExportGroup => {}
                     })
                 });
                 this.refresh_title(window, cx);
@@ -524,6 +531,41 @@ impl Shell {
         }
     }
 
+    /// Asks where to save the selected group's groups bundle, named after the group.
+    fn export_selected_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(reference) = self.editor.read(cx).selected_group_ref() else { return };
+        let export = self.editor.read(cx).model().export_group(&reference);
+        let Some(export) = export else { return };
+        let files = self.playback.read(cx).asset_files().clone();
+        let bytes = match group_bundles::encode(&export, &files) {
+            Ok(bytes) => bytes,
+            Err(e) => return Self::report(window, "Couldn't export the group", &e, cx),
+        };
+        let directory = dirs_home().unwrap_or_else(|| PathBuf::from("."));
+        let suggested = format!("{}.{}", export.name, BundleKind::Groups.extension());
+        let chosen = cx.prompt_for_new_path(&directory, Some(&suggested));
+        cx.spawn_in(window, async move |this, cx| {
+            let picked = match chosen.await {
+                Ok(Ok(path)) => path,
+                Ok(Err(e)) => {
+                    log::error!("the save dialog failed: {e:#}");
+                    None
+                }
+                Err(_) => None,
+            };
+            if let Some(path) = picked {
+                this.update_in(cx, |_, window, cx| {
+                    if let Err(e) = group_bundles::write(&path, &bytes) {
+                        let message = format!("Couldn't save {}", project::file_name(&path));
+                        Self::report(window, &message, &e, cx);
+                    }
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
     fn save_project_as(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let directory = self
             .path
@@ -658,6 +700,9 @@ impl Render for Shell {
             }))
             .on_action(cx.safe_listener(|this, _: &ImportMedia, window, cx| {
                 assets::pick_and_import(&this.editor, &this.playback, window, cx);
+            }))
+            .on_action(cx.safe_listener(|this, _: &ImportGroups, window, cx| {
+                group_bundles::pick_and_import(&this.editor, &this.playback, window, cx);
             }))
             .on_action(cx.safe_listener(|this, _: &ExportVideo, window, cx| {
                 export_dialog::open(this.editor.clone(), this.playback.clone(), window, cx);

@@ -4,6 +4,7 @@ mod code_view;
 mod editor;
 mod export_dialog;
 mod graph;
+mod group_bundles;
 mod layout;
 mod playback;
 mod preferences;
@@ -29,7 +30,7 @@ use clap::Parser as _;
 use gpui::{AsyncApp, WindowHandle};
 use preferences::ToggleDeveloperTools;
 use shell::{
-    ExportFrame, ExportVideo, ImportMedia, MenuActualSizePreview, MenuFitPreview, MenuZoomPreviewIn,
+    ExportFrame, ExportVideo, ImportGroups, ImportMedia, MenuActualSizePreview, MenuFitPreview, MenuZoomPreviewIn,
     MenuZoomPreviewOut, OpenPreferences, OpenProject, OpenProjectSettings, OpenSettings, SaveProject, Shell,
     ToggleMode, TogglePlayback,
 };
@@ -82,6 +83,9 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
                 MenuItem::action("Save", SaveProject),
                 MenuItem::action("Upload", OpenProject),
                 MenuItem::action("Import media…", ImportMedia),
+                MenuItem::separator(),
+                MenuItem::action("Export selected group", editor::ExportSelectedGroup),
+                MenuItem::action("Import groups", ImportGroups),
                 MenuItem::separator(),
                 MenuItem::action("Export frame as PNG", ExportFrame),
                 MenuItem::action("Export video…", ExportVideo),
@@ -279,7 +283,8 @@ mod tests {
         assert_eq!(
             labels(menu(&menus, "File")),
             [
-                "Save", "Upload", "Import media…", "-", "Export frame as PNG", "Export video…", "-",
+                "Save", "Upload", "Import media…", "-", "Export selected group", "Import groups", "-",
+                "Export frame as PNG", "Export video…", "-",
                 "Project settings…", "-", "Developer tools",
             ]
         );

@@ -56,6 +56,7 @@ gpui::actions!(
     editor,
     [
         PruneUnusedGroups,
+        ExportSelectedGroup,
         LayoutSelected,
         LayoutDocument,
         LayoutGraph,
@@ -111,6 +112,8 @@ pub enum EditorEvent {
     Settings(ProjectSettings),
     /// The project's model was edited, after the edit is shown. Listeners compare what they show.
     Edited,
+    /// File > Export selected group was chosen; the shell asks where to save it.
+    ExportGroup,
 }
 
 /// What a menu entry does to the editor.
@@ -1512,6 +1515,12 @@ impl Editor {
 
     // --- Commands ---
 
+    /// The definition of the first selected group node, if any.
+    pub(crate) fn selected_group_ref(&self) -> Option<String> {
+        let model = self.model.borrow();
+        self.selected().iter().find_map(|id| model.node(id)?.definition_ref().map(str::to_owned))
+    }
+
     fn selected(&self) -> Vec<String> {
         self.model.borrow().selected_node_ids().to_vec()
     }
@@ -1816,6 +1825,7 @@ struct Enabled {
     enter: bool,
     exit: bool,
     sheet: bool,
+    export_group: bool,
 }
 
 impl Editor {
@@ -1839,6 +1849,7 @@ impl Editor {
             enter: selected_group && idle,
             exit: (can_exit || self.sheet.is_some()) && idle,
             sheet: (has_selection || can_exit || self.sheet.is_some()) && idle,
+            export_group: selected_group,
         }
     }
 }
@@ -1879,6 +1890,9 @@ impl Render for Editor {
                 d.on_action(cx.safe_listener(|this, _: &LayoutDocument, _, cx| this.layout_document(cx)))
             })
             .on_action(cx.safe_listener(|this, _: &LayoutGraph, _, cx| this.layout_graph(cx)))
+            .when(on.export_group, |d| {
+                d.on_action(cx.safe_listener(|_, _: &ExportSelectedGroup, _, cx| cx.emit(EditorEvent::ExportGroup)))
+            })
             .when(on.enter, |d| {
                 d.on_action(cx.safe_listener(|this, _: &EnterNodeGroup, _, cx| {
                     this.enter_selected_group(cx);
@@ -2541,6 +2555,20 @@ mod tests {
         cx.dispatch_action(UngroupSelected);
         render_frame(cx);
         assert!(scene.editor.read_with(cx, |e, _| e.model().node(&group[0]).is_none()));
+    }
+
+    #[gpui::test]
+    fn export_selected_group_is_enabled_only_with_a_group_selected(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        focus_flow(&scene, cx);
+        select_nodes(&scene, cx, vec![scene.loose.clone()]);
+        assert!(!enabled(cx, &ExportSelectedGroup));
+
+        select_nodes(&scene, cx, vec![scene.member.clone(), scene.loose.clone()]);
+        cx.dispatch_action(GroupSelected);
+        render_frame(cx);
+        assert!(enabled(cx, &ExportSelectedGroup));
+        assert!(scene.editor.read_with(cx, |e, _| e.selected_group_ref().is_some()));
     }
 
     #[gpui::test]
