@@ -53,7 +53,7 @@ pub const SKIP_HANDLE: &str = "skip";
 pub const NEW_ITEM_HANDLE: &str = "__new_item__";
 pub const DEFAULT_ITERATIONS: i32 = 1;
 pub const DEFAULT_MAX_ITERATIONS: u32 = 1024;
-pub const MAX_ITERATIONS: u32 = i32::MAX as u32;
+pub use crate::graph::MAX_ITERATIONS;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZoneKind {

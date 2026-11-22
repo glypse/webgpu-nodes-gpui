@@ -4,6 +4,9 @@
 mod document;
 mod frames;
 mod history;
+mod hydrate;
+mod import_groups;
+mod limits;
 mod model;
 mod model_edits;
 mod model_assets;
@@ -20,6 +23,8 @@ mod validate;
 pub use document::*;
 pub use frames::*;
 pub use history::{History, HistoryCounts};
+pub use import_groups::*;
+pub use limits::*;
 pub use model::{GraphModel, NodeClipboard, TypeChoice, clone_subgraph};
 pub use model_assets::PlaybackChange;
 pub use model_edits::VariableChoice;

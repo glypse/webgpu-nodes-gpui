@@ -22,3 +22,4 @@ mod assets;
 mod model_edits;
 mod preview;
 mod groups;
+mod validate;

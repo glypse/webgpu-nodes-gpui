@@ -449,3 +449,156 @@ fn the_values_the_frame_renders_to_textures_are_listed_by_id() {
     let renders = g.model.pass_analysis().renders();
     assert_eq!(renders.keys().collect::<Vec<_>>(), [&format!("render:{uv}:uv")]);
 }
+
+/// A simulation of `count` f32 items, each feeding a sum drawn as the frame. Returns its zone,
+/// its input node and its items' ids.
+fn simulation_of(g: &mut TestGraph, count: usize) -> (String, String, Vec<String>) {
+    let sim = g.model.create_zone(ZoneKind::Simulation, Default::default()).unwrap();
+    while g.model.zone_items_of(&sim).len() < count {
+        g.model.add_zone_item(&sim, HandleType::Fixed(WgslType::F32), None);
+    }
+    let output = g.model.zone_nodes(&sim).unwrap().output.id;
+    let input = g.model.zone_nodes(&sim).unwrap().input.id;
+    let out = g.output();
+    let sum = g.add("add");
+    let items: Vec<String> = g.model.zone_items_of(&sim).into_iter().map(|i| i.id).collect();
+    for item in &items {
+        g.link((&output, item), (&sum, "operands"));
+    }
+    g.link((&sum, "result"), (&out, "color"));
+    (sim, input, items)
+}
+
+#[test]
+fn simulation_items_are_canvas_sized_unless_they_are_set() {
+    let mut g = TestGraph::new();
+    let (sim, _, items) = simulation_of(&mut g, 2);
+    let sizes = |g: &TestGraph| -> Vec<TextureSize> {
+        g.program()
+            .plan
+            .resources
+            .iter()
+            .filter_map(|r| match r {
+                ResourceDecl::State { size, read: crate::passes::StateRead::Current, .. } => Some(size.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let canvas = sizes(&g);
+    assert_eq!(canvas.len(), 2);
+    assert!(canvas.iter().all(|s| *s == CANVAS_SIZE));
+
+    g.model.set_zone_item_size(&sim, &items[0], Some(ItemSizeMode::Pixels));
+    assert_eq!(sizes(&g).iter().filter(|s| **s != CANVAS_SIZE).count(), 1);
+    validate_all(&g);
+}
+
+#[test]
+fn a_scaled_simulation_item_without_a_texture_to_be_like_is_relative_to_the_canvas() {
+    let mut g = TestGraph::new();
+    let (sim, input, items) = simulation_of(&mut g, 1);
+    g.model.set_zone_item_size(&sim, &items[0], Some(ItemSizeMode::Scale));
+    g.model.update_node_data(&input, |d| {
+        d.values.insert(format!("scale:{}", items[0]), InputValue::from(2.0));
+    });
+    let plan = g.literal_program().plan;
+    let size = plan.resources.iter().find_map(|r| match r {
+        ResourceDecl::State { size, read: crate::passes::StateRead::Current, .. } => Some(size.clone()),
+        _ => None,
+    });
+    assert_eq!(size, Some(TextureSize::Scale { scale: 2.0.into(), of: SizeBase::Canvas }));
+    validate_all(&g);
+}
+
+#[test]
+fn a_scaled_simulation_item_is_like_a_texture_it_is_linked_to() {
+    let mut g = TestGraph::new();
+    let (base, base_item) = uv_texture(&mut g);
+    let (sim, input, items) = simulation_of(&mut g, 1);
+    g.model.set_zone_item_size(&sim, &items[0], Some(ItemSizeMode::Scale));
+    g.model.update_node_data(&input, |d| {
+        d.values.insert(format!("scale:{}", items[0]), InputValue::from(0.25));
+    });
+    g.link((&base, &base_item), (&input, &format!("like:{}", items[0])));
+    let plan = g.literal_program().plan;
+    let size = plan.resources.iter().find_map(|r| match r {
+        ResourceDecl::State { size, read: crate::passes::StateRead::Current, .. } => Some(size.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        size,
+        Some(TextureSize::Scale {
+            scale: 0.25.into(),
+            of: SizeBase::Resource(format!("render:{base}:{base_item}")),
+        })
+    );
+    validate_all(&g);
+}
+
+#[test]
+fn a_simulation_item_has_the_size_inputs_its_mode_needs() {
+    let mut g = TestGraph::new();
+    let (sim, input, items) = simulation_of(&mut g, 1);
+    let item = &items[0];
+    let inputs = |g: &TestGraph| -> Vec<String> {
+        g.model.resolve_node_inputs(&input).iter().map(|i| i.id.clone()).filter(|id| id.ends_with(item.as_str())).collect()
+    };
+    assert_eq!(inputs(&g), vec![item.clone()]);
+    g.model.set_zone_item_size(&sim, item, Some(ItemSizeMode::Scale));
+    assert_eq!(inputs(&g).len(), 3);
+    g.model.set_zone_item_size(&sim, item, Some(ItemSizeMode::Pixels));
+    assert!(g.model.resolve_node_inputs(&input).iter().any(|i| i.id == format!("pixels:{item}")));
+    assert!(!g.model.resolve_node_inputs(&input).iter().any(|i| i.id == format!("scale:{item}")));
+    g.model.set_zone_item_size(&sim, item, None);
+    assert_eq!(inputs(&g), vec![item.clone()]);
+}
+
+#[test]
+fn only_simulation_items_take_a_size() {
+    let mut g = TestGraph::new();
+    let repeat = g.model.create_zone(ZoneKind::Repeat, Default::default()).unwrap();
+    let item = g.model.zone_items_of(&repeat)[0].id.clone();
+    g.model.set_zone_item_size(&repeat, &item, Some(ItemSizeMode::Scale));
+    assert_eq!(g.model.zone_items_of(&repeat)[0].size, None);
+}
+
+#[test]
+fn the_links_to_size_inputs_a_mode_drops_are_removed_with_it() {
+    let mut g = TestGraph::new();
+    let (sim, input, items) = simulation_of(&mut g, 1);
+    let item = &items[0];
+    g.model.set_zone_item_size(&sim, item, Some(ItemSizeMode::Scale));
+    let declare = g.add("declare");
+    g.model.set_input_value(&declare, "x", Some(InputValue::from(2.0)));
+    g.link((&declare, "value"), (&input, &format!("scale:{item}")));
+    let links = |g: &TestGraph| g.model.root().edges.iter().filter(|e| e.target_handle == format!("scale:{item}")).count();
+    assert_eq!(links(&g), 1);
+    g.model.set_zone_item_size(&sim, item, Some(ItemSizeMode::Pixels));
+    assert_eq!(links(&g), 0);
+}
+
+#[test]
+fn every_simulation_state_is_stepped_each_frame_though_unread() {
+    let mut g = TestGraph::new();
+    let (_, _, _) = simulation_of(&mut g, 2);
+    let plan = g.program().plan;
+    let stepped: Vec<&str> = plan
+        .passes
+        .iter()
+        .filter(|p| p.simulation.as_ref().and_then(|s| s.stage) == Some(SimulationStage::Step))
+        .flat_map(|p| p.writes.iter().map(String::as_str))
+        .collect();
+    let states: Vec<&str> = plan
+        .resources
+        .iter()
+        .filter_map(|r| match r {
+            ResourceDecl::State { id, read: crate::passes::StateRead::Current, .. } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(states.len(), 2);
+    for id in states {
+        assert!(stepped.contains(&id), "{id} is never stepped");
+    }
+    validate_all(&g);
+}

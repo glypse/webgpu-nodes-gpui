@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use crate::enums::{CASES_FAMILY, MATCH, MATCH_SELECTOR, WIDTH_SWITCH, WIDTH_SWITCH_VALUE, case_handle, widths};
-use crate::graph::{GraphDocument, GraphNode, GraphProject};
+use crate::graph::{GraphDocument, GraphNode, GraphProject, MAX_CASES};
 use crate::types::{
     EnumVariant, GroupHandleDef, HandleType, InputControl, InputValue,
     NodeCategory, NodeData, TypeFamily, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
@@ -14,7 +14,6 @@ use crate::types::{
 pub const INDEX_SWITCH: &str = "index-switch";
 pub const INDEX_SWITCH_INDEX: &str = "index";
 pub const DEFAULT_CASES: u32 = 2;
-pub const MAX_CASES: u32 = 1024;
 
 fn result_output() -> Vec<NodeOutputDef> {
     vec![NodeOutputDef::new("result", "result", WgslType::F32)]

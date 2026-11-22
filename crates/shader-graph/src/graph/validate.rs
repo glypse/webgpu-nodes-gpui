@@ -2,39 +2,59 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
-use super::{GraphDocument, GraphProject, ROOT_ID};
+use super::hydrate::normalise_project;
+use super::limits::*;
+use super::{GraphDocument, GraphNode, GraphProject, ROOT_ID};
+use crate::library::is_library_ref;
 use crate::nodes::{has_valid_socket_names, is_known_node_type};
+use crate::types::{EnumVariant, Handle, HandleType, NodeData, TypeOwner, TypeVariable};
 use crate::zones::{is_zone_output, paired_output_id};
-
-/// What a file may ask for. Far above anything drawn by hand, yet low enough
-/// that the work a file can cause stays bounded.
-pub const MAX_DEFINITIONS: usize = 2000;
-pub const MAX_NODES_PER_DOCUMENT: usize = 20_000;
-pub const MAX_EDGES_PER_DOCUMENT: usize = 80_000;
-pub const MAX_PROJECT_NODES: usize = 100_000;
-/// Links in a row, which type inference and codegen follow recursively.
-pub const MAX_CHAIN_LENGTH: usize = 2000;
-/// Groups nested in a row, for the same reason.
-pub const MAX_GROUP_DEPTH: usize = 64;
-pub const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
 
 /// A rule of the graph model a file breaks, though its shape is right.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GraphIssue {
     NoRoot,
-    DuplicateId { definition: String, id: String },
-    DanglingEdge { definition: String, edge: String },
-    EdgeCycle { definition: String },
-    ChainTooLong { definition: String },
+    DuplicateId {
+        definition: String,
+        id: String,
+    },
+    DuplicateAsset {
+        id: String,
+    },
+    DanglingEdge {
+        definition: String,
+        edge: String,
+    },
+    EdgeCycle {
+        definition: String,
+    },
+    ChainTooLong {
+        definition: String,
+    },
     GroupCycle,
     GroupsTooDeep,
-    RootInstance { definition: String },
-    UnknownNodeType { definition: String, node: String, node_type: String },
-    MissingDefinition { definition: String, node: String, reference: String },
+    RootInstance {
+        definition: String,
+    },
+    ReservedDefinition {
+        definition: String,
+    },
+    UnknownNodeType {
+        definition: String,
+        node: String,
+        node_type: String,
+    },
+    MissingDefinition {
+        definition: String,
+        node: String,
+        reference: String,
+    },
     TooManyDefinitions,
     TooManyNodes,
-    TooManyInDocument { definition: String },
-    InvalidSocketNames { definition: String, node: String },
+    InvalidSocketNames {
+        definition: String,
+        node: String,
+    },
 }
 
 /// Why a file can't be read.
@@ -50,20 +70,255 @@ pub enum LoadError {
     InvalidGraph(Vec<GraphIssue>),
 }
 
+/// Collects the schema's violations, each prefixed with the path of its value.
+#[derive(Default)]
+struct Schema(Vec<String>);
+
+impl Schema {
+    fn fail(&mut self, path: &str, message: impl std::fmt::Display) {
+        self.0.push(format!("{path}: {message}"));
+    }
+
+    fn length(&mut self, path: &str, len: usize, max: usize) {
+        if len > max {
+            self.fail(
+                path,
+                format!("Invalid length: Expected <={max} but received {len}"),
+            );
+        }
+    }
+
+    fn text(&mut self, path: &str, text: &str, max: usize) {
+        self.length(path, js_length(text), max);
+    }
+
+    fn id(&mut self, path: &str, id: &str) {
+        self.text(path, id, MAX_ID_LENGTH);
+    }
+
+    fn label(&mut self, path: &str, label: &str) {
+        self.text(path, label, MAX_LABEL_LENGTH);
+    }
+
+    fn list<T>(&mut self, path: &str, items: &[T]) {
+        self.length(path, items.len(), MAX_LIST_LENGTH);
+    }
+
+    fn handle<T>(&mut self, path: &str, handle: &Handle<T>) {
+        self.id(&format!("{path}.id"), &handle.id);
+        self.label(&format!("{path}.label"), &handle.label);
+        if let Some(variants) = &handle.variants {
+            self.list(&format!("{path}.variants"), variants);
+            for (i, variant) in variants.iter().enumerate() {
+                self.variant(&format!("{path}.variants[{i}]"), variant);
+            }
+        }
+        if let Some(owner) = &handle.type_owner {
+            self.type_owner(&format!("{path}.typeOwner"), owner);
+        }
+        if let Some(id) = &handle.variants_by {
+            self.id(&format!("{path}.variantsBy"), id);
+        }
+        if let Some(owner) = &handle.owner {
+            self.id(&format!("{path}.owner.enumId"), &owner.enum_id);
+        }
+    }
+
+    /// A group or zone socket, whose type may name one of the group's type variables.
+    fn group_handle(&mut self, path: &str, handle: &Handle<HandleType>) {
+        self.handle(path, handle);
+        if let HandleType::Variable { variable } = &handle.ty {
+            self.id(&format!("{path}.type.variable"), variable);
+        }
+    }
+
+    fn variant(&mut self, path: &str, variant: &EnumVariant) {
+        self.label(&format!("{path}.label"), &variant.label);
+        if let Some(types) = &variant.types {
+            self.list(&format!("{path}.types"), types);
+        }
+    }
+
+    fn type_owner(&mut self, path: &str, owner: &TypeOwner) {
+        self.id(&format!("{path}.variable"), &owner.variable);
+        self.list(&format!("{path}.types"), &owner.types);
+    }
+
+    fn type_variable(&mut self, path: &str, variable: &TypeVariable) {
+        self.id(&format!("{path}.id"), &variable.id);
+        self.label(&format!("{path}.name"), &variable.name);
+        self.list(&format!("{path}.types"), &variable.types);
+    }
+
+    fn node_data(&mut self, path: &str, data: &NodeData) {
+        if let Some(label) = &data.label {
+            self.label(&format!("{path}.label"), label);
+        }
+        for key in data.values.keys().chain(data.types.keys()) {
+            self.id(&format!("{path}.values"), key);
+        }
+        for (key, value) in &data.settings {
+            self.id(&format!("{path}.settings"), key);
+            self.label(&format!("{path}.settings.{key}"), value);
+        }
+        if let Some(items) = &data.items {
+            self.list(&format!("{path}.items"), items);
+            for (i, item) in items.iter().enumerate() {
+                self.group_handle(&format!("{path}.items[{i}]"), item);
+            }
+        }
+        if let Some(id) = &data.paired_output {
+            self.id(&format!("{path}.pairedOutput"), id);
+        }
+        if let Some(max) = data.max_iterations.filter(|m| *m > MAX_ITERATIONS) {
+            self.fail(
+                &format!("{path}.maxIterations"),
+                format!("Invalid value: Expected <={MAX_ITERATIONS} but received {max}"),
+            );
+        }
+        if let Some(cases) = data.cases.filter(|c| !(1..=MAX_CASES).contains(c)) {
+            self.fail(
+                &format!("{path}.cases"),
+                format!("Invalid value: Expected 1 to {MAX_CASES} but received {cases}"),
+            );
+        }
+        if let Some(code) = &data.code {
+            self.text(&format!("{path}.code"), code, MAX_CODE_LENGTH);
+        }
+        if let Some(sockets) = &data.sockets {
+            for (side, list) in [("inputs", &sockets.inputs), ("outputs", &sockets.outputs)] {
+                self.list(&format!("{path}.sockets.{side}"), list);
+                for (i, socket) in list.iter().enumerate() {
+                    self.handle(&format!("{path}.sockets.{side}[{i}]"), socket);
+                }
+            }
+        }
+        if let Some(curve) = &data.curve {
+            self.list(&format!("{path}.curve"), curve);
+        }
+        if let Some(ramp) = &data.ramp {
+            self.list(&format!("{path}.ramp"), ramp);
+            let mut seen = HashSet::new();
+            for stop in ramp {
+                self.id(&format!("{path}.ramp.id"), &stop.id);
+                if !seen.insert(stop.id.as_str()) {
+                    self.fail(
+                        &format!("{path}.ramp"),
+                        "Every ramp stop needs an id of its own.",
+                    );
+                }
+            }
+        }
+        if let Some(asset) = &data.asset {
+            self.id(&format!("{path}.asset"), asset);
+        }
+        if let Some(note) = data.extra.get("note").and_then(|n| n.as_str()) {
+            self.text(&format!("{path}.note"), note, MAX_NOTE_LENGTH);
+        }
+    }
+
+    fn node(&mut self, path: &str, node: &GraphNode) {
+        self.id(&format!("{path}.id"), &node.id);
+        self.node_data(&format!("{path}.data"), &node.data);
+        if let Some(group) = &node.group {
+            self.id(
+                &format!("{path}.group.definitionRef"),
+                &group.definition_ref,
+            );
+        }
+        if let Some(frame) = &node.frame {
+            self.id(&format!("{path}.frame"), frame);
+        }
+    }
+
+    fn document(&mut self, path: &str, doc: &GraphDocument) {
+        self.length(
+            &format!("{path}.nodes"),
+            doc.nodes.len(),
+            MAX_NODES_PER_DOCUMENT,
+        );
+        self.length(
+            &format!("{path}.edges"),
+            doc.edges.len(),
+            MAX_EDGES_PER_DOCUMENT,
+        );
+        for (i, node) in doc.nodes.iter().enumerate() {
+            self.node(&format!("{path}.nodes[{i}]"), node);
+        }
+        for (i, edge) in doc.edges.iter().enumerate() {
+            let edge_path = format!("{path}.edges[{i}]");
+            self.id(&format!("{edge_path}.id"), &edge.id);
+            self.id(&format!("{edge_path}.source"), &edge.source);
+            self.id(&format!("{edge_path}.target"), &edge.target);
+            self.id(&format!("{edge_path}.sourceHandle"), &edge.source_handle);
+            self.id(&format!("{edge_path}.targetHandle"), &edge.target_handle);
+        }
+        if let Some(label) = &doc.label {
+            self.label(&format!("{path}.label"), label);
+        }
+        self.list(&format!("{path}.typeVariables"), &doc.type_variables);
+        for (i, variable) in doc.type_variables.iter().enumerate() {
+            self.type_variable(&format!("{path}.typeVariables[{i}]"), variable);
+        }
+        for (side, list) in [("inputs", &doc.inputs), ("outputs", &doc.outputs)] {
+            self.list(&format!("{path}.{side}"), list);
+            for (i, handle) in list.iter().enumerate() {
+                self.group_handle(&format!("{path}.{side}[{i}]"), handle);
+            }
+        }
+        for key in doc.defaults.keys() {
+            self.id(&format!("{path}.defaults"), key);
+        }
+        if let Some(viewport) = doc
+            .viewport
+            .filter(|v| v.zoom.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater))
+        {
+            self.fail(
+                &format!("{path}.viewport.zoom"),
+                format!("Invalid value: Expected >0 but received {}", viewport.zoom),
+            );
+        }
+    }
+}
+
+/// The schema's limits on a parsed project, each violation with the path of its value.
+/// Serde has already checked the shape; this checks the sizes, counts and ranges the
+/// original's schema caps.
+pub fn schema_issues(project: &GraphProject) -> Vec<String> {
+    let mut schema = Schema::default();
+    schema.length("definitions", project.definitions.len(), MAX_DEFINITIONS);
+    for (key, doc) in &project.definitions {
+        schema.id("definitions", key);
+        schema.document(&format!("definitions.{key}"), doc);
+    }
+    schema.length("assets", project.assets.len(), MAX_ASSETS);
+    for asset in &project.assets {
+        schema.id("assets.id", asset.id());
+    }
+    schema.0
+}
+
 /// The longest path through a directed graph, in links; `None` when it has a
 /// cycle. Iterative: what it checks is what would overflow the stack.
-fn longest_path(ids: &[&str], links: &[(&str, &str)]) -> Option<usize> {
+pub(super) fn longest_path(ids: &[&str], links: &[(&str, &str)]) -> Option<usize> {
     let mut incoming: HashMap<&str, usize> = ids.iter().map(|id| (*id, 0)).collect();
     let mut next: HashMap<&str, Vec<&str>> = HashMap::new();
     for (from, to) in links {
-        if !incoming.contains_key(from) || !incoming.contains_key(to) {
+        if !incoming.contains_key(from) {
             continue;
         }
+        let Some(count) = incoming.get_mut(to) else {
+            continue;
+        };
+        *count += 1;
         next.entry(from).or_default().push(to);
-        *incoming.get_mut(to).expect("checked") += 1;
     }
     let mut lengths: HashMap<&str, usize> = HashMap::new();
-    let mut ready: Vec<&str> = incoming.iter().filter(|(_, c)| **c == 0).map(|(id, _)| *id).collect();
+    let mut ready: Vec<&str> = incoming
+        .iter()
+        .filter(|(_, c)| **c == 0)
+        .map(|(id, _)| *id)
+        .collect();
     let (mut visited, mut longest) = (0, 0);
     while let Some(id) = ready.pop() {
         visited += 1;
@@ -72,7 +327,9 @@ fn longest_path(ids: &[&str], links: &[(&str, &str)]) -> Option<usize> {
         for target in next.get(id).into_iter().flatten() {
             let l = lengths.entry(target).or_insert(0);
             *l = (*l).max(length + 1);
-            let left = incoming.get_mut(target).expect("known");
+            let Some(left) = incoming.get_mut(target) else {
+                continue;
+            };
             *left -= 1;
             if *left == 0 {
                 ready.push(target);
@@ -84,7 +341,9 @@ fn longest_path(ids: &[&str], links: &[(&str, &str)]) -> Option<usize> {
 
 fn duplicates<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut seen = HashSet::new();
-    ids.filter(|id| !seen.insert(*id)).map(str::to_owned).collect()
+    ids.filter(|id| !seen.insert(*id))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// What's wrong within one document, `definition` naming it.
@@ -100,31 +359,54 @@ pub fn document_issues(definition: &str, doc: &GraphDocument) -> Vec<GraphIssue>
     .into_iter()
     .chain(doc.nodes.iter().flat_map(|n| {
         [
-            n.data.items.iter().flatten().map(|i| i.id.as_str()).collect::<Vec<_>>(),
-            n.data.sockets.iter().flat_map(|s| s.inputs.iter().map(|h| h.id.as_str())).collect(),
-            n.data.sockets.iter().flat_map(|s| s.outputs.iter().map(|h| h.id.as_str())).collect(),
+            n.data
+                .items
+                .iter()
+                .flatten()
+                .map(|i| i.id.as_str())
+                .collect::<Vec<_>>(),
+            n.data
+                .sockets
+                .iter()
+                .flat_map(|s| s.inputs.iter().map(|h| h.id.as_str()))
+                .collect(),
+            n.data
+                .sockets
+                .iter()
+                .flat_map(|s| s.outputs.iter().map(|h| h.id.as_str()))
+                .collect(),
         ]
     }))
     .collect();
     for ids in lists {
         for id in duplicates(ids.into_iter()) {
-            issues.push(GraphIssue::DuplicateId { definition: definition.to_owned(), id });
+            issues.push(GraphIssue::DuplicateId {
+                definition: definition.to_owned(),
+                id,
+            });
         }
-    }
-    if doc.nodes.len() > MAX_NODES_PER_DOCUMENT || doc.edges.len() > MAX_EDGES_PER_DOCUMENT {
-        issues.push(GraphIssue::TooManyInDocument { definition: definition.to_owned() });
     }
     let nodes: HashSet<&str> = doc.nodes.iter().map(|n| n.id.as_str()).collect();
     for edge in &doc.edges {
         if !nodes.contains(edge.source.as_str()) || !nodes.contains(edge.target.as_str()) {
-            issues.push(GraphIssue::DanglingEdge { definition: definition.to_owned(), edge: edge.id.clone() });
+            issues.push(GraphIssue::DanglingEdge {
+                definition: definition.to_owned(),
+                edge: edge.id.clone(),
+            });
         }
     }
     // A zone's output depends on its input without a link saying so.
-    let outputs: HashSet<&str> =
-        doc.nodes.iter().filter(|n| is_zone_output(&n.node_type)).map(|n| n.id.as_str()).collect();
-    let mut links: Vec<(&str, &str)> =
-        doc.edges.iter().map(|e| (e.source.as_str(), e.target.as_str())).collect();
+    let outputs: HashSet<&str> = doc
+        .nodes
+        .iter()
+        .filter(|n| is_zone_output(&n.node_type))
+        .map(|n| n.id.as_str())
+        .collect();
+    let mut links: Vec<(&str, &str)> = doc
+        .edges
+        .iter()
+        .map(|e| (e.source.as_str(), e.target.as_str()))
+        .collect();
     for n in &doc.nodes {
         if let Some(output) = paired_output_id(n).filter(|o| outputs.contains(o)) {
             links.push((&n.id, output));
@@ -132,9 +414,13 @@ pub fn document_issues(definition: &str, doc: &GraphDocument) -> Vec<GraphIssue>
     }
     let ids: Vec<&str> = nodes.iter().copied().collect();
     match longest_path(&ids, &links) {
-        None => issues.push(GraphIssue::EdgeCycle { definition: definition.to_owned() }),
+        None => issues.push(GraphIssue::EdgeCycle {
+            definition: definition.to_owned(),
+        }),
         Some(l) if l > MAX_CHAIN_LENGTH => {
-            issues.push(GraphIssue::ChainTooLong { definition: definition.to_owned() });
+            issues.push(GraphIssue::ChainTooLong {
+                definition: definition.to_owned(),
+            });
         }
         _ => {}
     }
@@ -150,8 +436,18 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
     if project.definitions.len() > MAX_DEFINITIONS {
         issues.push(GraphIssue::TooManyDefinitions);
     }
-    if project.definitions.values().map(|d| d.nodes.len()).sum::<usize>() > MAX_PROJECT_NODES {
+    if project
+        .definitions
+        .values()
+        .map(|d| d.nodes.len())
+        .sum::<usize>()
+        > MAX_PROJECT_NODES
+    {
         issues.push(GraphIssue::TooManyNodes);
+    }
+    let asset_ids: Vec<&str> = project.assets.iter().map(|a| a.id()).collect();
+    for id in duplicates(asset_ids.into_iter()) {
+        issues.push(GraphIssue::DuplicateAsset { id });
     }
     for (key, doc) in &project.definitions {
         issues.extend(document_issues(key, doc));
@@ -163,7 +459,12 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
                     node_type: node.node_type.clone(),
                 });
             }
-            if node.data.sockets.as_ref().is_some_and(|s| !has_valid_socket_names(s)) {
+            if node
+                .data
+                .sockets
+                .as_ref()
+                .is_some_and(|s| !has_valid_socket_names(s))
+            {
                 issues.push(GraphIssue::InvalidSocketNames {
                     definition: key.clone(),
                     node: node.id.clone(),
@@ -178,7 +479,9 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
                     });
                 }
                 if reference == ROOT_ID {
-                    issues.push(GraphIssue::RootInstance { definition: key.clone() });
+                    issues.push(GraphIssue::RootInstance {
+                        definition: key.clone(),
+                    });
                 }
             }
         }
@@ -198,18 +501,38 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
 }
 
 impl GraphProject {
-    /// Read a saved project, checking it keeps every rule the editor relies on.
+    /// Read a saved project: parse it, check the schema's limits, fill in the
+    /// defaults, then check it keeps every rule the editor relies on.
     pub fn from_json(text: &str) -> Result<GraphProject, LoadError> {
         if text.len() > MAX_JSON_BYTES {
             return Err(LoadError::TooLarge);
         }
-        let value: serde_json::Value = serde_json::from_str(text).map_err(|_| LoadError::InvalidJson)?;
+        let value: serde_json::Value =
+            serde_json::from_str(text).map_err(|_| LoadError::InvalidJson)?;
         let mut project: GraphProject =
             serde_json::from_value(value).map_err(|e| LoadError::InvalidSchema(e.to_string()))?;
+        let schema = schema_issues(&project);
+        if !schema.is_empty() {
+            return Err(LoadError::InvalidSchema(schema.join("; ")));
+        }
+        // Checked before the library is registered, so a file can't pose as one of its entries.
+        let reserved = project
+            .definitions
+            .keys()
+            .filter(|key| is_library_ref(key))
+            .map(|key| GraphIssue::ReservedDefinition {
+                definition: key.clone(),
+            });
+        let mut issues: Vec<GraphIssue> = reserved.collect();
+        normalise_project(&mut project);
         crate::library::register(&mut project);
         project.reindex();
-        let issues = project_issues(&project);
-        if issues.is_empty() { Ok(project) } else { Err(LoadError::InvalidGraph(issues)) }
+        issues.extend(project_issues(&project));
+        if issues.is_empty() {
+            Ok(project)
+        } else {
+            Err(LoadError::InvalidGraph(issues))
+        }
     }
 
     /// The project as saved: pretty JSON of the original's format.
