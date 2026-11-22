@@ -752,8 +752,8 @@ mod tests {
     fn panel(
         cx: &mut gpui::TestAppContext,
     ) -> (Entity<Editor>, Entity<Playback>, Entity<AssetsPanel>, gpui::VisualTestContext) {
-        cx.update(|cx| theme::init(cx));
-        let (editor, vcx) = cx.add_window_view(|window, cx| Editor::new(window, cx));
+        cx.update(theme::init);
+        let (editor, vcx) = cx.add_window_view(Editor::new);
         let playback = vcx.new(|_| Playback::new());
         let panel = vcx.update(|window, cx| {
             cx.new(|cx| AssetsPanel::new(editor.clone(), playback.clone(), window, cx))
