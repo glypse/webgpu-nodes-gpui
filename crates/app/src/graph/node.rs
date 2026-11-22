@@ -449,6 +449,12 @@ fn reroute(props: &NodeProps, view: &NodeView, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// The outline of a selected card, which contrasts with the canvas. Its border
+/// is transparent otherwise, so selecting a card never shifts its contents.
+fn card_outline(selected: bool, colors: &theme::Colors) -> gpui::Hsla {
+    if selected { colors.foreground } else { gpui::transparent_black() }
+}
+
 pub fn render_node(
     view: &NodeView,
     props: &NodeProps,
@@ -814,7 +820,7 @@ pub fn render_node(
         .w(px(node_width(&view.node_type) * z))
         .rounded(s(4.0))
         .border(s(1.0))
-        .border_color(if props.selected { c.primary } else { c.border })
+        .border_color(card_outline(props.selected, c))
         .bg(c.card)
         .text_color(c.card_foreground)
         .child(header)
@@ -835,4 +841,19 @@ pub fn render_node(
                 .when(add_zone, |d| d.child(virtual_row(HandleType::Target)).child(div().flex().child(zone_add))),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::card_outline;
+    use theme::Colors;
+
+    #[test]
+    fn a_selected_card_is_outlined_in_contrast_with_the_canvas() {
+        let (dark, light) = (Colors::dark(), Colors::light());
+        assert_eq!(card_outline(false, &dark).a, 0.0);
+        assert_eq!(card_outline(false, &light).a, 0.0);
+        assert!(card_outline(true, &dark).l > 0.9, "white on dark");
+        assert!(card_outline(true, &light).l < 0.2, "black on light");
+    }
 }
