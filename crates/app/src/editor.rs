@@ -2444,7 +2444,7 @@ mod tests {
 
     #[gpui::test]
     fn a_finder_drop_on_the_graph_imports_and_adds_a_node_where_it_lands(cx: &mut TestAppContext) {
-        let (editor, _playback, _asset, mut vcx) = media_scene(cx);
+        let (editor, _playback, _asset, vcx) = media_scene(cx);
         let dir = std::env::temp_dir().join(format!("wgnodes-finder-drop-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch dir");
         let path = dir.join("Dropped.png");
