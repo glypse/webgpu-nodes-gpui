@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Image, ImageFormat, ImageSource,
+    AnyElement, App, AppContext as _, Context, Entity, Image, ImageFormat, ImageSource, Pixels, Point,
     InteractiveElement as _, IntoElement, ParentElement as _, PathPromptOptions, PromptLevel, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, StyleRefinement, Subscription, WeakEntity, Window,
     StyledImage as _, ObjectFit, div, img, px,
@@ -81,14 +81,8 @@ pub fn pick_and_import<T: 'static>(
     .detach();
 }
 
-/// Reads the paths and imports what they hold as one undo step. Files that can't be used are reported together.
-pub fn import_paths(
-    editor: &Entity<Editor>,
-    playback: &Entity<Playback>,
-    paths: &[PathBuf],
-    window: &mut Window,
-    cx: &mut App,
-) {
+/// Reads the paths; the ones that can't be read are returned as problems.
+fn read_paths(paths: &[PathBuf]) -> (Vec<PickedFile>, Vec<String>) {
     let mut picked = Vec::new();
     let mut problems = Vec::new();
     for path in paths {
@@ -97,18 +91,110 @@ pub fn import_paths(
             Err(problem) => problems.push(problem),
         }
     }
-    let mut imports = None;
-    editor.update(cx, |e, cx| e.edit_model(cx, |m| imports = Some(import(m, &picked))));
-    if let Some(imports) = imports {
-        problems.extend(imports.problems);
-        let files = imports.files;
-        playback.update(cx, |p, cx| {
-            let mut all = p.asset_files().clone();
-            for (id, bytes) in files {
-                all.entry(id).or_insert(bytes);
+    (picked, problems)
+}
+
+/// Imports the files as one undo step, with their bytes kept by the playback. When `node` is
+/// given, it is set to read the first file imported, in the same undo step.
+fn import_into(
+    editor: &mut Editor,
+    playback: &Entity<Playback>,
+    picked: &[PickedFile],
+    node: Option<&str>,
+    window: &mut Window,
+    cx: &mut Context<Editor>,
+) -> Imports {
+    let mut imports = Imports::default();
+    editor.edit_model(cx, |model| {
+        model.batched(|model| {
+            imports = import(model, picked);
+            if let (Some(node), Some((id, _))) = (node, imports.files.first()) {
+                model.set_node_asset(node, Some(id));
             }
-            p.set_asset_files(all, window, cx);
-        });
+        })
+    });
+    if let (Some(node), Some((id, _))) = (node, imports.files.first()) {
+        let reads_it = editor.model().node(node).and_then(|n| n.data.asset.as_deref()) == Some(id.as_str());
+        if !reads_it {
+            let name = editor.model().asset(id).map_or_else(String::new, |a| a.name().to_owned());
+            imports.problems.push(format!("{name}: this node can't read it, being of another kind."));
+        }
+    }
+    let files = imports.files.clone();
+    playback.update(cx, |p, cx| {
+        let mut all = p.asset_files().clone();
+        for (id, bytes) in files {
+            all.entry(id).or_insert(bytes);
+        }
+        p.set_asset_files(all, window, cx);
+    });
+    imports
+}
+
+/// Reads the paths and imports what they hold as one undo step. Files that can't be used are reported together.
+pub fn import_paths(
+    editor: &Entity<Editor>,
+    playback: &Entity<Playback>,
+    paths: &[PathBuf],
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (picked, mut problems) = read_paths(paths);
+    let imports = editor.update(cx, |e, cx| import_into(e, playback, &picked, None, window, cx));
+    problems.extend(imports.problems);
+    report_problems(window, &problems, cx);
+}
+
+/// Asks for one media file, imports it and makes `node`, an Image or Video node, read it: its picker's Import entry.
+pub fn pick_and_import_for_node<T: 'static>(
+    editor: &Entity<Editor>,
+    playback: &Entity<Playback>,
+    node: &str,
+    window: &mut Window,
+    cx: &mut Context<T>,
+) {
+    let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
+    let (editor, playback, node) = (editor.clone(), playback.clone(), node.to_owned());
+    cx.spawn_in(window, async move |_, cx| {
+        let picked = match paths.await {
+            Ok(Ok(Some(paths))) => paths,
+            _ => return,
+        };
+        cx.update(|window, cx| import_for_node(&editor, &playback, &node, &picked, window, cx)).ok();
+    })
+    .detach();
+}
+
+/// Imports the file at `paths` and makes `node` read it, as one undo step.
+pub fn import_for_node(
+    editor: &Entity<Editor>,
+    playback: &Entity<Playback>,
+    node: &str,
+    paths: &[PathBuf],
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (picked, mut problems) = read_paths(paths);
+    let imports = editor.update(cx, |e, cx| import_into(e, playback, &picked, Some(node), window, cx));
+    problems.extend(imports.problems);
+    report_problems(window, &problems, cx);
+}
+
+/// Imports files dropped on the graph and makes nodes of them where they land, as the original's dropMedia does.
+pub fn drop_files_on_graph(
+    editor: &mut Editor,
+    playback: &Entity<Playback>,
+    paths: &[PathBuf],
+    at: Point<Pixels>,
+    window: &mut Window,
+    cx: &mut Context<Editor>,
+) {
+    let (picked, mut problems) = read_paths(paths);
+    let imports = import_into(editor, playback, &picked, None, window, cx);
+    problems.extend(imports.problems);
+    let ids: Vec<String> = imports.files.iter().map(|(id, _)| id.clone()).collect();
+    if !ids.is_empty() {
+        editor.drop_assets(&ids, at, cx);
     }
     report_problems(window, &problems, cx);
 }
@@ -579,6 +665,8 @@ impl AssetsPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shader_graph::graph::Point;
+    use shader_graph::nodes::IMAGE;
     use std::fs;
 
     fn png(width: u32) -> Vec<u8> {
@@ -676,6 +764,32 @@ mod tests {
 
     fn asset_count(editor: &Entity<Editor>, vcx: &mut gpui::VisualTestContext) -> usize {
         editor.read_with(vcx, |e, _| e.model().assets().len())
+    }
+
+    #[gpui::test]
+    fn import_for_node_sets_the_node_and_is_one_undo_step(cx: &mut gpui::TestAppContext) {
+        let (editor, playback, _panel, mut vcx) = panel(cx);
+        let node = editor.update(&mut vcx, |e, cx| {
+            let mut id = String::new();
+            e.edit_model(cx, |m| id = m.add_node(IMAGE, Point::new(0.0, 0.0)).expect("adds"));
+            id
+        });
+        let dir = std::env::temp_dir().join(format!("wgnodes-import-for-node-{}", std::process::id()));
+        let path = scratch_png(&dir, "Photo.png", 3);
+
+        vcx.update(|window, cx| import_for_node(&editor, &playback, &node, std::slice::from_ref(&path), window, cx));
+        vcx.run_until_parked();
+        let read = |vcx: &mut gpui::VisualTestContext| {
+            editor.read_with(vcx, |e, _| e.model().node(&node).and_then(|n| n.data.asset.clone()))
+        };
+        assert!(read(&mut vcx).is_some(), "the node reads the imported file");
+        assert_eq!(asset_count(&editor, &mut vcx), 1);
+
+        editor.update(&mut vcx, |e, cx| e.undo(cx));
+        vcx.run_until_parked();
+        assert_eq!(read(&mut vcx), None, "one undo takes back the node's asset");
+        assert_eq!(asset_count(&editor, &mut vcx), 0, "and the import with it");
+        fs::remove_dir_all(dir).ok();
     }
 
     #[gpui::test]

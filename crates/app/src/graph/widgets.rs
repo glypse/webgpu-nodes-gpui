@@ -657,6 +657,7 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
             asset_choice(ed, node, Some(id.clone())),
         )
     }));
+    choices.push(ListItem::new("Import…", None, import_choice(ed, node)));
     let asset_picker = picker(
         SharedString::from(format!("asset-{node}")),
         label,
@@ -737,6 +738,14 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
         .py(px(4.0 * z))
         .child(body)
         .into_any_element()
+}
+
+/// The handler of the picker's Import entry: asks for a file and has the node read it.
+fn import_choice(ed: &WeakEntity<Editor>, node: &str) -> OnSelect {
+    let (ed, node) = (ed.clone(), node.to_owned());
+    Rc::new(move |window, cx| {
+        ed.update(cx, |e, cx| e.import_for_node(&node, window, cx)).ok();
+    })
 }
 
 /// The handler of an asset picker entry: `None` reads no asset.

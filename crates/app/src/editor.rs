@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use handle::{ModelHandle, ModelMut};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Pixels,
     Point, Render, SharedString, Styled as _, Window, div,
     px,
@@ -33,7 +33,7 @@ use shader_graph::UniformValue;
 use gpui_component::menu::PopupMenu;
 use theme::{ActiveTheme as _, popup};
 
-use crate::assets::AssetDrag;
+use crate::assets::{self, AssetDrag};
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
 use crate::graph::type_picker::{self, TypePicker};
@@ -889,6 +889,12 @@ impl Editor {
 
     pub(crate) fn set_node_asset(&mut self, node: &str, asset: Option<&str>, cx: &mut Context<Self>) {
         self.edit(cx, |m| m.set_node_asset(node, asset));
+    }
+
+    /// The picker's Import entry: asks for a file and has the Image or Video node read it.
+    pub(crate) fn import_for_node(&mut self, node: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(playback) = self.playback.clone() else { return };
+        assets::pick_and_import_for_node(&cx.entity(), &playback, node, window, cx);
     }
 
     pub(crate) fn set_video_playback(&mut self, node: &str, change: PlaybackChange, edit: Edit, cx: &mut Context<Self>) {
@@ -1918,6 +1924,12 @@ impl Render for Editor {
                             .on_drop(cx.safe_listener(|this, dragged: &AssetDrag, window, cx| {
                                 this.drop_assets(std::slice::from_ref(&dragged.id), window.mouse_position(), cx);
                             }))
+                            .on_drop(cx.safe_listener(|this, paths: &ExternalPaths, window, cx| {
+                                if let Some(playback) = this.playback.clone() {
+                                    let at = window.mouse_position();
+                                    assets::drop_files_on_graph(this, &playback, &paths.0, at, window, cx);
+                                }
+                            }))
                             .child(self.flow.clone()),
                     ),
             )
@@ -2428,6 +2440,35 @@ mod tests {
         let (node_type, position) = added.expect("a node reads the dropped asset");
         assert_eq!(node_type, IMAGE);
         assert_eq!((position.x, position.y), (expected.x, expected.y));
+    }
+
+    #[gpui::test]
+    fn a_finder_drop_on_the_graph_imports_and_adds_a_node_where_it_lands(cx: &mut TestAppContext) {
+        let (editor, _playback, _asset, mut vcx) = media_scene(cx);
+        let dir = std::env::temp_dir().join(format!("wgnodes-finder-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let path = dir.join("Dropped.png");
+        std::fs::write(&path, png_of_width(4)).expect("writes");
+
+        let at = point(px(300.0), px(200.0));
+        let expected = editor.read_with(vcx, |e, cx| e.flow.read(cx).screen_to_flow(at));
+        let paths = gpui::ExternalPaths(std::iter::once(path).collect());
+        vcx.simulate_event(gpui::FileDropEvent::Entered { position: at, paths });
+        vcx.simulate_event(gpui::FileDropEvent::Submit { position: at });
+        vcx.run_until_parked();
+
+        let added = editor.read_with(vcx, |e, _| {
+            let model = e.model();
+            let doc = model.active_document();
+            doc.nodes
+                .iter()
+                .find(|n| n.node_type == IMAGE && n.data.asset.is_some())
+                .map(|n| (model.asset(n.data.asset.as_deref().unwrap_or_default()).map(|a| a.name().to_owned()), n.position))
+        });
+        let (name, position) = added.expect("a node reads the dropped file");
+        assert_eq!(name.as_deref(), Some("Dropped"));
+        assert_eq!((position.x, position.y), (expected.x, expected.y));
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[gpui::test]
