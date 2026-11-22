@@ -24,6 +24,7 @@ use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaSta
 use theme::{ActiveTheme as _, Icon, IconName, NumberEvent, NumberField};
 
 use super::frames::tint_color;
+use super::node::is_locked_group;
 use super::type_picker::{TypePicker, on_editor};
 use super::type_set_picker;
 use crate::editor::{Editor, ListItem};
@@ -204,13 +205,17 @@ pub(super) fn hint(text: &str, cx: &Context<Editor>) -> gpui::Div {
 }
 
 pub(super) fn boxed(input: Entity<InputState>, cx: &Context<Editor>) -> gpui::Div {
+    boxed_disabled(input, false, cx)
+}
+
+pub(super) fn boxed_disabled(input: Entity<InputState>, disabled: bool, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
     div()
         .px_1()
         .border_1()
         .border_color(theme.colors.input)
         .rounded(theme.radius.md)
-        .child(Input::new(&input).appearance(false))
+        .child(Input::new(&input).appearance(false).disabled(disabled))
 }
 
 /// A multi-line field that grows with its text: Enter starts a line, Cmd-Enter is the commit
@@ -289,7 +294,7 @@ fn subject(model: &GraphModel, node_id: &str) -> Option<Subject> {
         default_label: model.default_node_label(node_id),
         node_type: node.node_type.clone(),
         hide_links: node.data.hide_links == Some(true),
-        locked: model.is_locked() || node.group.as_ref().is_some_and(|g| g.locked),
+        locked: model.is_locked() || is_locked_group(model, node),
         frame: node.is(LAYOUT_FRAME).then(|| (frame_note(&node.data).unwrap_or_default().to_owned(), frame_tint(&node.data))),
         zone,
         group,
@@ -363,7 +368,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             .flex_col()
             .gap_1p5()
             .child(heading("Label", cx))
-            .child(div().flex().items_center().gap_1().child(div().flex_1().child(boxed(label_input, cx))).child(reset)),
+            .child(div().flex().items_center().gap_1().child(div().flex_1().child(boxed_disabled(label_input, locked, cx))).child(reset)),
     );
 
     if subject.node_type == REROUTE {
@@ -506,7 +511,7 @@ fn group_settings(
             })
         };
         let input = field(editor, format!("group-{reference}"), &group.label, "Group name", window, cx, commit);
-        body = body.child(div().flex().flex_col().gap_1p5().child(heading("Group name", cx)).child(boxed(input, cx)));
+        body = body.child(div().flex().flex_col().gap_1p5().child(heading("Group name", cx)).child(boxed_disabled(input, locked, cx)));
     }
 
     if !group.variables.is_empty() || !locked {
@@ -556,7 +561,7 @@ fn group_settings(
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().w(px(56.0)).flex_none().child(boxed(name, cx)))
+                    .child(div().w(px(56.0)).flex_none().child(boxed_disabled(name, locked, cx)))
                     .child(div().flex().flex_1().min_w_0().child(types_button))
                     .child(
                         div()
@@ -670,7 +675,7 @@ fn group_settings(
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(div().flex_1().min_w_0().child(boxed(input, cx)))
+                    .child(div().flex_1().min_w_0().child(boxed_disabled(input, locked, cx)))
                     .child(div().w(px(96.0)).flex_none().flex().child(type_button))
                     .when(detailed, |d| {
                         d.child(button(SharedString::from(format!("expand-{}", handle.id)), if open { Icon::new(IconName::CaretDown).size(px(14.0)).into_any_element() } else { Icon::new(IconName::CaretRight).size(px(14.0)).into_any_element() }, cx, move |this, cx| {

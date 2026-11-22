@@ -129,6 +129,14 @@ pub fn node_width(node_type: &str) -> f32 {
     }
 }
 
+/// Whether a group node is locked. Nodes added from the library can be saved
+/// with an unlocked `group` while their definition is locked, so the definition counts too.
+pub fn is_locked_group(model: &GraphModel, node: &GraphNode) -> bool {
+    node.group.as_ref().is_some_and(|g| {
+        g.locked || model.project().document(&g.definition_ref).is_some_and(|d| d.locked)
+    })
+}
+
 pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
     let descriptor = model.resolve_descriptor(node);
     let id = node.id.as_str();
@@ -195,7 +203,7 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         node_type: node.node_type.clone(),
         label: model.node_label(id),
         locked: model.is_locked(),
-        group_locked: node.group.as_ref().is_some_and(|g| g.locked),
+        group_locked: is_locked_group(model, node),
         settings,
         type_choice: model.type_choice(id),
         inputs,
