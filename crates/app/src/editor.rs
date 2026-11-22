@@ -1572,7 +1572,7 @@ impl Editor {
         self.flow.update(cx, |f, cx| f.set_selection(&flow_ids, &[], cx));
     }
 
-    /// Previews a node and selects it, as the original does. Previewing it again
+    /// Previews a node and selects it. Previewing it again
     /// moves the preview to its next output.
     pub(crate) fn preview_node(&mut self, node: &str, cx: &mut Context<Self>) {
         let previewed = self.model_mut().preview_node(node);
@@ -2578,7 +2578,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn menu_actions_follow_the_selection_as_the_original_enables_them(cx: &mut TestAppContext) {
+    fn menu_actions_follow_the_selection(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
         focus_flow(&scene, cx);
         select_nodes(&scene, cx, Vec::new());

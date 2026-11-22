@@ -1,4 +1,4 @@
-//! A node editor canvas for GPUI, modelled on `@xyflow/svelte`.
+//! A node editor canvas for GPUI.
 //!
 //! [`Flow`] is controlled: it shows the nodes and edges it's given, applies
 //! interactions to its own copy so they feel immediate, and reports them as

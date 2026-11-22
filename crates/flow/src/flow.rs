@@ -1746,7 +1746,7 @@ fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &Pai
             let b = match *last {
                 Segment::Move(p) | Segment::Line(p) | Segment::Quad(_, p) | Segment::Cubic(_, _, p) => p,
             };
-            // CSS angles run clockwise from "up".
+            // Gradient angles run clockwise from "up".
             let angle = (b.x - a.x).atan2(-(b.y - a.y)).to_degrees();
             gpui::linear_gradient(
                 angle,

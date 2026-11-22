@@ -1,7 +1,5 @@
 //! Resolved node geometry and the connection logic built on it: handle
 //! positions, edge ends, the closest handle to the pointer, and validity.
-//! Ports of `@xyflow/system`'s `getHandlePosition`, `getEdgePosition`,
-//! `getClosestHandle` and `isValidHandle`.
 
 use std::collections::HashMap;
 

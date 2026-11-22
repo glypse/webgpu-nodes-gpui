@@ -16,7 +16,7 @@ use super::video::{DecodedFrame, VideoDecoder};
 use super::MediaError;
 use crate::Size;
 
-/// Packets read to estimate a video's frame rate, as the original's importer does.
+/// Packets read to estimate a video's frame rate.
 const PACKETS_FOR_FRAME_RATE: usize = 600;
 /// The spacing assumed for a frame when the video's frame rate isn't known.
 const FALLBACK_FRAME_SECONDS: f64 = 1.0 / 30.0;

@@ -1,5 +1,5 @@
-//! What dragging from an area's corner does, as Blender's corners do: split
-//! the area, join a neighbour, dock into another area, or swap with one.
+//! What dragging from an area's corner does: split the area, join a neighbour,
+//! dock into another area, or swap with one.
 
 use crate::{Area, AreaId, Axis, DockTarget, MinSize, Part, Rect, Screen, Side, neighbour_side};
 
@@ -28,7 +28,7 @@ impl Outcome {
     }
 }
 
-/// Blender's slight snap of halves, and its minimum part size.
+/// Snaps a fraction near one half to exactly one half, and keeps it within the minimum part size.
 pub fn snap_half(fraction: f64, min_fraction: f64) -> f64 {
     let snapped = if (fraction - 0.5).abs() < 0.02 { 0.5 } else { fraction };
     snapped.clamp(min_fraction, 1.0 - min_fraction)

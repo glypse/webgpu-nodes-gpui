@@ -110,8 +110,8 @@ pub fn index_switch_cases(data: &NodeData) -> u32 {
     clamp_cases(i64::from(data.cases.unwrap_or(DEFAULT_CASES)))
 }
 
-/// Pick one of its cases by a runtime index, as Blender's Index Switch. An
-/// index out of range takes the nearest case.
+/// Pick one of its cases by a runtime index. An index out of range takes the
+/// nearest case.
 pub fn build_index_switch_descriptor(data: &NodeData) -> NodeDescriptor {
     let count = index_switch_cases(data);
     let cases: Vec<String> = (0..count).map(|i| case_handle(i64::from(i))).collect();

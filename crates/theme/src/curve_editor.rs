@@ -26,7 +26,7 @@ const INSET: f64 = 6.0;
 const GRAB: f64 = 7.0;
 /// How close the pointer must be to the curve to add a point on it.
 const CURVE_GRAB: f64 = 5.0;
-/// Ctrl-dragged points snap to 1 / SNAP steps, as in Blender.
+/// Ctrl-dragged points snap to 1 / SNAP steps.
 const SNAP: f64 = 8.0;
 /// How much slower things move while Shift is held.
 const PRECISION: f64 = 0.1;

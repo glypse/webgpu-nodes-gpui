@@ -17,7 +17,7 @@ impl From<WindowAppearance> for Appearance {
     }
 }
 
-/// The shadcn palette (neutral base) the original's components are styled with.
+/// The neutral palette the components are styled with.
 #[derive(Clone, Debug)]
 pub struct Colors {
     pub background: Hsla,
@@ -92,7 +92,7 @@ impl Colors {
     }
 }
 
-/// Tailwind's radius scale around the original's `--radius` of 0.625rem.
+/// Radius scale around a base radius of 0.625rem.
 #[derive(Clone, Copy, Debug)]
 pub struct Radii {
     pub sm: Pixels,
@@ -101,7 +101,7 @@ pub struct Radii {
     pub xl: Pixels,
 }
 
-/// Spacing is GPUI's rem scale (`p_1` is 0.25rem), the same as Tailwind's.
+/// Spacing is GPUI's rem scale (`p_1` is 0.25rem).
 #[derive(Clone, Copy, Debug)]
 pub struct TextSizes {
     pub xs: Pixels,

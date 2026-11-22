@@ -1,7 +1,7 @@
 //! Colour conversions. Colours are held as linear sRGB (what shaders compute
 //! with), components unbounded above for HDR and below for colours past sRGB;
-//! HSV is of the sRGB-encoded colour, as Blender shows it, and hex and
-//! on-screen swatches are encoded in the colour space shown.
+//! HSV is of the sRGB-encoded colour, and hex and on-screen swatches are
+//! encoded in the colour space shown.
 
 use palette::{
     Hsv as PaletteHsv, LinSrgb, Oklab, Oklch, Srgb as PaletteSrgb,
@@ -258,7 +258,7 @@ const GREY: f64 = 1e-6;
 
 /// HSV (of the sRGB-encoded colour) of a linear one, keeping `previous`'s
 /// hue for a grey and its hue and saturation for black, which have none: so
-/// a hue survives going through them, as in Blender.
+/// a hue survives going through them.
 pub fn hsv_keeping_hue(color: Rgb, previous: Hsv) -> Hsv {
     let next = rgb_to_hsv(encode_rgb(color));
     if next.v < GREY {

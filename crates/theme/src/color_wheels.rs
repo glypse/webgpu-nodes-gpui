@@ -16,7 +16,7 @@ use image::Frame;
 
 use crate::gamut_image::{PlaneKey, paint_gamut, plane_image};
 
-/// Red at the bottom, hues going clockwise (as Blender's wheel).
+/// Red at the bottom, hues going clockwise.
 const HUE_OFFSET: f64 = PI;
 /// A little over the most chroma each gamut reaches (about 0.32 and 0.36).
 pub fn oklch_max_chroma(gamut: ColorSpace) -> f64 {

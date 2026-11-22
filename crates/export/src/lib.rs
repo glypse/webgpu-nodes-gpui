@@ -315,7 +315,7 @@ fn validate(settings: &Settings) -> Result<(), ExportError> {
     if !(settings.fps.is_finite() && settings.fps > 0.0) {
         return invalid("the frame rate must be above zero");
     }
-    // A zero duration still exports one frame, as the original's frame count does.
+    // A zero duration still exports one frame.
     if !(settings.duration.is_finite() && settings.duration >= 0.0) {
         return invalid("the duration can't be negative");
     }

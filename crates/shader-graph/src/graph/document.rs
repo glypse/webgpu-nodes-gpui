@@ -266,8 +266,7 @@ fn serialize_user_definitions<S: serde::Serializer>(
 }
 
 /// The whole project: the root in `definitions[ROOT_ID]`, groups beside it.
-/// Besides `definitions`, the original's `settings`, `layout` and `assets`
-/// are kept as saved.
+/// Besides `definitions`, `settings`, `layout` and `assets` are kept as saved.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GraphProject {
     /// Library groups are registered here too but never serialised: the app

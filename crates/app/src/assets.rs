@@ -180,7 +180,7 @@ pub fn import_for_node(
     report_problems(window, &problems, cx);
 }
 
-/// Imports files dropped on the graph and makes nodes of them where they land, as the original's dropMedia does.
+/// Imports files dropped on the graph and makes nodes of them where they land.
 pub fn drop_files_on_graph(
     editor: &mut Editor,
     playback: &Entity<Playback>,
@@ -446,7 +446,7 @@ impl Render for Tile {
     }
 }
 
-/// The narrowest a tile gets, as the original's grid of 7.5rem columns.
+/// The narrowest a tile gets.
 const TILE_WIDTH: f32 = 120.0;
 
 /// The Assets area: a grid of the project's assets, each a cached tile.

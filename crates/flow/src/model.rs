@@ -444,7 +444,7 @@ pub fn reconnect_edge(old: &Edge, connection: &Connection, edges: Vec<Edge>) -> 
     edges
 }
 
-/// A connection being dragged, as `ConnectionState` in xyflow; positions are
+/// A connection being dragged; positions are
 /// in flow units, `pointer` in the flow's local pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConnectionState {

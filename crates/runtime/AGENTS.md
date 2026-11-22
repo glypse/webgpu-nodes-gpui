@@ -1,6 +1,6 @@
 # runtime
 
-wgpu renderer, playback clock and player for the shader programs `shader-graph` generates. Ports `/Volumes/T7WA/GitHub/webgpu-nodes/packages/runtime`.
+wgpu renderer, playback clock and player for the shader programs `shader-graph` generates.
 
 ## Module map
 - `src/lib.rs`: public surface. Everything else is private; re-export new API here.

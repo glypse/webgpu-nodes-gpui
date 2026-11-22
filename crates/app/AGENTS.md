@@ -1,6 +1,6 @@
 # crates/app (`webgpu-nodes`): the editor binary
 
-Purpose: the gpui window app (node editor, preview, timeline, code view, properties, output windows). Port of the original editor in `/Volumes/T7WA/GitHub/webgpu-nodes/packages/editor` and the shell in `/Volumes/T7WA/GitHub/webgpu-nodes/apps/web`. Read `docs/probing.md` for screenshot/profile/bounded-run usage.
+Purpose: the gpui window app (node editor, preview, timeline, code view, properties, output windows). Read `docs/probing.md` for screenshot/profile/bounded-run usage.
 
 ## Module map (`src/`)
 - `main.rs`: entry point. Parses CLI, installs probe, starts gpui, inits `theme`, `preferences`, `shell`, `windows`, `editor`; builds the menu bar (`menus()`, `refresh_menus`, `set_playing`); `wind_down` for bounded runs and `--screenshot`.

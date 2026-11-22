@@ -1,14 +1,18 @@
 # webgpu-nodes-gpui
 
-A minimal Rust port of [webgpu-nodes](../webgpu-nodes): a node editor for WGSL fragment shaders, built on GPUI and wgpu.
-
-Scope: UV, Time, Value, float math and groups. Every socket is an `f32`.
+A node editor for WGSL fragment shaders, built on GPUI and wgpu.
 
 ## Crates
 
-- `crates/flow` (`gpui-flow`): a controlled node-editor canvas for GPUI, in the spirit of Svelte Flow. Knows nothing about shaders.
-- `crates/shader-graph`: the headless graph model (documents, groups, edits) and WGSL codegen. Groups compile to WGSL functions.
-- `crates/app` (`webgpu-nodes`): the editor, rendering the generated shader offscreen with wgpu and showing it as an image.
+- `crates/flow` (`gpui-flow`): a controlled node-editor canvas for GPUI. Knows nothing about shaders.
+- `crates/shader-graph`: the headless graph model (types, nodes, documents, zones, groups, edits, library, catalog) and WGSL codegen.
+- `crates/graph-math`: colour, curve and colour-ramp maths shared by the graph's CPU evaluation and the editor widgets.
+- `crates/runtime`: the wgpu renderer, playback clock, player and media decoding.
+- `crates/export`: video export through FFmpeg's built-in encoders.
+- `crates/theme`: design tokens and UI components.
+- `crates/screen`: the editor's tiled area layout.
+- `crates/guard`: panic guards for UI callbacks.
+- `crates/app` (`webgpu-nodes`): the editor.
 
 ## Running
 

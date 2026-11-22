@@ -6,7 +6,7 @@ use crate::types::{EnumVariant, InputValue, enum_value};
 
 /// The values to set on a colour widget's components when its mode changes
 /// from what `before` held to what `after` holds, so the colour stays the
-/// same (unlike Blender's Combine Color, which keeps the numbers). `None`
+/// same, rather than keeping the numbers. `None`
 /// when the mode didn't change, or a component is linked: a linked one's
 /// value is only known in the shader.
 pub fn color_mode_conversion(

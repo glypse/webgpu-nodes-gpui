@@ -111,7 +111,7 @@ impl NodeProps {
         state
     }
 
-    /// A connection point. Positioned like xyflow's: at the node's border
+    /// A connection point. Positioned at the node's border
     /// for `position`, in the nearest positioned ancestor.
     pub fn handle(&self, id: impl Into<Option<Id>>, kind: HandleType, position: Position) -> Handle {
         let id = id.into();

@@ -71,7 +71,7 @@ pub struct ColorPicker {
     gamut: ColorSpace,
     mode: ColorMode,
     /// HSV and OKLch are kept apart from `value` so a hue survives going
-    /// through grey (no hue) or black, as it does in Blender.
+    /// through grey (no hue) or black.
     hsv: Hsv,
     lch: Lch,
     /// The last value sent, to tell our own changes coming back from new ones.

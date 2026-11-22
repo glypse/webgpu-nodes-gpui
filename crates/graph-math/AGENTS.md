@@ -1,11 +1,6 @@
 # graph-math agent notes
 
-Colour, curve and colour-ramp maths shared by the node graph (its WGSL computes the same) and the editor widgets. Port of the TypeScript in the original repo.
-
-## Original source (/Volumes/T7WA/GitHub/webgpu-nodes/packages/core/src)
-- `color/convert.ts`, `color/modes.ts`, `color/display.ts`: `src/color/`
-- `curve/curve.ts`, `curve/presets.ts`: `src/curve.rs`
-- `nodes/color-ramp.ts` (ramp evaluation): `src/ramp.rs`
+Colour, curve and colour-ramp maths shared by the node graph (its WGSL computes the same) and the editor widgets.
 
 ## Module map
 - `src/lib.rs`: exports `color`, `curve`, `ramp`.
@@ -30,7 +25,7 @@ Colour, curve and colour-ramp maths shared by the node graph (its WGSL computes 
 ## Invariants (checked in code)
 - Colours are linear sRGB, unbounded: components below 0 or above 1 are valid (HDR, colours outside sRGB). Only swatches, hex and display clip.
 - `srgb_encode`/`srgb_decode` clamp negative inputs to 0 first, so out-of-gamut negatives do not survive an encode.
-- HSV is of the sRGB-encoded colour (as Blender shows it). Hue is normalised to [0, 1) in `hsv_to_rgb`.
+- HSV is of the sRGB-encoded colour. Hue is normalised to [0, 1) in `hsv_to_rgb`.
 - OKLch hue is in degrees; `Lch` chroma is unbounded above.
 - Display P3 matrices in `display.rs` are the CSS Color 4 rational values, deliberately kept over `palette`'s derived ones (about 3e-5 apart). Don't "fix" them to match palette.
 - The OKLab matrices (`LINEAR_RGB_TO_LMS`, `LMS_TO_OKLAB`, ...) are emitted to WGSL; a test checks they agree with `palette`.
@@ -38,12 +33,11 @@ Colour, curve and colour-ramp maths shared by the node graph (its WGSL computes 
 - Curve: outside the first and last points the curve is flat; neighbouring points form cubic segments; vector points join by straight lines whatever handles they keep; handles are shortened so x keeps growing.
 - `CURVE_SOLVE_STEPS` (16) is the Newton iteration count the generated WGSL uses. It is the shader's only accuracy knob: change it on both sides.
 - Ramp: `evaluate_ramp` mirrors the shader stage by stage (its doc says the two must change together). Past the end stops, the end colours are kept. `Smooth` is a monotone cubic (no overshoot). Grey detection uses `RAMP_ACHROMATIC` (1e-4); `RAMP_CARDINAL_TENSION` is 0.71.
-- Ramp stop positions are passed to the shader as uniforms, so moving a stop does not change the compiled shader (the original's test asserts this on the node side).
+- Ramp stop positions are passed to the shader as uniforms, so moving a stop does not change the compiled shader.
 
 ## Tests
 - Inline `#[cfg(test)] mod tests` in each source file (`color/display.rs`, `color/modes.rs`, `color/convert.rs`, `curve.rs`, `ramp.rs`). No `tests/` directory.
 - Run: `cargo test -p graph-math` (from the repo root; shared `target/`).
-- Ported from the original: `ramp.rs` tests follow `nodes/color-ramp.test.ts` (end colours, stops, Blender interpolation, no overshoot, hue paths, alpha); `curve.rs` tests follow `curve/curve.test.ts`; `convert.rs` tests follow `color/convert.test.ts`. The original's gamut tests (`color/gamut.test.ts`) and node/UI tests (compile, uniforms, save/load) are not in this crate and live in `shader-graph`/`theme` where applicable.
 
 ## Workspace dependents
 - `crates/shader-graph/Cargo.toml`: `graph-math = { path = "../graph-math" }`.

@@ -353,7 +353,7 @@ pub struct CustomSockets {
 }
 
 /// Everything a node stores. Which fields apply depends on the node type.
-/// Fields of nodes this port doesn't implement (assets) are
+/// Fields of nodes this crate doesn't implement (assets) are
 /// kept in `extra` so saved projects round-trip.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

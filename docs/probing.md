@@ -70,7 +70,7 @@ This section has not been run; check `samply record --help` if the flags differ.
 
 `crates/app/scenes/` holds the benchmark projects:
 
-- `default.json`: the original app's default scene, copied unchanged.
+- `default.json`: the default scene.
 - `voronoi.wgnodes`: a fractal Voronoi scene saved from the editor (UV, aspect, a vec3 whose z is time / 2, Fractal Voronoi, Remap, OKLCh), far heavier on the GPU than the default scene.
 
 `cargo test -p webgpu-nodes scenes` checks that both scenes load and generate WGSL that naga validates.

@@ -1,5 +1,4 @@
 //! Pure coordinate maths: viewport transforms, bounds, snapping, fitting.
-//! Mirrors the helpers of `@xyflow/system`'s `utils/general.ts`.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Xy {
@@ -203,7 +202,7 @@ pub fn constrain_viewport(vp: Viewport, width: f32, height: f32, extent: &Extent
 }
 
 /// The viewport that centres `bounds` in a canvas with the given padding
-/// (a fraction of the canvas, as xyflow's unitless paddings).
+/// (a unitless fraction of the canvas).
 pub fn viewport_for_bounds(
     bounds: Rect,
     width: f32,
@@ -226,8 +225,7 @@ pub fn viewport_for_bounds(
     }
 }
 
-/// How fast to pan, per frame, while the pointer is near a canvas edge
-/// (`xyflow`'s `calcAutoPan`).
+/// How fast to pan, per frame, while the pointer is near a canvas edge.
 pub fn auto_pan(pos: Xy, width: f32, height: f32, speed: f32, distance: f32) -> Xy {
     fn velocity(value: f32, min: f32, max: f32) -> f32 {
         if value < min {

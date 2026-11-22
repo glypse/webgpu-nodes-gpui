@@ -1,4 +1,4 @@
-//! Zones: a pair of nodes after Blender's geometry-nodes zones. The output
+//! Zones: a pair of nodes that bound a region of the graph. The output
 //! node owns the item list (`data.items`); the input node points at its
 //! partner with `data.paired_output`. Item handle ids are shared by both.
 //!
@@ -413,7 +413,7 @@ fn topo_order(ids: &[&str], edges: &[(&str, &str)]) -> Vec<String> {
 }
 
 /// Work out zone membership, nesting and invalid links for one document,
-/// following Blender's rules:
+/// following these rules:
 ///
 /// - "inside" flags propagate forward along links: a zone input sets its
 ///   zone's flag; a zone output inherits its input's flags (implicit link),

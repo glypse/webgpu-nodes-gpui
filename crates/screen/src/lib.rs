@@ -1,4 +1,4 @@
-//! Editor panels tiling a window, after Blender's screens: every area is a
+//! Editor panels tiling a window: every area is a
 //! rectangle, neighbours share edges, and the editing operations (split, join,
 //! close, dock, edge moves) keep the window tiled. Coordinates are fractions
 //! of the window, from its top-left corner; a value shared by several areas is
@@ -273,7 +273,7 @@ impl<E: Clone> Screen<E> {
         }
     }
 
-    /// Exchange two areas' editors, as Blender's Ctrl-drag from a corner does.
+    /// Exchange two areas' editors.
     pub fn swap(&self, a: AreaId, b: AreaId) -> Option<Self> {
         let first = self.area(a)?.editor.clone();
         let second = self.area(b)?.editor.clone();
@@ -556,9 +556,9 @@ impl<E: Clone> Screen<E> {
         sides
     }
 
-    /// The interior edge within `threshold` of a point, as Blender picks it:
-    /// the sides on that line connected to the one under the point (through
-    /// T-junctions), or every side on it with `extend`.
+    /// The interior edge within `threshold` of a point: the sides on that line
+    /// connected to the one under the point (through T-junctions), or every
+    /// side on it with `extend`.
     pub fn edge_at(
         &self,
         x: f64,

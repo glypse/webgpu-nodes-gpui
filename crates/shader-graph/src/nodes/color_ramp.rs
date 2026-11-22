@@ -1,4 +1,4 @@
-//! The Color Ramp node, after Blender's: a colour picked along stops by a
+//! The Color Ramp node: a colour picked along stops by a
 //! factor. Each stop's colour is an input of its own (so it can be linked),
 //! its position is the node's data. The colours are interpolated in RGB, HSV
 //! or OKLch, any of the interpolations in any space; these are enum inputs,

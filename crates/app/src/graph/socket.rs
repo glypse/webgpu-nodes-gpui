@@ -6,7 +6,7 @@ use gpui_flow::{Handle, HandleType, NodeProps, Position};
 use shader_graph::types::{ScalarKind, WgslType};
 use theme::Theme;
 
-/// Colour follows the component count, as the original's `--color-*`.
+/// Colour follows the component count.
 pub fn socket_color(ty: WgslType, theme: &Theme) -> Hsla {
     if ty.is_texture() {
         return hsla(199.0 / 360.0, 0.89, 0.48, 1.0);

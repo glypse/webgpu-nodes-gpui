@@ -4,7 +4,7 @@ use super::{
 };
 
 /// What three colour components are. RGB is linear (what the shader computes
-/// with); HSV is of the sRGB-encoded colour, hue in [0, 1] (as Blender);
+/// with); HSV is of the sRGB-encoded colour, hue in [0, 1];
 /// OKLch has its hue in degrees.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ColorMode {

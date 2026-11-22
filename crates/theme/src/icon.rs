@@ -5,7 +5,7 @@ use gpui::{
     svg,
 };
 
-/// Phosphor icons, in the weight the original uses at each place. Each variant names its
+/// Phosphor icons, each in the weight its place calls for. Each variant names its
 /// `phosphor_svgs` weight and const, and the Phosphor file stem its asset path is built from.
 macro_rules! icons {
     ($($variant:ident => $weight:ident::$konst:ident, $stem:literal,)*) => {
@@ -78,7 +78,7 @@ icons! {
 }
 
 /// gpui-component names its built-in icons after Lucide; these paths resolve to the Phosphor
-/// icon the original uses for the same job.
+/// icon for the same job.
 const COMPONENT_ICON_ALIASES: &[(&str, &str)] = &[
     ("icons/chevron-down.svg", "icons/caret-down.svg"),
     ("icons/chevron-left.svg", "icons/caret-left.svg"),

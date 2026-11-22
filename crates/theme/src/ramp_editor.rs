@@ -298,7 +298,7 @@ impl RampEditor {
             }
             return;
         }
-        // Ctrl-click adds a stop, as in Blender; a click grabs the nearest one.
+        // Ctrl-click adds a stop; a click grabs the nearest one.
         let (stop, stops) = match near {
             Some(near) if !(event.modifiers.control || event.modifiers.platform) => {
                 (near, self.stops.clone())

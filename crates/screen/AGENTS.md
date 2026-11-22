@@ -1,6 +1,6 @@
 # screen crate (agent notes)
 
-Blender-like area layout: a window tiled by rectangles of fractional coordinates, with split/join/close/dock/edge-move operations and a gpui `ScreenView` that draws headers, dividers and gestures. Original: none identified (grep of `/Volumes/T7WA/GitHub/webgpu-nodes/packages/editor/src` for split/area hits unrelated files).
+Area layout: a window tiled by rectangles of fractional coordinates, with split/join/close/dock/edge-move operations and a gpui `ScreenView` that draws headers, dividers and gestures.
 
 ## Module map
 - `src/lib.rs`: `Screen<E>` model (pure ops), `Rect`, `Area`, `AreaId`, `Axis`, `Side`, `Part`, `MinSize`, `DockTarget`, `EdgeSelection`, `Invalid`, `neighbour_side`.

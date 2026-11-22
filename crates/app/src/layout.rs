@@ -11,7 +11,7 @@ use crate::shell::Panel;
 
 /// The key of the layout in the project's JSON.
 const KEY: &str = "layout";
-/// What a path may hold, as the original's schema limits it.
+/// What a path may hold.
 const MAX_PATH: usize = 64;
 const MAX_AREAS: usize = 256;
 
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn the_layout_survives_a_project_round_trip_in_the_originals_shape() {
+    fn the_layout_survives_a_project_round_trip() {
         let mut project = GraphProject::default();
         store(&mut project, &screen(), &|_| GraphView::default());
         let json = project.to_json();

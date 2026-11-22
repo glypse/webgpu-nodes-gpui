@@ -64,8 +64,8 @@ pub(crate) fn set_playing(cx: &mut App, playing: bool) {
     refresh_menus(cx);
 }
 
-/// The File, Edit and Display menus of the original, in its order. An item whose action the focused
-/// element doesn't handle is greyed out; the original's items with no action yet are left out.
+/// The File, Edit and Display menus, in order. An item whose action the focused element doesn't
+/// handle is greyed out; items with no action yet are left out.
 fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
     let play_or_pause = if playing { "Pause" } else { "Play" };
     vec![
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn file_edit_and_display_menus_list_the_original_items_in_order() {
+    fn file_edit_and_display_menus_list_items_in_order() {
         let menus = menus(false, false);
         assert_eq!(
             labels(menu(&menus, "File")),

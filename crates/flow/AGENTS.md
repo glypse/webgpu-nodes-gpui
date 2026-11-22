@@ -1,6 +1,6 @@
 # crates/flow (`gpui-flow`, lib `gpui_flow`)
 
-Node-editor canvas for gpui, modelled on `@xyflow/svelte`. Original source for the behaviour: `/Volumes/T7WA/GitHub/webgpu-nodes/packages/editor`. Repo-wide rules are in the root `AGENTS.md`.
+Node-editor canvas for gpui. Repo-wide rules are in the root `AGENTS.md`.
 
 ## Model
 - `Flow` is controlled. It keeps its own copy of nodes/edges so interactions feel immediate, emits `FlowEvent`s, and the owner must write its result back with `set_nodes` / `set_edges`. Without that write-back the canvas drifts from the app model.

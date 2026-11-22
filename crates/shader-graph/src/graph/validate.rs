@@ -283,7 +283,7 @@ impl Schema {
 
 /// The schema's limits on a parsed project, each violation with the path of its value.
 /// Serde has already checked the shape; this checks the sizes, counts and ranges the
-/// original's schema caps.
+/// schema's caps.
 pub fn schema_issues(project: &GraphProject) -> Vec<String> {
     let mut schema = Schema::default();
     schema.length("definitions", project.definitions.len(), MAX_DEFINITIONS);
@@ -535,7 +535,7 @@ impl GraphProject {
         }
     }
 
-    /// The project as saved: pretty JSON of the original's format.
+    /// The project as saved: pretty JSON of the file format.
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).expect("a project serialises")
     }

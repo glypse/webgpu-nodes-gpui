@@ -1,6 +1,6 @@
 # crates/export (agents)
 
-Renders a shader graph frame by frame at a fixed timestep and encodes it to MOV or MKV with FFmpeg's built-in encoders. Spec and codec decisions: `docs/video-export.md` (its decision section overrides the H.264/AV1/openh264 proposals below it). Repo rules: root `AGENTS.md`.
+Renders a shader graph frame by frame at a fixed timestep and encodes it to MOV or MKV with FFmpeg's built-in encoders only (ProRes, FFV1, DNxHD/DNxHR, PNG in MOV and MKV, QuickTime Animation in MOV only): no H.264, H.265, VP9 or AV1, and no external encoder crates, so the static FFmpeg build needs nothing but zlib. The default is ProRes 422 HQ in MOV. Repo rules: root `AGENTS.md`.
 
 ## Modules
 - `src/lib.rs`: public types (`Container`, `Codec`, `ProResProfile`, `DnxhrProfile`, `Depth`, `Settings`, `Scene`, `ExportError`, `Progress`), `Export` (start/progress/cancel/wait), `validate`, `video_size`, `frame_count`, `first_frame`.

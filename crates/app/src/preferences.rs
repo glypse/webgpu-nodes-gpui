@@ -79,7 +79,7 @@ impl Preferences {
         }
     }
 
-    /// The first family of the list: GPUI takes one family name, not a CSS list.
+    /// The first family of the list: GPUI takes one family name, not a comma-separated list.
     pub fn font_family(&self) -> Option<String> {
         let first = self.font.split(',').next()?.trim().trim_matches(['"', '\'']).trim();
         (!first.is_empty()).then(|| first.to_owned())
@@ -143,7 +143,7 @@ pub fn apply(window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Switches to the opposite of the appearance on screen, as the original's ⌘M does.
+/// Switches to the opposite of the appearance on screen.
 pub fn toggle_mode(window: &mut Window, cx: &mut App) {
     let on_screen = cx.global::<Preferences>().appearance(window);
     let theme = match on_screen {

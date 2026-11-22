@@ -1,5 +1,5 @@
 //! Describing the files a user imports as assets: their size, hash and
-//! bundle path, as the importer of the original makes them.
+//! bundle path.
 
 use std::io::Cursor;
 
@@ -27,7 +27,7 @@ pub enum ImportError {
 }
 
 /// A video's metadata as a probe reads it. The duration is in seconds and the
-/// frame rate averages the frames' spacing, as the original's importer does.
+/// frame rate averages the frames' spacing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VideoInfo {
     pub width: u32,

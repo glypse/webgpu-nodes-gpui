@@ -1,7 +1,6 @@
 # shader-graph agent notes
 
 Headless shader graph: document model, type inference, CPU evaluation and WGSL codegen. No GPU or UI.
-Ports `/Volumes/T7WA/GitHub/webgpu-nodes/packages/core/src` (the TS module layout mirrors this crate).
 
 ## Modules
 - `src/lib.rs`: declares all modules; re-exports `ShaderProgram`, `UniformBlock/Field/Scalar/Value` from codegen.

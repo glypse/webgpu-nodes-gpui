@@ -1,12 +1,12 @@
 # theme crate
 
-Design tokens and the editor's gpui UI components. Original: `/Volumes/T7WA/GitHub/webgpu-nodes/packages/theme` (shadcn neutral palette, Atkinson Hyperlegible font, Phosphor icons).
+Design tokens and the editor's gpui UI components (neutral palette, Atkinson Hyperlegible font, Phosphor icons).
 
 Builds on `gpui-component` (0.10, `gpui-fast` feature) for its widgets (`Button`, `Input`, `PopupMenu`, `Disableable`, ...) and `gpui-kit-assets` (its icons, served as a fallback by `Assets`). Phosphor SVGs come from `phosphor-svgs`.
 
 ## Module map
 - `src/lib.rs`: `init` (font, gpui-component, default Dark theme), `sync_component_theme`, re-exports.
-- `src/theme.rs`: `Theme` global, `Colors` (light/dark shadcn palette), `Radii`, `TextSizes`, `Appearance`, `ActiveTheme`.
+- `src/theme.rs`: `Theme` global, `Colors` (light/dark palette), `Radii`, `TextSizes`, `Appearance`, `ActiveTheme`.
 - `src/color.rs`: `oklch`/`oklch_a`, OKLCH to sRGB `Hsla` conversion (CSS-matching).
 - `src/icon.rs`: `IconName` (macro-generated enum), `Assets` (AssetSource), `Icon` (RenderOnce).
 - `src/popup.rs`: popup menus, cascading menus (`Cascade`, `Row`), panels and `layer` placed at window positions.
@@ -49,7 +49,7 @@ Builds on `gpui-component` (0.10, `gpui-fast` feature) for its widgets (`Button`
 4. Register the module in `lib.rs`.
 
 ## Adding a token
-- Add the field to `Colors`/`Radii`/`TextSizes`/`Theme` and set it in both `Colors::light`/`dark` (or `Theme::new`). Use OKLCH via `oklch(l, c, h)` and check the sRGB result against the original in a test (see `color.rs` tests).
+- Add the field to `Colors`/`Radii`/`TextSizes`/`Theme` and set it in both `Colors::light`/`dark` (or `Theme::new`). Use OKLCH via `oklch(l, c, h)` and check the sRGB result against reference values in a test (see `color.rs` tests).
 
 ## Tests
 - `cargo test -p theme` (gpui `test-support` is a dev-dep). `gamut_image.rs` tests exercise `paint_gamut` and `ImageCache` directly, without a window.

@@ -1,6 +1,6 @@
 use gpui::{Hsla, Rgba};
 
-/// An OKLCH colour (the original's CSS notation, hue in degrees), clipped to sRGB.
+/// An OKLCH colour (hue in degrees), clipped to sRGB.
 pub fn oklch(l: f32, c: f32, h: f32) -> Hsla {
     oklch_a(l, c, h, 1.0)
 }
@@ -46,11 +46,11 @@ mod tests {
     }
 
     #[test]
-    fn matches_css() {
+    fn matches_reference_values() {
         assert_eq!(rgb(oklch(1.0, 0.0, 0.0)), [255, 255, 255]);
         assert_eq!(rgb(oklch(0.145, 0.0, 0.0)), [10, 10, 10]);
         assert_eq!(rgb(oklch(0.922, 0.0, 0.0)), [229, 229, 229]);
-        // Tailwind's red-ish destructive, rgb(231 0 11) in CSS.
+        // Destructive red, rgb(231 0 11).
         let [r, g, b] = rgb(oklch(0.577, 0.245, 27.325));
         assert!(
             r.abs_diff(231) <= 1 && g <= 1 && b.abs_diff(11) <= 2,

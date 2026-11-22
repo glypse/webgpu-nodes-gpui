@@ -88,7 +88,7 @@ struct Splitting {
     at: f64,
 }
 
-/// The options of the edge between two areas, as Blender's right-click on an edge offers.
+/// The options of the edge between two areas.
 struct EdgeMenu<E> {
     at: Point<Pixels>,
     axis: Axis,

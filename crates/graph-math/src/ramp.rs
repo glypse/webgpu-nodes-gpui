@@ -1,13 +1,13 @@
 //! Colour ramps: a factor mapped to a colour through stops, each a position
 //! in [0, 1] and a colour. Past its first and last stops, a ramp keeps their
 //! colours. Between two stops, colours are interpolated in a colour space:
-//! RGB (linear), HSV (of the sRGB-encoded colour, as Blender's) or OKLch,
-//! their hues taking the way around the circle a hue interpolation picks.
+//! RGB (linear), HSV (of the sRGB-encoded colour) or OKLch, their hues taking
+//! the way around the circle a hue interpolation picks.
 //!
-//! The interpolations are Blender's (Linear, Ease, Cardinal, B-Spline,
-//! Constant) and Smooth: a monotone cubic (Steffen's), which is smooth through
-//! every stop without overshooting, and follows their spacing. Blender's other
-//! curves ignore it, as each segment is uniformly parameterised.
+//! The interpolations are Linear, Ease, Cardinal, B-Spline, Constant and
+//! Smooth: a monotone cubic (Steffen's), which is smooth through every stop
+//! without overshooting, and follows their spacing. The others ignore it, as
+//! each segment is uniformly parameterised.
 //!
 //! `evaluate_ramp` is the shader's computation on the CPU, stage by stage: the
 //! two must change together.
@@ -55,8 +55,7 @@ pub const HUE_LONGER: i64 = 1;
 pub const HUE_INCREASING: i64 = 2;
 pub const HUE_DECREASING: i64 = 3;
 
-/// Each variant's value and label: CSS Color 4's names, which Blender calls
-/// Near, Far, Counter-Clockwise and Clockwise.
+/// Each variant's value and label, named after CSS Color 4's hue interpolation methods.
 pub const RAMP_HUES: [(i64, &str); 4] = [
     (HUE_SHORTER, "Shorter"),
     (HUE_LONGER, "Longer"),
@@ -67,7 +66,7 @@ pub const RAMP_HUES: [(i64, &str); 4] = [
 /// Below this saturation (HSV) or chroma (OKLch), a colour's hue doesn't show.
 pub const RAMP_ACHROMATIC: f64 = 1e-4;
 
-/// Blender's cardinal spline tension.
+/// Cardinal spline tension.
 pub const RAMP_CARDINAL_TENSION: f64 = 0.71;
 
 const STOP_PREFIX: &str = "stop-";
@@ -84,7 +83,7 @@ fn stop(n: usize, position: f64) -> RampStop {
     }
 }
 
-/// Black to white, as Blender's.
+/// Black to white.
 pub fn default_ramp() -> Vec<RampStop> {
     vec![stop(0, 0.0), stop(1, 1.0)]
 }
@@ -131,7 +130,7 @@ pub fn add_ramp_stop(stops: &[RampStop], position: f64) -> (Vec<RampStop>, RampS
     (sorted_ramp_stops(Some(&all)), added)
 }
 
-/// Where Blender adds a stop: halfway between the selected one and the next
+/// Where a new stop goes: halfway between the selected one and the next
 /// (or the previous, for the last), or in the middle without one.
 pub fn new_stop_position(stops: &[RampStop], selected: Option<&str>) -> f64 {
     let Some(index) = stops.iter().position(|s| Some(s.id.as_str()) == selected) else {
@@ -156,7 +155,7 @@ pub fn remove_ramp_stop(stops: &[RampStop], id: &str) -> Vec<RampStop> {
     stops.iter().filter(|s| s.id != id).cloned().collect()
 }
 
-/// Move a stop, which may pass others: they swap places, as in Blender.
+/// Move a stop, which may pass others: they swap places.
 pub fn move_ramp_stop(stops: &[RampStop], id: &str, position: f64) -> Vec<RampStop> {
     let moved: Vec<RampStop> = stops
         .iter()
@@ -615,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn interpolates_as_blender_does() {
+    fn interpolates_each_mode() {
         let ramp = stops(&[(0.2, RED), (0.6, BLUE)]);
         let at = |interpolation, x| {
             evaluate_ramp(&ramp, x, modes(interpolation, RAMP_RGB, HUE_SHORTER))[0]

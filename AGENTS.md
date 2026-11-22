@@ -1,8 +1,8 @@
 # Working on this repo (agents)
 
-A Rust port (gpui-fast, wgpu) of the Svelte/TypeScript app at /Volumes/T7WA/GitHub/webgpu-nodes. The port is faithful: read the original's source (packages/core, packages/runtime, packages/editor, packages/theme, apps/web; never node_modules compiled JS) and match its behaviour, defaults, concepts and file format.
+A node editor for WGSL fragment shaders, in Rust (gpui-fast, wgpu).
 
-Crates: `flow` (xyflow-like canvas), `shader-graph` (types, nodes, graph model, zones, groups, codegen, library, catalog), `graph-math` (colour, curve, ramp maths), `runtime` (wgpu renderer, player, clock), `theme` (tokens + components), `screen` (area layout), `guard` (panic guards), `app` (the editor binary).
+Crates: `flow` (node-editor canvas), `shader-graph` (types, nodes, graph model, zones, groups, codegen, library, catalog), `graph-math` (colour, curve, ramp maths), `runtime` (wgpu renderer, player, clock, media), `export` (video export), `theme` (tokens + components), `screen` (area layout), `guard` (panic guards), `app` (the editor binary).
 
 Each crate has its own `crates/<crate>/AGENTS.md` (module map, invariants, how to add things, test commands): read it before working in that crate instead of exploring the source, and update it when your change invalidates it.
 
@@ -23,14 +23,14 @@ Loops of repeated waits are the most common way agents waste a session. Follow t
 - Before re-running a command, check whether its previous result already answers the question.
 
 ## Code
-- Errors: no `unwrap`/`expect`/`panic!`/fallible indexing on user, file or GPU data in non-test code. Libraries use `thiserror`, the app `anyhow`; report through `Result`, log with `log::error!/warn!`, and surface user-facing failures in the UI where the original does.
+- Errors: no `unwrap`/`expect`/`panic!`/fallible indexing on user, file or GPU data in non-test code. Libraries use `thiserror`, the app `anyhow`; report through `Result`, log with `log::error!/warn!`, and surface user-facing failures in the UI.
 - UI listeners: `cx.safe_listener(...)` (trait `guard::SafeListener`). Other callback bodies (subscriptions, `on_mouse_event`, `on_next_frame`, closures calling `entity.update`) go in `guard::guard("context", || ...)`. Wrap `Render::render`/`RenderOnce::render` bodies in `guard::render("context", || ...)` and `canvas` closures in `guard::guard`. Never call `window.request_animation_frame()` or other paint-phase-only window APIs from event handlers.
 - Performance: views that change often (playback readouts) are their own cached views; a cached view only skips re-rendering if every child view that changes is cached too.
 - Comments only explain why / non-obvious constraints. Never restate code, duplicate docs, hard-code facts owned by other code, or reference other modules' or the UI's behaviour; no banners repeating the file name. Fix or delete comments your change invalidates.
 
 ## Tests
 - Screenshots, profiles and benchmark scenes: see `docs/probing.md`.
-- Port the original's tests for what you port, plus regression tests for bugs you hit.
+- Test what you add, plus regression tests for bugs you hit.
 - Generated WGSL must validate with naga. GPU tests run on the real device.
 - UI behaviour: `TestAppContext` (see `crates/flow/tests/pointer.rs`); layout can be checked with `debug_selector`/`debug_bounds`.
 - Build in the shared `target/` (don't set `CARGO_TARGET_DIR`): everyone reuses the same compiled dependencies. Cargo locks it, so a "Blocking waiting for file lock" message means another agent is building; it is not a hang. Before each commit: tests for your crates, `cargo build --workspace`, `cargo clippy --workspace --all-targets` clean for your files.

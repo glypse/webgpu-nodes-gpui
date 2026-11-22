@@ -242,7 +242,7 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
     }
 }
 
-/// Amber-500, the colour the original gives its warnings.
+/// The colour of warnings.
 const WARNING_AMBER: gpui::Hsla = gpui::Hsla { h: 38.0 / 360.0, s: 0.92, l: 0.50, a: 1.0 };
 
 const PAD: f32 = 12.0;

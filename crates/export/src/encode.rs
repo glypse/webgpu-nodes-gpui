@@ -207,7 +207,7 @@ impl Encoder {
     }
 }
 
-/// Frames are sRGB: BT.709 primaries with the sRGB transfer, as the original tags them. YUV uses
+/// Frames are sRGB: BT.709 primaries with the sRGB transfer. YUV uses
 /// the BT.709 matrix and limited range; RGB has no matrix and full range.
 fn tag_colour(context: &mut codec::encoder::video::Video, yuv: bool) {
     if yuv {

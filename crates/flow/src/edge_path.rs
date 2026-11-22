@@ -1,5 +1,5 @@
-//! Edge geometry: ports of `getBezierPath`, `getSmoothStepPath` and
-//! `getStraightPath`, returning drawable segments instead of SVG strings.
+//! Edge geometry for bezier, smooth-step and straight edges, returning
+//! drawable segments instead of SVG strings.
 
 use crate::geometry::Xy;
 
