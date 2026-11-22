@@ -1,0 +1,22 @@
+diff --git a/build.rs b/build.rs
+index c08fd29..c142d12 100644
+--- a/build.rs
++++ b/build.rs
+@@ -755,6 +755,8 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
+ 
+     // configure misc build options
+     enable!(configure, "BUILD_PIC", "pic");
++    // --disable-autodetect leaves zlib (PNG, compressed MOV headers) off unless asked for.
++    enable!(configure, "BUILD_ZLIB", "zlib");
+ 
+     // skip all the warnings from output as they can significantly slow down the build
+     // time on platforms like mac which spawns thousands of nullabilty complieance warnings
+@@ -1082,7 +1084,7 @@ fn link_to_libraries(statik: bool, target_os: &str) {
+     ) {
+         println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
+     }
+-    if env::var("CARGO_FEATURE_BUILD_ZLIB").is_ok() && target_os == "linux" {
++    if env::var("CARGO_FEATURE_BUILD_ZLIB").is_ok() && target_os != "windows" {
+         println!("cargo:rustc-link-lib=z");
+     }
+ }

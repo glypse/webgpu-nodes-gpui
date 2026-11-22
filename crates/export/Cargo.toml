@@ -11,4 +11,4 @@ shader-graph = { path = "../shader-graph" }
 log.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-ffmpeg-next = { version = "=9.1.0", default-features = false, features = ["codec", "format", "software-scaling", "build"] }
+ffmpeg-next = { version = "=9.1.0", default-features = false, features = ["codec", "format", "software-scaling", "build", "build-zlib"] }

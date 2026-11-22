@@ -29,9 +29,16 @@ opt-level = 2
 [profile.dev]
 debug = "line-tables-only"
 
+# Crates patched from patches/ by `cargo patch-crate` (see README, "Building"). The
+# `[patch.crates-io]` entries for these crates point at its output in target/patch/.
+[workspace.metadata.patch]
+crates = ["ffmpeg-sys-next"]
+
 # Our gpui-fast fork: BGRA surface support for gpui-fast-apple, and an opt-in
 # unsnapped layout (`Div::unsnapped_layout`, `Window::with_layout_snapping`)
 # that keeps fractional sizes exact during zoom animations.
 [patch.crates-io]
+# From `cargo patch-crate` (patches/ffmpeg-sys-next+9.1.1.patch): zlib for PNG.
+ffmpeg-sys-next = { path = "./target/patch/ffmpeg-sys-next-9.1.1" }
 gpui-fast = { git = "https://github.com/glypse/gpui-fast", rev = "6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b" }
 gpui-fast-apple = { git = "https://github.com/glypse/gpui-fast", rev = "6a4e9a9aaa08c6470a62f1f07bcaab1e095adb5b" }

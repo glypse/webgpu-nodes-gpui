@@ -16,4 +16,13 @@ Scope: UV, Time, Value, float math and groups. Every socket is an `f32`.
 cargo run -p webgpu-nodes
 ```
 
-GPUI's `runtime_shaders` feature is on, so building doesn't need a full Xcode install.
+## Building
+
+The video export needs FFmpeg with zlib (for PNG), built from source. Its build script ignores the zlib feature, so `ffmpeg-sys-next` is patched from `patches/`. After a fresh checkout, once:
+
+```bash
+cargo install patch-crate
+cargo patch-crate
+```
+
+This copies `ffmpeg-sys-next` to `target/patch/` with the patch applied. Until it has run, cargo fails to load the `[patch.crates-io]` path, and the first build compiles FFmpeg (several minutes). Re-run `cargo patch-crate --force` after changing a patch file.

@@ -6,6 +6,9 @@ Crates: `flow` (xyflow-like canvas), `shader-graph` (types, nodes, graph model, 
 
 Other agents may work in the same checkout at the same time. Stay inside the files your task gives you. For shared registries (module lists, `Cargo.toml` deps) make small additive edits and re-read the file right before each edit. If the build breaks in a file you don't own, it's probably another agent's in-progress edit: build again later rather than fixing it.
 
+## Build
+- After a fresh checkout, run `cargo install patch-crate && cargo patch-crate` once (README, "Building"): FFmpeg's patched build needs it.
+
 ## Use crates, not in-house code
 Before writing any subsystem (layout, colour maths, parsing, text editing, media IO, geometry, search…), look for a reliable crate (`cargo search`, `cargo info`, docs.rs; check maintenance and downloads) and use it. Replacing code already here with a good crate is welcome. Write it yourself only when nothing suitable exists, and name the crates you considered in your report.
 
