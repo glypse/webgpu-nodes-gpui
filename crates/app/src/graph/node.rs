@@ -478,7 +478,10 @@ pub fn render_node(
     }
     let z = props.zoom;
     for wheel in view.wheels.values() {
-        wheel.update(cx, |w, cx| w.set_size(px(112.0 * z), cx));
+        wheel.update(cx, |w, cx| {
+            w.set_size(px(112.0 * z), cx);
+            w.set_zoom(z, cx);
+        });
     }
     let theme = cx.theme().clone();
     let c = &theme.colors;
