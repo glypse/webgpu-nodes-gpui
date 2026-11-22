@@ -12,17 +12,19 @@ use graph_math::curve::{
 };
 use guard::SafeListener as _;
 
-use gpui_component::{Disableable as _, Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
+use gpui_component::{Disableable as _, Selectable as _, Size, Sizable as _, button::{Button, ButtonVariants as _}};
 
 use crate::{
     ActiveTheme as _, IconName, NumberEvent, NumberField,
 };
 
+/// The graph's side at zoom 1. Everything in the editor is in these units times the zoom.
+const SIDE: f64 = 150.0;
 /// Room around the square, so points on its edges are drawn whole.
 const INSET: f64 = 6.0;
-/// How close the pointer must be (in pixels) to grab a point or a handle.
+/// How close the pointer must be to grab a point or a handle.
 const GRAB: f64 = 7.0;
-/// How close the pointer must be (in pixels) to the curve to add a point on it.
+/// How close the pointer must be to the curve to add a point on it.
 const CURVE_GRAB: f64 = 5.0;
 /// Ctrl-dragged points snap to 1 / SNAP steps, as in Blender.
 const SNAP: f64 = 8.0;
@@ -119,25 +121,41 @@ fn part_at(point: &CurvePoint, part: Part) -> Vec2 {
     }
 }
 
-/// The curve's pixels at a size: the square sits `INSET` in from the sides.
+/// The curve's pixels at a zoom: the square sits `INSET` in from the sides.
 #[derive(Clone, Copy)]
 struct Plane {
+    zoom: f64,
     span: f64,
 }
 
 impl Plane {
-    fn new(side: f64) -> Self {
+    fn new(zoom: f64) -> Self {
         Self {
-            span: (side - 2.0 * INSET).max(1.0),
+            zoom,
+            span: ((SIDE - 2.0 * INSET) * zoom).max(1.0),
         }
     }
 
+    fn inset(self) -> f64 {
+        INSET * self.zoom
+    }
+
+    fn grab(self) -> f64 {
+        GRAB * self.zoom
+    }
+
+    fn curve_grab(self) -> f64 {
+        CURVE_GRAB * self.zoom
+    }
+
     fn project(self, p: Vec2) -> Vec2 {
-        Vec2::new(INSET + p.x * self.span, INSET + (1.0 - p.y) * self.span)
+        let inset = self.inset();
+        Vec2::new(inset + p.x * self.span, inset + (1.0 - p.y) * self.span)
     }
 
     fn unproject(self, p: Vec2) -> Vec2 {
-        Vec2::new((p.x - INSET) / self.span, 1.0 - (p.y - INSET) / self.span)
+        let inset = self.inset();
+        Vec2::new((p.x - inset) / self.span, 1.0 - (p.y - inset) / self.span)
     }
 }
 
@@ -156,7 +174,7 @@ fn segment_distance(m: Vec2, a: Vec2, b: Vec2) -> f64 {
     distance(m, Vec2::new(a.x + t * dx, a.y + t * dy))
 }
 
-/// Whether a pixel is within `CURVE_GRAB` of the curve.
+/// Whether a pixel is within reach of the curve.
 fn on_curve(points: &[CurvePoint], plane: Plane, m: Vec2) -> bool {
     let (Some(first), Some(last)) = (points.first(), points.last()) else {
         return false;
@@ -171,13 +189,13 @@ fn on_curve(points: &[CurvePoint], plane: Plane, m: Vec2) -> bool {
     let pixels: Vec<Vec2> = line.into_iter().map(|p| plane.project(p)).collect();
     pixels
         .windows(2)
-        .any(|pair| segment_distance(m, pair[0], pair[1]) < CURVE_GRAB)
+        .any(|pair| segment_distance(m, pair[0], pair[1]) < plane.curve_grab())
 }
 
-/// The point nearest the pointer, within `GRAB`.
+/// The point nearest the pointer, within reach.
 fn grabbed_point(points: &[CurvePoint], plane: Plane, m: Vec2) -> Option<usize> {
     let mut nearest = None;
-    let mut best = GRAB;
+    let mut best = plane.grab();
     for (i, p) in points.iter().enumerate() {
         let d = distance(plane.project(Vec2::new(p.x, p.y)), m);
         if d < best {
@@ -207,7 +225,7 @@ struct DragMarker;
 pub struct CurveEditor {
     points: Vec<CurvePoint>,
     disabled: bool,
-    side: Pixels,
+    zoom: f32,
     selected: Option<usize>,
     drag: Option<Drag>,
     /// The graph's top left, as last drawn.
@@ -235,7 +253,7 @@ impl CurveEditor {
         let mut editor = Self {
             points,
             disabled: false,
-            side: px(150.0),
+            zoom: 1.0,
             selected: None,
             drag: None,
             origin: Point::default(),
@@ -247,20 +265,18 @@ impl CurveEditor {
         editor
     }
 
-    /// The side of the graph.
-    pub fn side(mut self, side: Pixels) -> Self {
-        self.side = side;
-        self
-    }
-
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    pub fn set_side(&mut self, side: Pixels, cx: &mut Context<Self>) {
-        if self.side != side {
-            self.side = side;
+    /// Scales the graph and its controls; 1 is the design size.
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        if self.zoom != zoom {
+            self.zoom = zoom;
+            for field in self.fields.iter().flatten() {
+                field.update(cx, |field, cx| field.set_zoom(zoom, cx));
+            }
             cx.notify();
         }
     }
@@ -295,7 +311,7 @@ impl CurveEditor {
     }
 
     fn plane(&self) -> Plane {
-        Plane::new(f64::from(self.side))
+        Plane::new(f64::from(self.zoom))
     }
 
     fn active(&self) -> Option<&CurvePoint> {
@@ -357,7 +373,7 @@ impl CurveEditor {
             } else {
                 Part::Right
             };
-            distance(plane.project(part_at(point, part)), m) < GRAB
+            distance(plane.project(part_at(point, part)), m) < plane.grab()
         })
     }
 
@@ -556,14 +572,21 @@ fn pt(origin: Point<Pixels>, p: Vec2) -> Point<Pixels> {
     point(origin.x + px(p.x as f32), origin.y + px(p.y as f32))
 }
 
-fn paint_dot(window: &mut Window, centre: Point<Pixels>, radius: f32, color: Hsla, ring: Hsla) {
+fn paint_dot(
+    window: &mut Window,
+    centre: Point<Pixels>,
+    radius: f32,
+    border: f32,
+    color: Hsla,
+    ring: Hsla,
+) {
     let bounds = Bounds::new(
         point(centre.x - px(radius), centre.y - px(radius)),
         size(px(2.0 * radius), px(2.0 * radius)),
     );
     let mut quad = fill(bounds, color);
     quad.corner_radii = px(radius).into();
-    quad.border_widths = px(1.5).into();
+    quad.border_widths = px(border).into();
     quad.border_color = ring;
     window.paint_quad(quad);
 }
@@ -620,7 +643,8 @@ impl Render for CurveEditor {
         guard::render("CurveEditor", || {
             let theme = cx.theme();
             let c = theme.colors.clone();
-            let side = self.side;
+            let z = self.zoom;
+            let side = px(SIDE as f32 * z);
             let plane = self.plane();
             let disabled = self.disabled;
             let selected = self.selected;
@@ -629,7 +653,7 @@ impl Render for CurveEditor {
             let this = cx.entity();
 
             let graph = {
-                let (points, c, this) = (points.clone(), c.clone(), this.clone());
+                let (points, c, this, z) = (points.clone(), c.clone(), this.clone(), z);
                 canvas(
                     {
                         let this = this.clone();
@@ -643,10 +667,10 @@ impl Render for CurveEditor {
                         guard::guard("curve editor paint", || {
                             let origin = bounds.origin;
                             let mut quad = fill(bounds, c.foreground.opacity(0.05));
-                            quad.corner_radii = px(4.0).into();
+                            quad.corner_radii = px(4.0 * z).into();
                             window.paint_quad(quad);
                             let span = plane.span as f32;
-                            let inset = INSET as f32;
+                            let inset = plane.inset() as f32;
                             for g in GRID {
                                 let g = g as f32;
                                 let line = c.foreground.opacity(0.1);
@@ -656,7 +680,7 @@ impl Render for CurveEditor {
                                             origin.x + px(inset + g * span),
                                             origin.y + px(inset),
                                         ),
-                                        size(px(1.0), px(span)),
+                                        size(px(z), px(span)),
                                     ),
                                     line,
                                 ));
@@ -666,7 +690,7 @@ impl Render for CurveEditor {
                                             origin.x + px(inset),
                                             origin.y + px(inset + g * span),
                                         ),
-                                        size(px(span), px(1.0)),
+                                        size(px(span), px(z)),
                                     ),
                                     line,
                                 ));
@@ -678,7 +702,7 @@ impl Render for CurveEditor {
                                 ),
                                 gpui::transparent_black(),
                             );
-                            frame.border_widths = px(1.0).into();
+                            frame.border_widths = px(z).into();
                             frame.border_color = c.foreground.opacity(0.15);
                             window.paint_quad(frame);
 
@@ -707,7 +731,7 @@ impl Render for CurveEditor {
                                     window.paint_path(path, c.foreground.opacity(0.05));
                                 }
                             }
-                            stroke_path(window, origin, &steps, 1.5, c.foreground);
+                            stroke_path(window, origin, &steps, 1.5 * z, c.foreground);
 
                             if let (Some(point), Some(index)) =
                                 (points.get(selected.unwrap_or(usize::MAX)), selected)
@@ -724,18 +748,25 @@ impl Render for CurveEditor {
                                         window,
                                         origin,
                                         &[PathStep::Move(at), PathStep::Line(handle)],
-                                        1.0,
+                                        z,
                                         c.primary.opacity(0.7),
                                     );
-                                    paint_dot(window, pt(origin, handle), 3.0, c.card, c.primary);
+                                    paint_dot(
+                                        window,
+                                        pt(origin, handle),
+                                        3.0 * z,
+                                        1.5 * z,
+                                        c.card,
+                                        c.primary,
+                                    );
                                 }
                             }
                             for (i, p) in points.iter().enumerate() {
                                 let at = pt(origin, plane.project(Vec2::new(p.x, p.y)));
                                 if Some(i) == selected {
-                                    paint_dot(window, at, 4.5, c.primary, c.card);
+                                    paint_dot(window, at, 4.5 * z, 1.5 * z, c.primary, c.card);
                                 } else {
-                                    paint_dot(window, at, 3.5, c.foreground, c.card);
+                                    paint_dot(window, at, 3.5 * z, 1.5 * z, c.foreground, c.card);
                                 }
                             }
                         });
@@ -785,22 +816,25 @@ impl Render for CurveEditor {
                     let id = preset.id;
                     let button = Button::new(SharedString::from(format!("curve-preset-{id}")))
                         .ghost()
-                        .xsmall()
                         .tooltip(label)
                         .disabled(disabled)
+                        .with_size(Size::Size(px(20.0 * z)))
                         .child(
                             canvas(
                                 |_, _, _| (),
                                 move |bounds, (), window, _| {
                                     guard::guard("curve editor paint", || {
                                         let steps = curve_path(&thumb, |p| {
-                                            Vec2::new(3.0 + p.x * 14.0, 3.0 + (1.0 - p.y) * 14.0)
+                                            Vec2::new(
+                                                (3.0 + p.x * 14.0) * f64::from(z),
+                                                (3.0 + (1.0 - p.y) * 14.0) * f64::from(z),
+                                            )
                                         });
-                                        stroke_path(window, bounds.origin, &steps, 1.5, muted);
+                                        stroke_path(window, bounds.origin, &steps, 1.5 * z, muted);
                                     });
                                 },
                             )
-                            .size(px(20.0)),
+                            .size(px(20.0 * z)),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.apply_preset(applied.clone(), cx)
@@ -831,17 +865,18 @@ impl Render for CurveEditor {
             let kind_row = div()
                 .flex()
                 .items_center()
-                .gap(px(2.0))
+                .gap(px(2.0 * z))
                 .children(kinds.into_iter().map(|(kind, label)| {
                     let pressed = active.is_some_and(|p| p.kind == kind);
                     let (lines, dot, handles) = kind_glyph(kind);
                     let ink = c.foreground;
                     let button = Button::new(SharedString::from(format!("curve-kind-{kind:?}")))
                         .ghost()
-                        .small()
                         .tooltip(label)
                         .selected(pressed)
                         .disabled(disabled || active.is_none())
+                        .with_size(Size::Size(px(40.0 * z)))
+                        .h(px(24.0 * z))
                         .child(
                             canvas(
                                 |_, _, _| (),
@@ -852,7 +887,10 @@ impl Render for CurveEditor {
                                             .iter()
                                             .enumerate()
                                             .map(|(i, (x, y))| {
-                                                let p = Vec2::new(f64::from(*x), f64::from(*y));
+                                                let p = Vec2::new(
+                                                    f64::from(*x * z),
+                                                    f64::from(*y * z),
+                                                );
                                                 if i == 0 {
                                                     PathStep::Move(p)
                                                 } else {
@@ -860,27 +898,29 @@ impl Render for CurveEditor {
                                                 }
                                             })
                                             .collect();
-                                        stroke_path(window, o, &steps, 1.25, ink);
+                                        stroke_path(window, o, &steps, 1.25 * z, ink);
                                         for (x, y) in handles {
                                             paint_dot(
                                                 window,
-                                                point(o.x + px(*x), o.y + px(*y)),
-                                                1.5,
+                                                point(o.x + px(*x * z), o.y + px(*y * z)),
+                                                1.5 * z,
+                                                z,
                                                 gpui::transparent_black(),
                                                 ink,
                                             );
                                         }
                                         paint_dot(
                                             window,
-                                            point(o.x + px(dot.0), o.y + px(dot.1)),
-                                            2.0,
+                                            point(o.x + px(dot.0 * z), o.y + px(dot.1 * z)),
+                                            2.0 * z,
+                                            z,
                                             ink,
                                             gpui::transparent_black(),
                                         );
                                     });
                                 },
                             )
-                            .size(px(16.0)),
+                            .size(px(16.0 * z)),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| this.set_kind(kind, cx)));
                     #[cfg(test)]
@@ -893,7 +933,7 @@ impl Render for CurveEditor {
                 .child({
                     let b = Button::new("curve-flip-x")
                         .ghost()
-                        .small()
+                        .with_size(Size::Size(px(24.0 * z)))
                         .icon(IconName::FlipHorizontal)
                         .tooltip("Flip left to right")
                         .disabled(disabled)
@@ -905,7 +945,7 @@ impl Render for CurveEditor {
                 .child({
                     let b = Button::new("curve-flip-y")
                         .ghost()
-                        .small()
+                        .with_size(Size::Size(px(24.0 * z)))
                         .icon(IconName::FlipVertical)
                         .tooltip("Flip upside down")
                         .disabled(disabled)
@@ -917,7 +957,7 @@ impl Render for CurveEditor {
                 .child({
                     let b = Button::new("curve-delete")
                         .danger()
-                        .small()
+                        .with_size(Size::Size(px(24.0 * z)))
                         .icon(IconName::X)
                         .tooltip("Delete point")
                         .disabled(disabled || active.is_none() || points.len() <= 2)
@@ -931,14 +971,14 @@ impl Render for CurveEditor {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(2.0 * z))
                     .children(self.fields.iter().zip(PARTS).map(|(row, (_, label))| {
                         div()
                             .flex()
                             .items_center()
-                            .gap_1()
-                            .text_size(theme.text.xs)
-                            .child(div().w(px(36.0)).flex_none().text_color(muted).child(label))
+                            .gap(px(4.0 * z))
+                            .text_size(theme.text.xs * z)
+                            .child(div().w(px(36.0 * z)).flex_none().text_color(muted).child(label))
                             .children(
                                 row.iter()
                                     .map(|field| div().flex_1().min_w_0().child(field.clone())),
@@ -948,10 +988,10 @@ impl Render for CurveEditor {
             div()
                 .flex()
                 .flex_col()
-                .gap_1()
+                .gap(px(4.0 * z))
                 .font_family(theme.font.clone())
                 .when(disabled, |d| d.opacity(0.6))
-                .child(div().flex().gap_1().child(graph).child(presets))
+                .child(div().flex().gap(px(4.0 * z)).child(graph).child(presets))
                 .child(kind_row)
                 .child(coordinates)
         })
@@ -994,7 +1034,7 @@ mod tests {
     /// A point of the square, in window coordinates.
     fn at(cx: &mut VisualTestContext, p: Vec2) -> Point<Pixels> {
         let graph = cx.debug_bounds("curve-graph").expect("the graph is drawn");
-        let plane = Plane::new(f64::from(graph.size.width));
+        let plane = Plane::new(f64::from(graph.size.width) / SIDE);
         let px_pos = plane.project(p);
         point(
             graph.left() + px(px_pos.x as f32),
@@ -1018,6 +1058,41 @@ mod tests {
         assert!((a - b).abs() < 1e-3, "{a} vs {b}");
     }
 
+    fn set_zoom(cx: &mut VisualTestContext, editor: &Entity<CurveEditor>, zoom: f32) {
+        cx.update(|_, cx| editor.update(cx, |e, cx| e.set_zoom(zoom, cx)));
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn the_graph_is_drawn_at_the_zoom(cx: &mut TestAppContext) {
+        let (editor, _, cx) = setup(cx, linear_curve(), false);
+        set_zoom(cx, &editor, 2.0);
+        let graph = cx.debug_bounds("curve-graph").expect("the graph is drawn");
+        assert_eq!(graph.size.width, px(300.0));
+        set_zoom(cx, &editor, 0.5);
+        let graph = cx.debug_bounds("curve-graph").expect("the graph is drawn");
+        assert_eq!(graph.size.width, px(75.0));
+    }
+
+    #[gpui::test]
+    fn clicking_the_zoomed_graph_selects_the_point_drawn_there(cx: &mut TestAppContext) {
+        let (editor, _, cx) = setup(cx, linear_curve(), false);
+        set_zoom(cx, &editor, 2.0);
+        let top_right = at(cx, Vec2::new(1.0, 1.0));
+        click(cx, top_right, Modifiers::default());
+        assert_eq!(cx.read(|cx| editor.read(cx).selected()), Some(1));
+    }
+
+    #[test]
+    fn the_grab_reach_scales_with_the_zoom() {
+        let points = linear_curve();
+        let (x, y) = (points[0].x, points[0].y);
+        let m = Plane::new(2.0).project(Vec2::new(x, y));
+        let near_it = Vec2::new(m.x + 10.0, m.y);
+        assert_eq!(grabbed_point(&points, Plane::new(2.0), near_it), Some(0));
+        assert_eq!(grabbed_point(&points, Plane::new(1.0), near_it), None);
+    }
+
     #[test]
     fn a_path_runs_across_the_whole_square() {
         let steps = curve_path(&linear_curve(), |p| p);
@@ -1029,7 +1104,7 @@ mod tests {
 
     #[test]
     fn pixels_and_the_square_map_both_ways() {
-        let plane = Plane::new(150.0);
+        let plane = Plane::new(1.0);
         for p in [
             Vec2::new(0.0, 0.0),
             Vec2::new(0.25, 0.9),
@@ -1040,6 +1115,7 @@ mod tests {
             near(back.y, p.y);
         }
         near(plane.project(Vec2::new(0.0, 1.0)).y, INSET);
+        near(Plane::new(2.0).project(Vec2::new(0.0, 1.0)).y, 2.0 * INSET);
     }
 
     #[test]

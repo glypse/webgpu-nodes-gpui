@@ -3,10 +3,10 @@ use std::rc::Rc;
 use gpui::{
     App, AppContext as _, Context, CursorStyle, DispatchPhase, ElementId, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Point, RenderOnce, SharedString, Styled as _, Subscription, Window,
-    canvas, div, prelude::FluentBuilder as _, px,
+    ParentElement as _, Pixels, Point, RenderOnce, SharedString, Styled as _, Subscription,
+    TextAlign, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::input::{Escape, InputEvent, InputState, MaskPattern, NumberInput};
+use gpui_component::input::{Escape, Input, InputEvent, InputState, MaskPattern};
 use theme::{ActiveTheme as _, Icon, IconName};
 
 /// Whether a change is a step of a gesture still going on, or its end.
@@ -324,27 +324,34 @@ impl RenderOnce for Scrub {
             .when(self.readonly, |d| d.opacity(0.5))
             .when(typing, |d| {
                 let entry = entry.clone();
-                d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                let field = div()
+                    .w_full()
+                    .h(px(22.0 * z))
+                    .min_w_0()
+                    .on_action(move |_: &Escape, window, cx| {
+                        cx.stop_propagation();
+                        guard::guard("number entry", || {
+                            entry.update(cx, |e, cx| {
+                                e.finish(cx);
+                                e.restore_focus(window, cx);
+                            });
+                        });
+                    })
                     .child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .on_action(move |_: &Escape, window, cx| {
-                                cx.stop_propagation();
-                                guard::guard("number entry", || {
-                                    entry.update(cx, |e, cx| {
-                                        e.finish(cx);
-                                        e.restore_focus(window, cx);
-                                    });
-                                });
-                            })
-                            .child(
-                                NumberInput::new(&input)
-                                    .stepper(false)
-                                    .h(px(22.0 * z))
-                                    .text_size(px(12.0 * z)),
-                            ),
-                    )
+                        // The input's own size sets its text and padding, so they are
+                        // overridden here to follow the zoom. Its height fills the wrapper.
+                        Input::new(&input)
+                            .appearance(false)
+                            .px(px(4.0 * z))
+                            .py(px(0.0))
+                            .text_size(px(12.0 * z))
+                            .line_height(px(15.0 * z))
+                            .text_align(TextAlign::Center),
+                    );
+                #[cfg(test)]
+                let field = field.debug_selector(|| "scrub-entry".into());
+                d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(field)
             })
             .when(!self.readonly && !typing, |d| {
                 d.cursor(CursorStyle::ResizeLeftRight)
@@ -512,6 +519,7 @@ mod tests {
 
     struct Host {
         value: f64,
+        zoom: f32,
         changes: Changes,
     }
 
@@ -520,7 +528,7 @@ mod tests {
             let host = cx.entity();
             let changes = self.changes.clone();
             div().w(px(200.0)).h(px(40.0)).child(
-                Scrub::new("n", self.value, 1.0).range(Some(0.0), Some(10.0)).on_change(
+                Scrub::new("n", self.value, self.zoom).range(Some(0.0), Some(10.0)).on_change(
                     move |v, edit, _, cx| {
                         changes.borrow_mut().push((v, edit));
                         host.update(cx, |h, cx| {
@@ -534,10 +542,14 @@ mod tests {
     }
 
     fn setup(cx: &mut TestAppContext) -> (Changes, &mut gpui::VisualTestContext) {
+        setup_at(cx, 1.0)
+    }
+
+    fn setup_at(cx: &mut TestAppContext, zoom: f32) -> (Changes, &mut gpui::VisualTestContext) {
         cx.update(theme::init);
         let changes = Rc::new(RefCell::new(Vec::new()));
         let shared = changes.clone();
-        let (_, cx) = cx.add_window_view(move |_, _| Host { value: 1.0, changes: shared });
+        let (_, cx) = cx.add_window_view(move |_, _| Host { value: 1.0, zoom, changes: shared });
         cx.run_until_parked();
         (changes, cx)
     }
@@ -563,6 +575,15 @@ mod tests {
         let (changes, cx) = setup(cx);
         type_into_field(cx, "99", "enter");
         assert_eq!(*changes.borrow(), vec![(10.0, Edit::Commit)]);
+    }
+
+    #[gpui::test]
+    fn the_typed_entry_is_as_tall_as_the_zoomed_field(cx: &mut TestAppContext) {
+        let (_, cx) = setup_at(cx, 2.0);
+        cx.simulate_click(point(px(100.0), px(22.0)), Modifiers::default());
+        cx.run_until_parked();
+        let entry = cx.debug_bounds("scrub-entry").expect("typing shows the entry");
+        assert_eq!(entry.size.height, px(44.0));
     }
 
     #[gpui::test]

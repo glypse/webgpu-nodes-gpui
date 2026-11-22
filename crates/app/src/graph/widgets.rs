@@ -492,13 +492,18 @@ pub fn render(
     let z = zoom;
     let body = match widget {
         WidgetView::Curve(curve) => {
-            let side = px(150.0 * z);
-            curve.update(cx, |e, cx| e.set_side(side, cx));
+            curve.update(cx, |e, cx| e.set_zoom(z, cx));
             curve.clone().into_any_element()
         }
-        WidgetView::Ramp(ramp) => ramp.clone().into_any_element(),
+        WidgetView::Ramp(ramp) => {
+            ramp.update(cx, |r, cx| r.set_zoom(z, cx));
+            ramp.clone().into_any_element()
+        }
         WidgetView::Color(wheels) => {
-            wheels.update(cx, |w, cx| w.set_size(px(112.0 * z), cx));
+            wheels.update(cx, |w, cx| {
+                w.set_size(px(112.0 * z), cx);
+                w.set_zoom(z, cx);
+            });
             wheels.clone().into_any_element()
         }
         WidgetView::Cases(count) => {
@@ -573,7 +578,11 @@ pub fn render(
                         )
                         .child(item_widgets::sockets_button(node, locked, z, ed, cx)),
                 )
-                .child(Textarea::new(&area))
+                .child(
+                    Textarea::new(&area)
+                        .text_size(px(14.0 * z))
+                        .line_height(px(17.5 * z)),
+                )
                 .into_any_element()
         }
     };

@@ -1,10 +1,10 @@
 use gpui::{
     AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Empty, Entity, EventEmitter,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TextAlign, Window,
+    div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::input::{Escape, InputEvent, InputState, MaskPattern, NumberInput};
+use gpui_component::input::{Escape, Input, InputEvent, InputState, MaskPattern};
 use guard::SafeListener as _;
 
 use crate::ActiveTheme as _;
@@ -40,6 +40,8 @@ pub struct NumberField {
     editing: bool,
     scrub: Option<(f32, f64)>,
     moved: bool,
+    /// Scales every size of the field, its text included.
+    zoom: f32,
 }
 
 impl EventEmitter<NumberEvent> for NumberField {}
@@ -61,6 +63,14 @@ impl NumberField {
             editing: false,
             scrub: None,
             moved: false,
+            zoom: 1.0,
+        }
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        if self.zoom != zoom {
+            self.zoom = zoom;
+            cx.notify();
         }
     }
 
@@ -250,35 +260,50 @@ impl Render for NumberField {
         guard::render("NumberField", || {
             let theme = cx.theme();
             let c = &theme.colors;
+            let z = self.zoom;
+            let text = theme.text.sm * z;
             let base = div()
                 .flex()
                 .items_center()
-                .h(px(32.0))
+                .h(px(32.0 * z))
                 .w_full()
                 .min_w_0()
                 .font_family(theme.font.clone())
-                .text_size(theme.text.sm);
+                .text_size(text);
             if self.editing
                 && let Some(input) = self.input.clone()
             {
-                return base
+                // The input's own text size and padding are set from its size, so they are
+                // overridden here to follow the zoom.
+                let entry = div()
+                    .w_full()
+                    .h_full()
+                    .min_w_0()
+                    .rounded(theme.radius.lg * z)
+                    .border(px(z))
+                    .border_color(c.ring)
+                    .on_action(cx.safe_listener(|this, _: &Escape, _, cx| {
+                        this.stop_editing(cx);
+                    }))
                     .child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .on_action(cx.safe_listener(|this, _: &Escape, _, cx| {
-                                this.stop_editing(cx);
-                            }))
-                            .child(NumberInput::new(&input).stepper(false)),
-                    )
-                    .into_any_element();
+                        Input::new(&input)
+                            .appearance(false)
+                            .px(px(10.0 * z))
+                            .py(px(0.0))
+                            .text_size(text)
+                            .line_height(text * 1.25)
+                            .text_align(TextAlign::Center),
+                    );
+                #[cfg(test)]
+                let entry = entry.debug_selector(|| "number-field-entry".into());
+                return base.child(entry).into_any_element();
             }
             if self.read_only {
                 return base
-                    .px(px(10.0))
-                    .gap_2()
-                    .rounded(theme.radius.lg)
-                    .border_1()
+                    .px(px(10.0 * z))
+                    .gap(px(8.0 * z))
+                    .rounded(theme.radius.lg * z)
+                    .border(px(z))
                     .border_color(c.input)
                     .opacity(0.5)
                     .children(
@@ -295,11 +320,12 @@ impl Render for NumberField {
                     )
                     .into_any_element();
             }
-            base.id("number-field")
-                .px(px(10.0))
-                .gap_2()
-                .rounded(theme.radius.lg)
-                .border_1()
+            let field = base
+                .id("number-field")
+                .px(px(10.0 * z))
+                .gap(px(8.0 * z))
+                .rounded(theme.radius.lg * z)
+                .border(px(z))
                 .border_color(c.input)
                 .when(theme.is_dark(), |d| d.bg(c.input.opacity(0.3)))
                 .cursor(CursorStyle::ResizeLeftRight)
@@ -339,8 +365,10 @@ impl Render for NumberField {
                         .text_right()
                         .text_color(c.foreground)
                         .child(self.format()),
-                )
-                .into_any_element()
+                );
+            #[cfg(test)]
+            let field = field.debug_selector(|| "number-field".into());
+            field.into_any_element()
         })
     }
 }
@@ -432,6 +460,26 @@ mod tests {
         let (field, changes, cx) = setup(cx, |cx| NumberField::new(1.0, cx).integer());
         edit(&field, cx, "2.6", "enter");
         assert_eq!(*changes.borrow(), vec![3.0]);
+    }
+
+    #[gpui::test]
+    fn the_field_and_its_typed_entry_scale_with_the_zoom(cx: &mut TestAppContext) {
+        let (field, _, cx) = setup(cx, |cx| NumberField::new(1.0, cx));
+        let height_at = |cx: &mut VisualTestContext, zoom: f32| {
+            cx.update(|_, cx| field.update(cx, |f, cx| f.set_zoom(zoom, cx)));
+            cx.run_until_parked();
+            cx.debug_bounds("number-field").expect("the field is drawn").size.height
+        };
+        let (small, large) = (height_at(cx, 0.5), height_at(cx, 2.0));
+        assert_eq!((small, large), (px(16.0), px(64.0)));
+        cx.update(|window, cx| field.update(cx, |f, cx| f.start_editing(window, cx)));
+        cx.run_until_parked();
+        let entry = cx.debug_bounds("number-field-entry").expect("the entry is drawn");
+        assert_eq!(entry.size.height, px(64.0));
+        cx.update(|_, cx| field.update(cx, |f, cx| f.set_zoom(0.5, cx)));
+        cx.run_until_parked();
+        let entry = cx.debug_bounds("number-field-entry").expect("the entry is drawn");
+        assert_eq!(entry.size.height, px(16.0));
     }
 
     #[gpui::test]

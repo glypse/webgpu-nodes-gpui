@@ -29,8 +29,9 @@ pub fn oklch_max_chroma(gamut: ColorSpace) -> f64 {
 /// Pixels per side of the image a wheel is painted from, a multiple of its
 /// size on screen so it stays sharp on dense displays.
 const WHEEL_PIXELS: u32 = 256;
-const BAR_WIDTH: Pixels = px(12.0);
-const MARKER: Pixels = px(14.0);
+/// The bar's width, the wheel's marker and the bar's knob at zoom 1.
+const BAR_WIDTH: f32 = 12.0;
+const MARKER: f32 = 14.0;
 const EPSILON: f64 = 1e-6;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,6 +114,8 @@ pub struct ColorWheels {
     disabled: bool,
     gamut: ColorSpace,
     size: Pixels,
+    /// Scales the bar and the markers; the wheel's diameter is `size`.
+    zoom: f32,
     /// In RGB the wheel and bar edit an HSV kept apart from the components,
     /// so a hue survives going through grey or black.
     hsv: Hsv,
@@ -136,6 +139,7 @@ impl ColorWheels {
             disabled: false,
             gamut: ColorSpace::Srgb,
             size: px(128.0),
+            zoom: 1.0,
             hsv: Hsv::default(),
             sent: None,
             wheel_bounds: Bounds::default(),
@@ -157,6 +161,13 @@ impl ColorWheels {
     pub fn set_size(&mut self, size: Pixels, cx: &mut Context<Self>) {
         if self.size != size {
             self.size = size;
+            cx.notify();
+        }
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        if self.zoom != zoom {
+            self.zoom = zoom;
             cx.notify();
         }
     }
@@ -403,13 +414,15 @@ impl ColorWheels {
     }
 
     fn marker(&self, left: Pixels, top: Pixels, fill: Hsla) -> gpui::Div {
+        let z = self.zoom;
+        let marker = px(MARKER * z);
         div()
             .absolute()
-            .left(left - MARKER / 2.0)
-            .top(top - MARKER / 2.0)
-            .size(MARKER)
+            .left(left - marker / 2.0)
+            .top(top - marker / 2.0)
+            .size(marker)
             .rounded_full()
-            .border_2()
+            .border(px(2.0 * z))
             .border_color(gpui::white())
             .bg(fill)
     }
@@ -420,6 +433,8 @@ impl Render for ColorWheels {
         guard::render("ColorWheels", || {
             let this = cx.entity();
             let size = self.size;
+            let z = self.zoom;
+            let bar_width = px(BAR_WIDTH * z);
             let (wheel_disabled, bar_disabled) = (self.wheel_disabled(), self.bar_disabled());
             let polar_mode = self.mode == ColorMode::Oklch;
 
@@ -528,7 +543,7 @@ impl Render for ColorWheels {
                                     .paint_image(
                                         bounds,
                                         bounds,
-                                        Corners::all(px(2.0)),
+                                        Corners::all(px(2.0 * z)),
                                         image,
                                         0,
                                         false,
@@ -546,9 +561,9 @@ impl Render for ColorWheels {
                 .id("color-bar")
                 .relative()
                 .flex_none()
-                .w(BAR_WIDTH)
+                .w(bar_width)
                 .h(size)
-                .rounded_sm()
+                .rounded(px(2.0 * z))
                 .when(bar_disabled, |d| d.opacity(0.5))
                 .when(!polar_mode, |d| {
                     let hsv = Hsv {
@@ -565,12 +580,12 @@ impl Render for ColorWheels {
                 .child(
                     div()
                         .absolute()
-                        .left(px(-2.0))
-                        .w(BAR_WIDTH + px(4.0))
-                        .top(top - px(3.0))
-                        .h(px(6.0))
+                        .left(px(-2.0 * z))
+                        .w(bar_width + px(4.0 * z))
+                        .top(top - px(3.0 * z))
+                        .h(px(6.0 * z))
                         .rounded_full()
-                        .border_2()
+                        .border(px(2.0 * z))
                         .border_color(gpui::white()),
                 )
                 .on_mouse_down(
@@ -593,7 +608,7 @@ impl Render for ColorWheels {
                 bar.debug_selector(|| "color-bar".into()),
             );
 
-            div().flex().gap_2().child(wheel).child(bar)
+            div().flex().gap(px(8.0 * z)).child(wheel).child(bar)
         })
     }
 }
@@ -744,6 +759,17 @@ mod tests {
         let out = on_wheel(cx, -0.5, 0.0);
         cx.simulate_mouse_down(out, MouseButton::Left, Modifiers::default());
         near(cx.read(|cx| view.read(cx).hsv.h), wheel_polar(-0.5, 0.0).0);
+    }
+
+    #[gpui::test]
+    fn the_value_bar_scales_with_the_zoom(cx: &mut TestAppContext) {
+        let (view, _, cx) = setup(cx, ColorWheels::new(ColorMode::Hsv, [0.3, 0.6, 1.0]));
+        for (zoom, width) in [(2.0, px(24.0)), (0.5, px(6.0))] {
+            cx.update(|_, cx| view.update(cx, |w, cx| w.set_zoom(zoom, cx)));
+            cx.run_until_parked();
+            let bar = cx.debug_bounds("color-bar").expect("the bar is drawn");
+            assert_eq!(bar.size.width, width);
+        }
     }
 
     #[gpui::test]

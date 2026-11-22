@@ -14,11 +14,11 @@ use graph_math::ramp::{
 };
 use guard::SafeListener as _;
 
-use gpui_component::{Disableable as _, Sizable as _, button::{Button, ButtonVariants as _}};
+use gpui_component::{Disableable as _, Size, Sizable as _, button::{Button, ButtonVariants as _}};
 
 use crate::{ActiveTheme as _, IconName, NumberEvent, NumberField, linear_to_hsla};
 
-/// How close the pointer must be (in pixels) to grab a stop on a double click.
+/// How close the pointer must be to grab a stop on a double click, at zoom 1.
 const GRAB: f32 = 6.0;
 /// Ctrl-dragged stops snap to 1 / SNAP steps.
 const SNAP: f64 = 20.0;
@@ -26,9 +26,10 @@ const SNAP: f64 = 20.0;
 const PRECISION: f64 = 0.1;
 /// Arrow keys move the selected stop by this much (ten times less with Shift).
 const NUDGE: f64 = 0.01;
-const BAR_HEIGHT: Pixels = px(24.0);
-const MARKER_HEIGHT: Pixels = px(12.0);
-const CHECKER: Pixels = px(8.0);
+/// Sizes at zoom 1; the editor draws everything at its zoom.
+const BAR_HEIGHT: f32 = 24.0;
+const MARKER_HEIGHT: f32 = 12.0;
+const CHECKER: f32 = 8.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RampEditorEvent {
@@ -64,6 +65,7 @@ pub struct RampEditor {
     alpha: bool,
     gamut: ColorSpace,
     disabled: bool,
+    zoom: f32,
     picked: Option<String>,
     drag: Option<Drag>,
     /// The bar's bounds, as last drawn.
@@ -101,6 +103,7 @@ impl RampEditor {
             alpha: false,
             gamut: ColorSpace::Srgb,
             disabled: false,
+            zoom: 1.0,
             picked: None,
             drag: None,
             lane: Bounds::default(),
@@ -289,7 +292,7 @@ impl RampEditor {
         if event.click_count >= 2 {
             let far = near
                 .as_ref()
-                .is_none_or(|s| (s.position * width - x).abs() > f64::from(GRAB));
+                .is_none_or(|s| (s.position * width - x).abs() > f64::from(GRAB * self.zoom));
             if far {
                 self.add(x / width, cx);
             }
@@ -359,6 +362,15 @@ impl RampEditor {
         cx.stop_propagation();
     }
 
+    /// Scales the bar, its markers and controls; 1 is the design size.
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        if self.zoom != zoom {
+            self.zoom = zoom;
+            self.position.update(cx, |field, cx| field.set_zoom(zoom, cx));
+            cx.notify();
+        }
+    }
+
     fn set_position(&mut self, number: f64, cx: &mut Context<Self>) {
         if self.disabled {
             return;
@@ -408,13 +420,16 @@ impl Render for RampEditor {
             let this = cx.entity();
             let selected_id = self.selected().map(str::to_owned);
             let alpha = self.alpha;
+            let z = self.zoom;
+            let (bar_height, marker_height, checker) =
+                (px(BAR_HEIGHT * z), px(MARKER_HEIGHT * z), px(CHECKER * z));
 
             // The gradient, one column per pixel, sampled at its middle.
             let colored = self.colored(&self.stops);
             let modes = self.modes;
             let gamut = self.gamut;
             let bar = {
-                let (this, colored) = (this.clone(), colored.clone());
+                let (this, colored, checker) = (this.clone(), colored.clone(), checker);
                 canvas(
                     {
                         let this = this.clone();
@@ -429,18 +444,18 @@ impl Render for RampEditor {
                             let width = f64::from(bounds.size.width);
                             let columns = width.ceil().max(1.0) as usize;
                             if alpha {
-                                let rows = (f64::from(bounds.size.height) / f64::from(CHECKER))
+                                let rows = (f64::from(bounds.size.height) / f64::from(checker))
                                     .ceil() as usize;
-                                let cols = (width / f64::from(CHECKER)).ceil() as usize;
+                                let cols = (width / f64::from(checker)).ceil() as usize;
                                 for row in 0..rows {
                                     for col in 0..cols {
                                         let shade = if (row + col) % 2 == 0 { 0.6 } else { 0.4 };
                                         let cell = Bounds::new(
                                             point(
-                                                bounds.left() + CHECKER * col as f32,
-                                                bounds.top() + CHECKER * row as f32,
+                                                bounds.left() + checker * col as f32,
+                                                bounds.top() + checker * row as f32,
                                             ),
-                                            size(CHECKER, CHECKER),
+                                            size(checker, checker),
                                         );
                                         window.paint_quad(fill(
                                             cell.intersect(&bounds),
@@ -496,26 +511,26 @@ impl Render for RampEditor {
                 div()
                     .absolute()
                     .top_0()
-                    .left(left - px(5.0))
-                    .w(px(10.0))
+                    .left(left - px(5.0 * z))
+                    .w(px(10.0 * z))
                     .flex()
                     .flex_col()
                     .items_center()
                     .when(active, |d| d.relative())
                     .child(
                         div()
-                            .h(BAR_HEIGHT)
-                            .w(px(3.0))
-                            .border_x_1()
+                            .h(bar_height)
+                            .w(px(3.0 * z))
+                            .border_x(px(z))
                             .border_color(gpui::black().opacity(0.6))
                             .bg(gpui::white().opacity(if active { 1.0 } else { 0.7 })),
                     )
                     .child(
                         div()
-                            .h(MARKER_HEIGHT)
-                            .w(px(10.0))
-                            .rounded_b_sm()
-                            .border(if active { px(2.0) } else { px(1.0) })
+                            .h(marker_height)
+                            .w(px(10.0 * z))
+                            .rounded_b(px(2.0 * z))
+                            .border(if active { px(2.0 * z) } else { px(z) })
                             .border_color(if active {
                                 c.primary
                             } else {
@@ -528,18 +543,18 @@ impl Render for RampEditor {
             let lane = div()
                 .id("ramp-lane")
                 .relative()
-                .mx_1()
-                .h(BAR_HEIGHT + MARKER_HEIGHT)
+                .mx(px(4.0 * z))
+                .h(bar_height + marker_height)
                 .when(!disabled, |d| d.cursor(gpui::CursorStyle::ResizeLeftRight))
                 .track_focus(&self.focus)
                 .on_key_down(cx.safe_listener(Self::key_down))
                 .child(
                     div()
                         .relative()
-                        .h(BAR_HEIGHT)
-                        .rounded_sm()
+                        .h(bar_height)
+                        .rounded(px(2.0 * z))
                         .overflow_hidden()
-                        .border_1()
+                        .border(px(z))
                         .border_color(gpui::black().opacity(0.2))
                         .child(bar),
                 )
@@ -570,7 +585,7 @@ impl Render for RampEditor {
             let tool = |id: &'static str, icon: IconName, label: &'static str, off: bool| {
                 Button::new(id)
                     .ghost()
-                    .small()
+                    .with_size(Size::Size(px(24.0 * z)))
                     .icon(icon)
                     .tooltip(label)
                     .disabled(disabled || off)
@@ -584,7 +599,7 @@ impl Render for RampEditor {
             let toolbar = div()
                 .flex()
                 .items_center()
-                .gap(px(2.0))
+                .gap(px(2.0 * z))
                 .child(wrap(
                     "ramp-add",
                     tool("ramp-add", IconName::Plus, "Add a stop", false)
@@ -632,9 +647,9 @@ impl Render for RampEditor {
             let footer = div()
                 .flex()
                 .items_center()
-                .gap_1()
-                .px_1()
-                .text_size(theme.text.xs)
+                .gap(px(4.0 * z))
+                .px(px(4.0 * z))
+                .text_size(theme.text.xs * z)
                 .child(
                     div()
                         .flex_none()
@@ -646,7 +661,7 @@ impl Render for RampEditor {
             div()
                 .flex()
                 .flex_col()
-                .gap_1()
+                .gap(px(4.0 * z))
                 .font_family(theme.font.clone())
                 .when(disabled, |d| d.opacity(0.6))
                 .child(toolbar)
@@ -695,6 +710,17 @@ mod tests {
         });
         cx.run_until_parked();
         (editor, changes, cx)
+    }
+
+    #[gpui::test]
+    fn the_bar_and_its_markers_scale_with_the_zoom(cx: &mut TestAppContext) {
+        let (editor, _, cx) = setup(cx, default_ramp(), false);
+        for (zoom, height) in [(2.0, px(72.0)), (0.5, px(18.0))] {
+            cx.update(|_, cx| editor.update(cx, |e, cx| e.set_zoom(zoom, cx)));
+            cx.run_until_parked();
+            let lane = cx.debug_bounds("ramp-lane").expect("the lane is drawn");
+            assert_eq!(lane.size.height, height);
+        }
     }
 
     /// A position of the ramp, in window coordinates, at the middle of the bar. Bounds exclude
