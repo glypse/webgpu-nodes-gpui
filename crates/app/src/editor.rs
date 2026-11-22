@@ -318,10 +318,7 @@ impl Editor {
             flow.options.delete_key = false;
             flow.options.min_zoom = 0.1;
             flow.options.max_zoom = 3.0;
-            flow.options.theme = gpui_flow::FlowTheme {
-                background: gpui::hsla(0.0, 0.0, 0.0, 1.0),
-                ..gpui_flow::FlowTheme::dark()
-            };
+            flow.options.theme = canvas_theme(cx.theme().appearance);
             flow.options.controls = Some(ControlsOptions {
                 show_zoom: false,
                 show_interactive: false,
@@ -562,7 +559,7 @@ impl Editor {
         let theme = cx.theme().clone();
         let doc = model.active_document();
         let selected = model.selected_node_ids();
-        let strokes = !model.is_locked();
+        let locked = model.is_locked();
         let gamut = widgets::gamut_of(model.settings().color_space);
         self.widgets.retain(&doc.nodes.iter().map(|n| n.id.clone()).collect());
         let mut nodes: Vec<Node> = Vec::new();
@@ -1934,6 +1931,13 @@ impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("graph editor", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
+        let canvas = canvas_theme(theme.appearance);
+        self.flow.update(cx, |flow, cx| {
+            if flow.options.theme.background != canvas.background {
+                flow.options.theme = canvas;
+                cx.notify();
+            }
+        });
         let sheet = self.render_sheet(window, cx);
         let on = self.enabled();
         div()
@@ -2035,7 +2039,7 @@ impl Editor {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{TestAppContext, point};
+    use gpui::{MouseButton, TestAppContext, point, px};
     use shader_graph::nodes::IMAGE;
 
     use super::*;
@@ -2695,5 +2699,112 @@ mod tests {
         cx.dispatch_action(ExitNodeGroup);
         render_frame(cx);
         assert!(scene.editor.read_with(cx, |e, _| e.sheet.is_none()), "escape closes the sheet first");
+    }
+
+    #[gpui::test]
+    fn a_long_title_wraps_and_grows_the_card(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let selector: &'static str = Box::leak(format!("node-card {}", scene.member).into_boxed_str());
+        render_frame(cx);
+        let short = f32::from(cx.debug_bounds(selector).expect("the card is drawn").size.height);
+
+        scene.editor.update(cx, |e, cx| {
+            e.model_mut().set_node_label(&scene.member, Some("A node title long enough to need several lines on one card".to_owned()));
+            e.after_edit(cx);
+        });
+        render_frame(cx);
+        let tall = f32::from(cx.debug_bounds(selector).expect("the card is drawn").size.height);
+        assert!(tall > short + 20.0, "a long title should wrap onto more lines: {short} grew to {tall}");
+    }
+
+    /// Library groups are locked when added from the library, whatever the
+    /// `locked` flag their node was saved with says.
+    #[gpui::test]
+    fn a_library_group_added_from_the_library_is_locked(cx: &mut TestAppContext) {
+        let (scene, cx) = scene(cx);
+        let reference = shader_graph::library::entries()
+            .iter()
+            .find(|e| e.id == "std-remap")
+            .expect("the library has Remap")
+            .reference
+            .clone();
+        let id = scene.editor.update(cx, |e, cx| {
+            let id = e.model_mut().add_group_instance(&reference, GraphPoint::new(300.0, 300.0)).expect("adds");
+            e.after_edit(cx);
+            id
+        });
+        render_frame(cx);
+        let locked = scene.editor.read_with(cx, |e, _| {
+            let model = e.model();
+            let node = model.node(&id).expect("the node is in the document");
+            crate::graph::node::is_locked_group(&model, node)
+        });
+        assert!(locked);
+    }
+
+    /// Nothing inside a locked group moves, while the group itself can be dragged in the document around it.
+    #[gpui::test]
+    fn nodes_in_a_locked_group_do_not_drag(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scenes/voronoi.wgnodes");
+        let loaded = crate::project::read(&path).expect("the scene loads");
+        let (editor, cx) = cx.add_window_view(Editor::new);
+        editor.update(cx, |e, cx| e.load_project(Some(loaded.project), None, cx));
+        fit(&editor, cx);
+        let (uv, group) = editor.read_with(cx, |e, _| {
+            let doc = e.model().active_document().clone();
+            let uv = doc.nodes.iter().find(|n| n.node_type == "uv").expect("the scene has UV").id.clone();
+            let group = doc
+                .nodes
+                .iter()
+                .find(|n| n.definition_ref().is_some_and(|r| r.starts_with("std-fractal-voronoi")))
+                .expect("the scene has Fractal Voronoi")
+                .id
+                .clone();
+            (uv, group)
+        });
+
+        let position = |cx: &gpui::VisualTestContext, id: &str| {
+            editor.read_with(cx, |e, _| e.model().node(id).map(|n| (n.position.x, n.position.y)).expect("node"))
+        };
+        let before = position(cx, &uv);
+        drag_card(cx, &uv);
+        assert_ne!(position(cx, &uv), before, "a node in the root document drags");
+
+        editor.update(cx, |e, cx| e.enter_group(&group, cx));
+        fit(&editor, cx);
+        let inner = editor.read_with(cx, |e, _| {
+            let plain = |n: &&shader_graph::graph::GraphNode| n.side().is_none() && !n.is(REROUTE) && !n.is(LAYOUT_FRAME);
+            e.model().active_document().nodes.iter().find(plain).expect("the group has a node").id.clone()
+        });
+        let before = position(cx, &inner);
+        drag_card(cx, &inner);
+        assert_eq!(position(cx, &inner), before, "a node in a locked group does not drag");
+        assert!(!editor.read_with(cx, |e, cx| e.flow.read(cx).options.nodes_draggable));
+    }
+
+    /// Fits the whole document in the window and draws until it has settled.
+    fn fit(editor: &Entity<Editor>, cx: &mut gpui::VisualTestContext) {
+        editor.update(cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx)));
+        settle(cx);
+    }
+
+    /// Draws until measurements and the fit to the window have settled.
+    fn settle(cx: &mut gpui::VisualTestContext) {
+        for _ in 0..6 {
+            render_frame(cx);
+        }
+    }
+
+    /// Presses on a card's title and drags it, as the pointer would.
+    fn drag_card(cx: &mut gpui::VisualTestContext, id: &str) {
+        let selector: &'static str = Box::leak(format!("node-card {id}").into_boxed_str());
+        let origin = cx.debug_bounds(selector).expect("the card is drawn").origin;
+        let from = origin + point(px(20.0), px(8.0));
+        let to = from + point(px(60.0), px(30.0));
+        cx.simulate_mouse_down(from, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(to, Some(MouseButton::Left), gpui::Modifiers::default());
+        cx.simulate_mouse_up(to, MouseButton::Left, gpui::Modifiers::default());
+        render_frame(cx);
     }
 }
