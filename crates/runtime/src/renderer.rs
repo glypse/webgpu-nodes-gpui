@@ -8,7 +8,7 @@ use shader_graph::codegen::{
     PLAN_TARGET, PassDecl, RenderPlan, ResourceDecl, SimulationStage, UniformValue,
 };
 use shader_graph::frame::{FrameEnv, FrameRef, FrameValues, evaluate_frame};
-use shader_graph::passes::{SizeEnv, TextureFormat, mip_level_count, resolve_size};
+use shader_graph::passes::{SizeEnv, mip_level_count, resolve_size};
 use shader_graph::types::{SamplerAddress, SamplerFilter};
 
 use crate::clock::FrameInputs;
@@ -17,15 +17,17 @@ use crate::gpu_timer::{GpuTimer, TIMING_BYTES};
 use crate::media::{MediaLibrary, MediaSource, MediaStatus};
 use crate::mips::MipGenerator;
 use crate::present::{PresentOptions, Presenter};
-use crate::simulation::{SimulationState, Step, StepKind};
+use crate::simulation::{Step, StepKind};
+use crate::target::{Target, render_target};
 use crate::uniforms::{UniformBlock, pack_block};
 #[cfg(target_os = "macos")]
 use crate::surface::{Surface, SurfacePool, wrap};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use shader_graph::passes::Size;
 
 /// The format programs draw into: linear, and wide enough for colours outside sRGB.
-const LINEAR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(crate) const LINEAR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Rows copied out of a texture start on multiples of this.
 const ROW_ALIGNMENT: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 
@@ -44,21 +46,24 @@ pub struct ProgramError {
     pub code: String,
 }
 
-/// One pass of a compiled plan, with its own frame and uniform buffers.
-struct CompiledPass {
-    decl: PassDecl,
+/// One pass of a compiled plan, with its own uniform buffer. The frame blocks, which depend on the
+/// canvas a frame is drawn at, belong to each target.
+pub(crate) struct CompiledPass {
+    pub(crate) decl: PassDecl,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
-    frame_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
-    frame_values_buffer: wgpu::Buffer,
 }
+
+static NEXT_PROGRAM: AtomicU64 = AtomicU64::new(1);
 
 /// A compiled plan: its passes in order, each drawing textures of its own
 /// (kept while their size and format stay the same) or of the simulations'
 /// state, but the last, which draws the frame.
 pub struct Program {
-    passes: Vec<CompiledPass>,
+    /// Tells programs apart, for what targets keep per program.
+    pub(crate) id: u64,
+    pub(crate) passes: Vec<CompiledPass>,
     plan: RenderPlan,
     /// The values of the uniform inputs, which the frame values read.
     uniforms: std::sync::Mutex<Vec<(String, UniformValue)>>,
@@ -121,9 +126,10 @@ impl Frame {
 /// A frame as the renderer hands it out: its pixels, or the surface it was drawn into.
 pub enum Presented {
     Pixels(Frame),
+    /// One surface per distinct canvas size asked for.
     #[cfg(target_os = "macos")]
-    Surface {
-        surface: Surface,
+    Surfaces {
+        surfaces: Vec<(Size, Surface)>,
         gpu_time: Option<f64>,
     },
 }
@@ -147,7 +153,7 @@ enum Output {
         buffer: wgpu::Buffer,
     },
     #[cfg(target_os = "macos")]
-    Surface(Surface),
+    Surfaces(Vec<(Size, Surface)>),
 }
 
 /// A frame's pass timestamps, read once mapped.
@@ -316,19 +322,14 @@ pub struct Renderer {
     /// The texture read where nothing is: transparent black.
     empty: wgpu::Texture,
     samplers: HashMap<(SamplerFilter, SamplerAddress), wgpu::Sampler>,
-    /// The textures passes draw for others to read, by resource id.
-    transients: HashMap<String, wgpu::Texture>,
+    /// What drawing at each canvas size keeps. Frames of the same size share a target.
+    targets: HashMap<Size, Target>,
     media: MediaLibrary,
-    simulation: SimulationState,
-    linear: Option<wgpu::Texture>,
     output: Option<wgpu::Texture>,
     /// Staging buffers no frame is reading, reused by the next frame of their size.
     free_pixels: Vec<(Size, wgpu::Buffer)>,
     free_timing: Vec<wgpu::Buffer>,
     in_flight: VecDeque<Submitted>,
-    /// Surfaces frames are drawn into, of one size; CoreVideo recycles them once the window lets go.
-    #[cfg(target_os = "macos")]
-    surfaces: Option<(Size, SurfacePool)>,
 }
 
 fn filter_mode(filter: SamplerFilter) -> wgpu::FilterMode {
@@ -384,16 +385,12 @@ impl Renderer {
             timer,
             empty,
             samplers: HashMap::new(),
-            transients: HashMap::new(),
+            targets: HashMap::new(),
             media,
-            simulation: SimulationState::default(),
-            linear: None,
             output: None,
             free_pixels: Vec::new(),
             free_timing: Vec::new(),
             in_flight: VecDeque::new(),
-            #[cfg(target_os = "macos")]
-            surfaces: None,
         })
     }
 
@@ -419,7 +416,7 @@ impl Renderer {
                 code: String::new(),
             });
         }
-        Ok(Program { passes, plan: plan.clone(), uniforms: std::sync::Mutex::new(plan.uniforms.clone()) })
+        Ok(Program { id: NEXT_PROGRAM.fetch_add(1, Ordering::Relaxed), passes, plan: plan.clone(), uniforms: std::sync::Mutex::new(plan.uniforms.clone()) })
     }
 
     fn compile_pass(
@@ -524,13 +521,11 @@ impl Renderer {
                 mapped_at_creation: false,
             })
         };
-        let frame_buffer = buffer("frame", &source.frame);
         let uniform_buffer = buffer("uniforms", &source.uniforms);
-        let frame_values_buffer = buffer("frame values", &source.frame_values);
         if let Some(error) = pollster::block_on(scope.pop()) {
             return Err(fail(error.to_string(), None));
         }
-        Ok(CompiledPass { decl: decl.clone(), pipeline, layout, frame_buffer, uniform_buffer, frame_values_buffer })
+        Ok(CompiledPass { decl: decl.clone(), pipeline, layout, uniform_buffer })
     }
 
     /// Writes the values of a program's uniform blocks, e.g. after an edit that doesn't change its code.
@@ -578,7 +573,18 @@ impl Renderer {
 
     /// Forgets every simulation's state: they all start over on the next frame.
     pub fn reset_simulations(&mut self) {
-        self.simulation.reset();
+        for target in self.targets.values_mut() {
+            target.simulation.reset();
+        }
+    }
+
+    /// How many canvas sizes frames are kept for.
+    pub fn target_count(&self) -> usize {
+        self.targets.len()
+    }
+
+    fn take_target(&mut self, size: Size) -> Target {
+        self.targets.remove(&size).unwrap_or_else(|| Target::new(&self.device, size))
     }
 
     fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> wgpu::Sampler {
@@ -601,51 +607,26 @@ impl Renderer {
             .clone()
     }
 
-    /// A pass's own texture, of `size` and `format`, with all its mip levels if `mips`.
-    fn transient(&mut self, id: &str, size: Size, format: TextureFormat, mips: bool) -> wgpu::Texture {
-        let levels = if mips { mip_level_count(size) } else { 1 };
-        let format = wgpu_format(format);
-        if let Some(existing) = self.transients.get(id)
-            && existing.width() == size.width
-            && existing.height() == size.height
-            && existing.format() == format
-            && existing.mip_level_count() == levels
-        {
-            return existing.clone();
-        }
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(id),
-            size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
-            mip_level_count: levels,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        self.transients.insert(id.to_owned(), texture.clone());
-        texture
-    }
-
     /// The texture of every resource of the plan `sizes` is of, by id, and
     /// how each simulation steps.
     fn resolve_resources(
         &mut self,
         sizes: &Sizes<'_>,
         inputs: FrameInputs,
+        target: &mut Target,
     ) -> (HashMap<String, wgpu::Texture>, HashMap<String, Step>) {
         let plan = sizes.plan;
         // State is sized like any other texture, so it's kept once sizes can be resolved.
-        let steps = self.simulation.advance(&self.device, plan, inputs, &mut |id| sizes.get(id));
+        let steps = target.simulation.advance(&self.device, plan, inputs, &mut |id| sizes.get(id));
         let mut textures = HashMap::new();
         let mut frame_values = None;
         for resource in &plan.resources {
             let texture = match resource {
                 ResourceDecl::Transient { id, format, mips, .. } => {
-                    self.transient(id, sizes.get(id), *format, *mips)
+                    target.transient(&self.device, id, sizes.get(id), *format, *mips)
                 }
                 ResourceDecl::State { texture, read, .. } => {
-                    self.simulation.texture(texture, *read).unwrap_or(&self.empty).clone()
+                    target.simulation.texture(texture, *read).unwrap_or(&self.empty).clone()
                 }
                 ResourceDecl::Media { id, asset, video, time } => match video {
                     Some(playback) => {
@@ -659,19 +640,22 @@ impl Renderer {
             };
             textures.insert(resource.id().to_owned(), texture);
         }
-        self.transients.retain(|id, _| textures.contains_key(id));
+        target.transients.retain(|id, _| textures.contains_key(id));
         (textures, steps)
     }
 
-    /// Encodes the passes drawing one frame into `target`.
+    /// Encodes the passes drawing one frame into `target`'s linear texture. `timed` says whether the
+    /// plan holds the first and the last pass the frame's timing spans, which several plans share.
     fn encode_plan(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         program: &Program,
         inputs: FrameInputs,
-        target: &wgpu::Texture,
+        target: &mut Target,
+        timed: (bool, bool),
     ) {
-        let canvas = Size::new(target.width(), target.height());
+        let canvas = target.size;
+        target.ensure_blocks(&self.device, program);
         let uniforms = program.uniforms.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         let media = program
             .plan
@@ -693,12 +677,13 @@ impl Renderer {
             known: RefCell::default(),
             resolving: RefCell::default(),
         };
-        let (textures, steps) = self.resolve_resources(&sizes, inputs);
+        let (textures, steps) = self.resolve_resources(&sizes, inputs, target);
         // A simulation's start only draws on the frames it starts.
-        let drawn: Vec<&CompiledPass> = program
+        let drawn: Vec<(usize, &CompiledPass)> = program
             .passes
             .iter()
-            .filter(|pass| match &pass.decl.simulation {
+            .enumerate()
+            .filter(|(_, pass)| match &pass.decl.simulation {
                 Some(sim) if sim.stage == Some(SimulationStage::Start) => {
                     steps.get(&sim.id).is_some_and(|s| s.kind == StepKind::Start)
                 }
@@ -706,12 +691,12 @@ impl Renderer {
             })
             .collect();
         let count = drawn.len();
-        for (i, pass) in drawn.into_iter().enumerate() {
+        for (i, (index, pass)) in drawn.into_iter().enumerate() {
             let decl = &pass.decl;
             let targets: Vec<wgpu::Texture> = decl
                 .writes
                 .iter()
-                .map(|id| if id == PLAN_TARGET { target.clone() } else { textures.get(id).cloned().unwrap_or_else(|| self.empty.clone()) })
+                .map(|id| if id == PLAN_TARGET { target.linear.clone() } else { textures.get(id).cloned().unwrap_or_else(|| self.empty.clone()) })
                 .collect();
             let first = targets.first();
             let delta = decl
@@ -719,8 +704,10 @@ impl Renderer {
                 .as_ref()
                 .and_then(|s| steps.get(&s.id))
                 .map_or(0.0, |s| s.delta);
-            self.write_frame_block(pass, inputs, first, delta);
-            self.write_frame_values(pass, &sizes, first);
+            if let Some(blocks) = target.pass_blocks(index) {
+                self.write_frame_block(pass, &blocks.frame, inputs, first, delta);
+                self.write_frame_values(pass, &blocks.frame_values, &sizes, first);
+            }
             let views: Vec<wgpu::TextureView> = targets
                 .iter()
                 .map(|t| {
@@ -743,10 +730,11 @@ impl Renderer {
                     textures.get(&id).unwrap_or(&self.empty).create_view(&Default::default())
                 })
                 .collect();
+            let Some(blocks) = target.pass_blocks(index) else { continue };
             let mut entries = vec![
                 wgpu::BindGroupEntry {
                     binding: program_source.frame.binding,
-                    resource: pass.frame_buffer.as_entire_binding(),
+                    resource: blocks.frame.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: program_source.uniforms.binding,
@@ -754,7 +742,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: program_source.frame_values.binding,
-                    resource: pass.frame_values_buffer.as_entire_binding(),
+                    resource: blocks.frame_values.as_entire_binding(),
                 },
             ];
             entries.extend(program_source.textures.iter().zip(&read_views).map(|(t, view)| {
@@ -795,8 +783,8 @@ impl Renderer {
                     timestamp_writes: self
                         .timer
                         .as_ref()
-                        .filter(|_| i == 0 || i + 1 == count)
-                        .map(|t| t.writes(i == 0, i + 1 == count)),
+                        .filter(|_| (i == 0 && timed.0) || (i + 1 == count && timed.1))
+                        .map(|t| t.writes(i == 0 && timed.0, i + 1 == count && timed.1)),
                     ..Default::default()
                 });
                 render.set_pipeline(&pass.pipeline);
@@ -812,7 +800,7 @@ impl Renderer {
     }
 
     /// Writes the frame values a pass's program reads, computed for its size.
-    fn write_frame_values(&self, pass: &CompiledPass, sizes: &Sizes<'_>, first: Option<&wgpu::Texture>) {
+    fn write_frame_values(&self, pass: &CompiledPass, buffer: &wgpu::Buffer, sizes: &Sizes<'_>, first: Option<&wgpu::Texture>) {
         let program = &pass.decl.program;
         if program.frame_value_refs.is_empty() {
             return;
@@ -826,12 +814,13 @@ impl Renderer {
             .collect();
         let mut bytes = vec![0u8; program.frame_values.size as usize];
         pack_block(&program.frame_values, &values, &mut bytes);
-        self.queue.write_buffer(&pass.frame_values_buffer, 0, &bytes);
+        self.queue.write_buffer(buffer, 0, &bytes);
     }
 
     fn write_frame_block(
         &self,
         pass: &CompiledPass,
+        buffer: &wgpu::Buffer,
         inputs: FrameInputs,
         first: Option<&wgpu::Texture>,
         simulation_delta: f64,
@@ -850,7 +839,7 @@ impl Renderer {
             ("simulation_delta".to_string(), vec![simulation_delta]),
         ]);
         pack_block(block, &values, &mut bytes);
-        self.queue.write_buffer(&pass.frame_buffer, 0, &bytes);
+        self.queue.write_buffer(buffer, 0, &bytes);
     }
 
     /// Draws `frames` at `size` without reading them back, only to step the
@@ -862,13 +851,13 @@ impl Renderer {
         size: Size,
     ) -> Result<()> {
         anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
-        self.ensure_linear(size);
-        let linear = self.linear.clone().context("no target")?;
+        let mut target = self.take_target(size);
         for inputs in frames {
             let mut encoder = self.device.create_command_encoder(&Default::default());
-            self.encode_plan(&mut encoder, program, inputs, &linear);
+            self.encode_plan(&mut encoder, program, inputs, &mut target, (true, true));
             self.queue.submit([encoder.finish()]);
         }
+        self.targets.insert(size, target);
         self.device.poll(wgpu::PollType::wait_indefinitely())?;
         Ok(())
     }
@@ -886,7 +875,7 @@ impl Renderer {
         match self.read_out(submitted)? {
             Presented::Pixels(frame) => Ok(frame),
             #[cfg(target_os = "macos")]
-            Presented::Surface { .. } => anyhow::bail!("a readback came out as a surface"),
+            Presented::Surfaces { .. } => anyhow::bail!("a readback came out as a surface"),
         }
     }
 
@@ -904,11 +893,13 @@ impl Renderer {
         Ok(())
     }
 
-    /// Starts drawing a frame into a surface a window can show, without copying it to the CPU.
+    /// Starts drawing a frame into surfaces a window can show, one per distinct size of `sizes`
+    /// and without copying anything to the CPU. Every size is drawn with the same inputs, in one
+    /// GPU submit; each keeps its own simulation state.
     #[cfg(target_os = "macos")]
-    pub fn submit_surface(&mut self, program: &Program, inputs: FrameInputs, size: Size) -> Result<()> {
+    pub fn submit_surfaces(&mut self, program: &Program, inputs: FrameInputs, sizes: &[Size]) -> Result<()> {
         self.ensure_room()?;
-        let submitted = self.start_surface(program, inputs, size)?;
+        let submitted = self.start_surfaces(program, inputs, sizes)?;
         self.in_flight.push_back(submitted);
         Ok(())
     }
@@ -954,15 +945,14 @@ impl Renderer {
     ) -> Result<Submitted> {
         let size = options.size;
         anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
-        self.ensure_linear(size);
         self.ensure_output(size, options.format);
-        let (linear, output) = (
-            self.linear.clone().context("no target")?,
-            self.output.clone().context("no target")?,
-        );
+        let output = self.output.clone().context("no target")?;
         let buffer = self.take_pixel_buffer(size);
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.encode_plan(&mut encoder, program, inputs, &linear);
+        let mut target = self.take_target(size);
+        self.encode_plan(&mut encoder, program, inputs, &mut target, (true, true));
+        let linear = target.linear.clone();
+        self.targets.insert(size, target);
         self.presenter.encode(
             &self.device,
             &mut encoder,
@@ -1001,40 +991,68 @@ impl Renderer {
         })
     }
 
+    /// Draws a frame into one surface per distinct size of `sizes`, all in one submit. Targets of
+    /// other sizes are dropped, with their simulation state.
     #[cfg(target_os = "macos")]
-    fn start_surface(&mut self, program: &Program, inputs: FrameInputs, size: Size) -> Result<Submitted> {
-        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
-        self.ensure_linear(size);
-        if !matches!(&self.surfaces, Some((kept, _)) if *kept == size) {
-            self.surfaces = Some((size, SurfacePool::new(size)?));
+    fn start_surfaces(&mut self, program: &Program, inputs: FrameInputs, sizes: &[Size]) -> Result<Submitted> {
+        let mut distinct: Vec<Size> = Vec::new();
+        for size in sizes {
+            anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+            if !distinct.contains(size) {
+                distinct.push(*size);
+            }
         }
-        let (_, pool) = self.surfaces.as_ref().context("no surface pool")?;
-        let surface = pool.next()?;
-        let target = wrap(&self.device, &surface)?;
-        let linear = self.linear.clone().context("no target")?;
+        anyhow::ensure!(!distinct.is_empty(), "there is no canvas to draw");
+        self.targets.retain(|size, _| distinct.contains(size));
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.encode_plan(&mut encoder, program, inputs, &linear);
-        self.presenter.encode(
-            &self.device,
-            &mut encoder,
-            &linear,
-            &target.create_view(&Default::default()),
-            PresentOptions {
-                format: wgpu::TextureFormat::Bgra8Unorm,
-                premultiply: true,
-            },
-        );
+        let mut surfaces = Vec::with_capacity(distinct.len());
+        let last = distinct.len() - 1;
+        for (i, size) in distinct.into_iter().enumerate() {
+            let mut target = self.take_target(size);
+            let surface = self.encode_surface(&mut encoder, program, inputs, &mut target, (i == 0, i == last));
+            self.targets.insert(size, target);
+            surfaces.push((size, surface?));
+        }
         let timing = self.start_timing(&mut encoder);
         self.queue.submit([encoder.finish()]);
         Ok(Submitted {
             ready: gpu_done(&self.queue),
-            output: Output::Surface(surface),
+            output: Output::Surfaces(surfaces),
             timing: timing.map(|buffer| Timing {
                 ready: map_for_read(&buffer),
                 buffer,
             }),
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn encode_surface(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        program: &Program,
+        inputs: FrameInputs,
+        target: &mut Target,
+        timed: (bool, bool),
+    ) -> Result<Surface> {
+        if target.pool.is_none() {
+            target.pool = Some(SurfacePool::new(target.size)?);
+        }
+        let surface = target.pool.as_ref().context("no surface pool")?.next()?;
+        let drawn = wrap(&self.device, &surface)?;
+        self.encode_plan(encoder, program, inputs, target, timed);
+        let linear = target.linear.clone();
+        self.presenter.encode(
+            &self.device,
+            encoder,
+            &linear,
+            &drawn.create_view(&Default::default()),
+            PresentOptions {
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                premultiply: true,
+            },
+        );
+        Ok(surface)
     }
 
     /// Copies a finished frame out, and recycles its buffers.
@@ -1056,7 +1074,7 @@ impl Renderer {
                 })
             }
             #[cfg(target_os = "macos")]
-            Output::Surface(surface) => Presented::Surface { surface, gpu_time },
+            Output::Surfaces(surfaces) => Presented::Surfaces { surfaces, gpu_time },
         })
     }
 
@@ -1103,19 +1121,6 @@ impl Renderer {
         seconds
     }
 
-    /// The linear target frames are drawn into, kept while its size stays the same.
-    fn ensure_linear(&mut self, size: Size) {
-        if !self.linear.as_ref().is_some_and(|t| fits(t, size, LINEAR_FORMAT)) {
-            self.linear = Some(render_target(
-                &self.device,
-                "linear",
-                size,
-                LINEAR_FORMAT,
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            ));
-        }
-    }
-
     /// The target readback frames are copied from, kept while its size and format stay the same.
     fn ensure_output(&mut self, size: Size, format: PixelFormat) {
         let format = format.texture_format();
@@ -1133,29 +1138,6 @@ impl Renderer {
 
 fn fits(texture: &wgpu::Texture, size: Size, format: wgpu::TextureFormat) -> bool {
     texture.width() == size.width && texture.height() == size.height && texture.format() == format
-}
-
-fn render_target(
-    device: &wgpu::Device,
-    label: &str,
-    size: Size,
-    format: wgpu::TextureFormat,
-    usage: wgpu::TextureUsages,
-) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width: size.width,
-            height: size.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage,
-        view_formats: &[],
-    })
 }
 
 /// The rows of a mapped staging buffer, tightly packed, top first.
@@ -1279,13 +1261,48 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
     }
 
     #[cfg(target_os = "macos")]
-    #[test]
-    fn surface_holds_the_frame_the_readback_gives() {
+    fn draw_surfaces(
+        renderer: &mut Renderer,
+        program: &Program,
+        inputs: FrameInputs,
+        sizes: &[Size],
+    ) -> Vec<(Size, Surface)> {
+        renderer.submit_surfaces(program, inputs, sizes).unwrap();
+        loop {
+            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            match renderer.take_frame() {
+                Some(Ok(Presented::Surfaces { surfaces, .. })) => break surfaces,
+                Some(_) => panic!("a surface frame came out as something else"),
+                None => {}
+            }
+        }
+    }
+
+    /// The surface's rows, tightly packed.
+    #[cfg(target_os = "macos")]
+    fn surface_pixels(surface: &Surface, size: Size) -> Vec<u8> {
         use objc2_core_video::{
             CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress,
             CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVReturnSuccess,
         };
 
+        let row_bytes = size.width as usize * 4;
+        let mut pixels = Vec::new();
+        unsafe {
+            assert_eq!(CVPixelBufferLockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly), kCVReturnSuccess);
+            let base = CVPixelBufferGetBaseAddress(surface).cast::<u8>();
+            let stride = CVPixelBufferGetBytesPerRow(surface);
+            for y in 0..size.height as usize {
+                pixels.extend_from_slice(std::slice::from_raw_parts(base.add(y * stride), row_bytes));
+            }
+            assert_eq!(CVPixelBufferUnlockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly), kCVReturnSuccess);
+        }
+        pixels
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn surface_holds_the_frame_the_readback_gives() {
         let mut renderer = Renderer::new().unwrap();
         let program = renderer.compile(&plan(CODE)).unwrap();
         let size = Size::new(100, 50);
@@ -1297,33 +1314,42 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
         let expected = renderer.render(&program, inputs, options).unwrap();
 
-        renderer.submit_surface(&program, inputs, size).unwrap();
-        let surface = loop {
-            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-            match renderer.take_frame() {
-                Some(Ok(Presented::Surface { surface, .. })) => break surface,
-                Some(_) => panic!("a surface frame came out as something else"),
-                None => {}
-            }
-        };
+        let surface = draw_surfaces(&mut renderer, &program, inputs, &[size]).remove(0).1;
+        assert_eq!(surface_pixels(&surface, size), expected.pixels);
+    }
 
-        let row_bytes = size.width as usize * 4;
-        unsafe {
-            assert_eq!(
-                CVPixelBufferLockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly),
-                kCVReturnSuccess
-            );
-            let base = CVPixelBufferGetBaseAddress(&surface).cast::<u8>();
-            let stride = CVPixelBufferGetBytesPerRow(&surface);
-            for y in 0..size.height as usize {
-                let row = std::slice::from_raw_parts(base.add(y * stride), row_bytes);
-                assert_eq!(row, &expected.pixels[y * row_bytes..][..row_bytes], "row {y}");
-            }
-            assert_eq!(
-                CVPixelBufferUnlockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly),
-                kCVReturnSuccess
-            );
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn targets_of_different_sizes_draw_the_program_at_their_sizes_in_one_submit() {
+        let mut renderer = Renderer::new().unwrap();
+        let program = renderer.compile(&plan(CODE)).unwrap();
+        let (wide, tall) = (Size::new(100, 50), Size::new(30, 60));
+        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let read = |renderer: &mut Renderer, size| {
+            let options = RenderOptions { size, format: PixelFormat::Bgra8, premultiply: true };
+            renderer.render(&program, inputs, options).unwrap().pixels
+        };
+        let expected = [read(&mut renderer, wide), read(&mut renderer, tall)];
+
+        let surfaces = draw_surfaces(&mut renderer, &program, inputs, &[wide, tall]);
+        assert_eq!(surfaces.len(), 2);
+        for ((size, surface), want) in surfaces.iter().zip(&expected) {
+            assert_eq!(surface_pixels(surface, *size), *want, "{size:?}");
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn targets_of_the_same_size_are_shared_and_unused_ones_dropped() {
+        let mut renderer = Renderer::new().unwrap();
+        let program = renderer.compile(&plan(CODE)).unwrap();
+        let (a, b) = (Size::new(40, 20), Size::new(20, 40));
+        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let surfaces = draw_surfaces(&mut renderer, &program, inputs, &[a, a, b, a]);
+        assert_eq!(surfaces.iter().map(|(size, _)| *size).collect::<Vec<_>>(), [a, b]);
+        assert_eq!(renderer.target_count(), 2);
+        draw_surfaces(&mut renderer, &program, inputs, &[b]);
+        assert_eq!(renderer.target_count(), 1, "the target of a size no frame asks for is dropped");
     }
 
     #[test]

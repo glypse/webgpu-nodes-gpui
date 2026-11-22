@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EntityId, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
     Render, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
     canvas, div, img, point, prelude::FluentBuilder as _, px, size,
@@ -37,6 +37,7 @@ struct Manual {
 /// Where the canvas sits in a preview area. Until the user zooms or pans, the
 /// canvas is fitted into the pane, following its resizes.
 pub struct PreviewArea {
+    id: EntityId,
     playback: Entity<Playback>,
     manual: Option<Manual>,
     pane: Bounds<Pixels>,
@@ -60,6 +61,7 @@ impl PreviewArea {
             cx.notify();
         });
         Self {
+            id: cx.entity_id(),
             playback,
             manual: None,
             pane: Bounds::default(),
@@ -80,8 +82,10 @@ impl PreviewArea {
         self.manual.map_or_else(|| self.fit_zoom(cx), |m| m.zoom)
     }
 
+    /// The size of the frame the area shows, which its own canvas size catches up with once the new render is drawn.
     fn resolution(&self, cx: &App) -> Size {
-        self.playback.read(cx).render_size()
+        let playback = self.playback.read(cx);
+        playback.pane_frame(self.id).map_or_else(|| playback.size_of(self.id), |(size, _)| size)
     }
 
     fn fit_zoom(&self, cx: &App) -> f32 {
@@ -184,7 +188,7 @@ impl Render for PreviewArea {
             self.scale = window.scale_factor();
             let theme = cx.theme().clone();
             let playback = self.playback.read(cx);
-            let shown = playback.shown();
+            let shown = playback.pane_frame(cx.entity_id()).map(|(_, shown)| shown);
             let failure = playback.failure.clone();
             let rect = self.rect(cx);
             let view = cx.entity();
@@ -481,7 +485,7 @@ impl Render for PreviewToolbar {
             }
         }
         guard::render("PreviewToolbar", || {
-            let resolution = self.playback.read(cx).render_size();
+            let resolution = self.playback.read(cx).size_of(self.area.entity_id());
             let zoom = self.area.read(cx).zoom(cx);
             let this = cx.entity();
             let open = move |kind: Open| {
@@ -581,6 +585,11 @@ mod tests {
         cx.run_until_parked();
     }
 
+    fn settle(cx: &mut gpui::VisualTestContext) {
+        cx.executor().advance_clock(crate::playback::SETTLE * 2);
+        redraw(cx);
+    }
+
     #[gpui::test]
     fn frames_follow_the_preview_area_while_following(cx: &mut TestAppContext) {
         cx.update(theme::init);
@@ -605,6 +614,8 @@ mod tests {
             cx.notify();
         });
         redraw(cx);
+        assert_eq!(size(cx), device_size(400.0, 300.0, scale).expect("a pane"), "a resize is drawn once it settles");
+        settle(cx);
         assert_eq!(size(cx), device_size(500.0, 300.0, scale).expect("a pane"));
 
         cx.update(|window, cx| {
@@ -612,6 +623,66 @@ mod tests {
         });
         redraw(cx);
         assert_eq!(size(cx), stored);
+    }
+
+    /// Two preview areas side by side, each of a width the test sets.
+    struct Pair {
+        areas: [Entity<PreviewArea>; 2],
+        widths: [f32; 2],
+    }
+
+    impl Render for Pair {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().flex().children(
+                self.areas.iter().zip(self.widths).map(|(area, width)| div().w(px(width)).h(px(300.0)).child(area.clone())),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn each_preview_area_gets_a_render_of_its_size_and_equal_sizes_share_one(cx: &mut TestAppContext) {
+        cx.update(theme::init);
+        let (pair, cx) = cx.add_window_view(|_, cx| {
+            let playback = cx.new(|_| Playback::new());
+            let areas = [(); 2].map(|_| cx.new(|cx| PreviewArea::new(playback.clone(), cx)));
+            Pair { areas, widths: [400.0, 250.0] }
+        });
+        let playback = pair.read_with(cx, |p, cx| p.areas[0].read(cx).playback.clone());
+        let ids: [EntityId; 2] = pair.read_with(cx, |p, _| [p.areas[0].entity_id(), p.areas[1].entity_id()]);
+        let stored = Size::new(1920, 1080);
+        let scale = cx.update(|window, _| window.scale_factor());
+        let pane = |width: f32| device_size(width, 300.0, scale).expect("a pane");
+        let sizes = |cx: &gpui::VisualTestContext| playback.read_with(cx, |p, _| p.render_sizes());
+
+        cx.update(|window, cx| playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx)));
+        redraw(cx);
+        assert_eq!(sizes(cx), [stored], "a fixed canvas is drawn once");
+        playback.read_with(cx, |p, _| {
+            assert_eq!(p.size_of(ids[0]), stored);
+            assert_eq!(p.size_of(ids[1]), stored);
+        });
+
+        cx.update(|window, cx| playback.update(cx, |p, cx| p.set_canvas(true, stored, window, cx)));
+        redraw(cx);
+        let mut drawn = sizes(cx);
+        drawn.sort_by_key(|s| s.width);
+        assert_eq!(drawn, [pane(250.0), pane(400.0)], "one render per size");
+        playback.read_with(cx, |p, _| {
+            assert_eq!(p.size_of(ids[0]), pane(400.0));
+            assert_eq!(p.size_of(ids[1]), pane(250.0));
+        });
+
+        pair.update(cx, |p, cx| {
+            p.widths = [400.0, 400.0];
+            cx.notify();
+        });
+        redraw(cx);
+        settle(cx);
+        assert_eq!(sizes(cx), [pane(400.0)], "areas of the same size share a render");
+
+        cx.update(|window, cx| playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx)));
+        redraw(cx);
+        assert_eq!(sizes(cx), [stored]);
     }
 
     /// The toolbar in a header row laid out as the screen lays it out.

@@ -115,7 +115,7 @@ impl Focusable for OutputView {
 impl Render for OutputView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         guard::render("OutputView", || {
-            let shown = self.playback.read(cx).shown();
+            let shown = self.playback.read(cx).pane_frame(cx.entity_id()).map(|(_, shown)| shown);
             // The window's image cache holds each frame drawn as an image until it is dropped.
             let image = match &shown {
                 Some(Shown::Image(image)) => Some(image.clone()),

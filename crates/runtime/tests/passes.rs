@@ -172,6 +172,23 @@ fn drawing_a_frame_again_repeats_its_step() {
 }
 
 #[test]
+fn each_canvas_size_keeps_its_own_simulation_state() {
+    let mut scene = counting_scene();
+    let program = scene.compile();
+    let (small, large) = (Size::new(2, 2), Size::new(4, 3));
+    for frame in 0..4u64 {
+        for size in [small, large] {
+            let pixels = scene.draw(&program, size, frame);
+            assert_eq!(
+                pixel(&pixels, size.width, 1, 1)[0],
+                srgb((frame + 1) as f64 * 0.1),
+                "{size:?}, frame {frame}: drawing at the other size doesn't restart it"
+            );
+        }
+    }
+}
+
+#[test]
 fn simulation_state_survives_a_recompile_of_the_same_graph() {
     let mut scene = counting_scene();
     let program = scene.compile();

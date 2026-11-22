@@ -12,6 +12,7 @@ mod present;
 mod refresh_rate;
 mod renderer;
 mod simulation;
+mod target;
 #[cfg(target_os = "macos")]
 mod surface;
 mod uniforms;

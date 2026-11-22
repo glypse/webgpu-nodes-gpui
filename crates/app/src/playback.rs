@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Window};
+use gpui::{Context, EntityId, EventEmitter, RenderImage, SharedString, Task, Window};
 use shader_graph::assets::{AssetKind, asset_hash};
 use shader_graph::codegen::{RenderPlan, ResourceDecl};
 use shader_graph::graph::MAX_CANVAS_SIZE;
@@ -15,6 +15,9 @@ use runtime::{
 
 /// Seconds' worth of samples before the display's refresh rate is judged.
 const REFRESH_SAMPLES: usize = 20;
+/// How long a preview area's size must hold still before frames are drawn at it, so that
+/// dragging a divider doesn't allocate a render for every size on the way.
+pub(crate) const SETTLE: Duration = Duration::from_millis(150);
 /// How often the preview's frame timing is logged at debug level.
 const STATS_PERIOD: Duration = Duration::from_secs(5);
 pub const DEFAULT_RESOLUTION: Size = Size::new(512, 512);
@@ -65,6 +68,13 @@ impl Failure {
     }
 }
 
+/// A preview area's size in device pixels: the latest reported, and the one frames are drawn at.
+#[derive(Clone, Copy)]
+struct Pane {
+    reported: Size,
+    settled: Size,
+}
+
 /// A drawn frame, as the window shows it.
 #[derive(Clone)]
 pub enum Shown {
@@ -81,6 +91,10 @@ pub enum PlaybackEvent {
 
 /// What the previews show: the generated program, drawn by the player's clock.
 ///
+/// A fixed canvas is drawn once, and every preview shows that frame. While following the
+/// previews, each distinct size of a preview area is drawn: areas of the same size share one
+/// render, and all renders of a frame use the same time and uniforms and go to the GPU together.
+///
 /// Drawing happens on the window's animation frames, only while playing or
 /// when something changed (a seek, a new program, a new size).
 pub struct Playback {
@@ -90,12 +104,17 @@ pub struct Playback {
     /// The canvas size from the project, which frames render at unless following a preview area.
     pub resolution: Size,
     follow: bool,
-    /// Each preview area's size in device pixels, by its entity.
-    panes: HashMap<EntityId, Size>,
-    /// The preview area frames follow: the one last used, else the first laid out.
+    /// Each preview area's size, by its entity.
+    panes: HashMap<EntityId, Pane>,
+    /// Applies the sizes the areas have reported once they hold still.
+    settling: Option<Task<()>>,
+    /// The preview area whose size exports and the canvas readouts use: the one last used, else the first laid out.
     followed: Option<EntityId>,
-    /// The latest frame drawn, as the window shows it.
-    shown: Option<Shown>,
+    /// The latest frame drawn at each size, as the window shows it.
+    frames: HashMap<Size, Shown>,
+    /// The frame each area showed last, which it keeps until one at its new size is drawn.
+    #[cfg(target_os = "macos")]
+    held: HashMap<EntityId, (Size, Shown)>,
     stats: FrameStats,
     /// Frames sent to the GPU so far: every window showing the playback shows these, none draws its own.
     submitted: u64,
@@ -132,8 +151,11 @@ impl Playback {
             resolution: DEFAULT_RESOLUTION,
             follow: false,
             panes: HashMap::new(),
+            settling: None,
             followed: None,
-            shown: None,
+            frames: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            held: HashMap::new(),
             stats: FrameStats::default(),
             submitted: 0,
             code: SharedString::default(),
@@ -215,8 +237,17 @@ impl Playback {
         self.submitted
     }
 
-    pub fn shown(&self) -> Option<Shown> {
-        self.shown.clone()
+    /// The frame a preview area or output window shows, and the size it was drawn at.
+    pub fn pane_frame(&self, area: EntityId) -> Option<(Size, Shown)> {
+        let size = self.size_of(area);
+        if let Some(shown) = self.frames.get(&size) {
+            return Some((size, shown.clone()));
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(held) = self.held.get(&area) {
+            return Some(held.clone());
+        }
+        self.frames.iter().next().map(|(size, shown)| (*size, shown.clone()))
     }
 
     pub fn timing(&self) -> Timing {
@@ -298,7 +329,7 @@ impl Playback {
         }
     }
 
-    /// Takes the canvas settings: frames render at the followed preview's size while `follow`.
+    /// Takes the canvas settings: frames render at the preview areas' sizes while `follow`.
     pub fn set_canvas(
         &mut self,
         follow: bool,
@@ -309,10 +340,11 @@ impl Playback {
         if follow == self.follow && resolution == self.resolution {
             return;
         }
-        let before = self.render_size();
+        let before = self.render_sizes();
         self.follow = follow;
         self.resolution = resolution;
-        if self.render_size() != before {
+        self.settle_now();
+        if self.render_sizes() != before {
             self.player.invalidate();
         }
         self.changed(window, cx);
@@ -322,13 +354,32 @@ impl Playback {
         self.follow
     }
 
-    /// The size frames render at: the followed preview area's, while following it.
+    /// The size frames render at for exports and the canvas readouts: the followed preview area's, while following it.
     pub fn render_size(&self) -> Size {
-        let pane = self.followed.and_then(|area| self.panes.get(&area).copied());
+        let pane = self.followed.and_then(|area| self.panes.get(&area)).map(|p| p.settled);
         canvas_size(self.follow, pane, self.resolution)
     }
 
-    /// Reports a preview area's size in device pixels, which frames follow while `follow`.
+    /// The size frames render at for a preview area: its own, while following.
+    pub fn size_of(&self, area: EntityId) -> Size {
+        canvas_size(self.follow, self.panes.get(&area).map(|p| p.settled), self.resolution)
+    }
+
+    /// The distinct sizes each frame is drawn at.
+    pub fn render_sizes(&self) -> Vec<Size> {
+        if !self.follow || self.panes.is_empty() {
+            return vec![self.render_size()];
+        }
+        let mut sizes: Vec<Size> = Vec::new();
+        for size in self.followed.iter().filter_map(|a| self.panes.get(a)).chain(self.panes.values()).map(|p| p.settled) {
+            if !sizes.contains(&size) {
+                sizes.push(size);
+            }
+        }
+        sizes
+    }
+
+    /// Reports a preview area's size in device pixels, which frames are drawn at while `follow`.
     pub fn set_pane(
         &mut self,
         area: EntityId,
@@ -336,38 +387,80 @@ impl Playback {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.panes.insert(area, size) == Some(size) {
-            return;
+        let before = self.render_sizes();
+        match self.panes.get_mut(&area) {
+            None => {
+                self.panes.insert(area, Pane { reported: size, settled: size });
+                self.followed.get_or_insert(area);
+            }
+            Some(pane) if pane.reported == size => return,
+            Some(pane) => {
+                pane.reported = size;
+                if !self.follow {
+                    pane.settled = size;
+                } else if pane.settled != size {
+                    self.settle_later(window, cx);
+                }
+            }
         }
-        let followed = *self.followed.get_or_insert(area);
-        if self.follow && followed == area {
+        if self.follow && self.render_sizes() != before {
             self.player.invalidate();
             self.changed(window, cx);
         }
     }
 
-    /// Makes `area` the one frames follow: the one last used.
+    /// Takes every area's reported size as the one frames are drawn at.
+    fn settle_now(&mut self) -> bool {
+        self.settling = None;
+        let mut moved = false;
+        for pane in self.panes.values_mut().filter(|p| p.settled != p.reported) {
+            pane.settled = pane.reported;
+            moved = true;
+        }
+        moved
+    }
+
+    fn settle_later(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settling = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(SETTLE).await;
+            this.update_in(cx, |p, window, cx| {
+                if p.settle_now() && p.follow {
+                    p.player.invalidate();
+                    p.changed(window, cx);
+                }
+            })
+            .ok();
+        }));
+    }
+
+    /// Makes `area` the one the canvas readouts follow: the one last used.
     pub fn follow_pane(&mut self, area: EntityId, window: &mut Window, cx: &mut Context<Self>) {
         if self.followed == Some(area) || !self.panes.contains_key(&area) {
             return;
         }
+        let before = self.render_size();
         self.followed = Some(area);
-        if self.follow {
+        if self.follow && self.render_size() != before {
             self.player.invalidate();
             self.changed(window, cx);
         }
     }
 
-    /// Forgets a preview area that has gone, moving frames to another area's size.
+    /// Forgets a preview area that has gone, with the render only it used.
     pub fn forget_pane(&mut self, area: EntityId, cx: &mut Context<Self>) {
+        let before = self.render_sizes();
         if self.panes.remove(&area).is_none() {
             return;
         }
+        #[cfg(target_os = "macos")]
+        self.held.remove(&area);
         if self.followed == Some(area) {
             self.followed = self.panes.keys().next().copied();
-            self.player.invalidate();
-            cx.notify();
         }
+        if self.follow && self.render_sizes() != before {
+            self.player.invalidate();
+        }
+        cx.notify();
     }
 
     pub fn set_timing(&mut self, timing: Timing, window: &mut Window, cx: &mut Context<Self>) {
@@ -473,19 +566,19 @@ impl Playback {
     /// Starts drawing a frame; it is shown once the GPU has finished with it.
     fn submit(&mut self, inputs: runtime::FrameInputs) -> bool {
         let _span = tracing::info_span!("submit").entered();
-        let size = self.render_size();
+        let sizes = self.render_sizes();
         let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else {
             return false;
         };
         let started = Instant::now();
         #[cfg(target_os = "macos")]
-        let submitted = renderer.submit_surface(program, inputs, size);
+        let submitted = renderer.submit_surfaces(program, inputs, &sizes);
         #[cfg(not(target_os = "macos"))]
         let submitted = renderer.submit(
             program,
             inputs,
             RenderOptions {
-                size,
+                size: self.render_size(),
                 format: PixelFormat::Bgra8,
                 premultiply: true,
             },
@@ -508,11 +601,15 @@ impl Playback {
         let started = Instant::now();
         let (shown, gpu_time) = match presented {
             #[cfg(target_os = "macos")]
-            Presented::Surface { surface, gpu_time } => (Shown::Surface(surface), gpu_time),
+            Presented::Surfaces { surfaces, gpu_time } => (
+                surfaces.into_iter().map(|(size, surface)| (size, Shown::Surface(surface))).collect::<HashMap<_, _>>(),
+                gpu_time,
+            ),
             Presented::Pixels(frame) => {
                 let gpu_time = frame.gpu_time;
+                let size = frame.size;
                 match image_of(frame) {
-                    Some(image) => (Shown::Image(image), gpu_time),
+                    Some(image) => (HashMap::from([(size, Shown::Image(image))]), gpu_time),
                     None => {
                         log::error!("a frame's pixels don't match its size");
                         return;
@@ -520,10 +617,21 @@ impl Playback {
                 }
             }
         };
-        if let Some(Shown::Image(old)) = self.shown.replace(shown)
-            && let Err(error) = window.drop_image(old)
+        #[cfg(target_os = "macos")]
         {
-            log::warn!("dropping the previous frame failed: {error:#}");
+            let sizes: Vec<(EntityId, Size)> = self.panes.keys().map(|area| (*area, self.size_of(*area))).collect();
+            for (area, size) in sizes {
+                if let Some(frame) = shown.get(&size) {
+                    self.held.insert(area, (size, frame.clone()));
+                }
+            }
+        }
+        for (_, old) in std::mem::replace(&mut self.frames, shown) {
+            if let Shown::Image(old) = old
+                && let Err(error) = window.drop_image(old)
+            {
+                log::warn!("dropping the previous frame failed: {error:#}");
+            }
         }
         if let Some(seconds) = gpu_time {
             tracing::debug!(target: "probe::gpu", seconds);
