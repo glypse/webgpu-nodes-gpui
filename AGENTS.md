@@ -4,6 +4,8 @@ A Rust port (gpui-fast, wgpu) of the Svelte/TypeScript app at /Volumes/T7WA/GitH
 
 Crates: `flow` (xyflow-like canvas), `shader-graph` (types, nodes, graph model, zones, groups, codegen, library, catalog), `graph-math` (colour, curve, ramp maths), `runtime` (wgpu renderer, player, clock), `theme` (tokens + components), `screen` (area layout), `guard` (panic guards), `app` (the editor binary).
 
+Each crate has its own `crates/<crate>/AGENTS.md` (module map, invariants, how to add things, test commands): read it before working in that crate instead of exploring the source, and update it when your change invalidates it.
+
 Other agents may work in the same checkout at the same time. Stay inside the files your task gives you. For shared registries (module lists, `Cargo.toml` deps) make small additive edits and re-read the file right before each edit. If the build breaks in a file you don't own, it's probably another agent's in-progress edit: build again later rather than fixing it.
 
 ## Build
