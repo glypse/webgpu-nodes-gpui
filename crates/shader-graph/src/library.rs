@@ -203,6 +203,10 @@ const SOURCES: &[(&str, &str)] = &[
     ),
 ];
 
+/// Older stored versions of library entries, resolvable by ref only. Empty
+/// while every entry has shipped in one version.
+const OLDER_SOURCES: &[(&str, &str)] = &[];
+
 /// Separates a library id from its version in a definition ref.
 const VERSION_SEPARATOR: char = '@';
 /// Bytes of the version digest kept: 64 bits, as hex.
@@ -267,69 +271,102 @@ pub fn is_library_ref(reference: &str) -> bool {
     entries().iter().any(|e| e.id == id)
 }
 
-pub(crate) fn load() -> Result<Vec<LibraryEntry>, LibraryError> {
-    let mut entries = Vec::with_capacity(SOURCES.len());
-    for &(id, source) in SOURCES {
-        let invalid = |source| LibraryError::Invalid { id, source };
-        let raw: Value = serde_json::from_str(source).map_err(invalid)?;
-        let version = raw.get("definition").map_or_else(String::new, version_of);
-        let file: LibraryFile = serde_json::from_value(raw).map_err(invalid)?;
-        let mut definition = file.definition;
-        definition.label = Some(file.name.clone());
-        definition.locked = true;
-        definition.widget = file.widget;
-        entries.push(LibraryEntry {
-            reference: format!("{}{VERSION_SEPARATOR}{version}", file.id),
-            id: file.id,
-            version,
-            label: file.name,
-            aliases: file.aliases,
-            category: file.category,
-            section: file.section,
-            search_section: file.search_section,
-            dependencies: file.dependencies,
-            definition,
-        });
-    }
-    Ok(entries)
+/// The standard library's stored versions.
+pub struct Library {
+    /// The current version of each entry, in menu order.
+    pub(crate) entries: Vec<LibraryEntry>,
+    /// Older versions, kept so saved projects that reference them still load.
+    pub(crate) older: Vec<LibraryEntry>,
 }
 
-static LIBRARY: LazyLock<Result<Vec<LibraryEntry>, LibraryError>> =
+fn load_source(id: &'static str, source: &str) -> Result<LibraryEntry, LibraryError> {
+    let invalid = |source| LibraryError::Invalid { id, source };
+    let raw: Value = serde_json::from_str(source).map_err(invalid)?;
+    let version = raw.get("definition").map_or_else(String::new, version_of);
+    let file: LibraryFile = serde_json::from_value(raw).map_err(invalid)?;
+    let mut definition = file.definition;
+    definition.label = Some(file.name.clone());
+    definition.locked = true;
+    definition.widget = file.widget;
+    Ok(LibraryEntry {
+        reference: format!("{}{VERSION_SEPARATOR}{version}", file.id),
+        id: file.id,
+        version,
+        label: file.name,
+        aliases: file.aliases,
+        category: file.category,
+        section: file.section,
+        search_section: file.search_section,
+        dependencies: file.dependencies,
+        definition,
+    })
+}
+
+pub(crate) fn load() -> Result<Library, LibraryError> {
+    let entries = SOURCES
+        .iter()
+        .map(|&(id, source)| load_source(id, source))
+        .collect::<Result<_, _>>()?;
+    let older = OLDER_SOURCES
+        .iter()
+        .map(|&(id, source)| load_source(id, source))
+        .collect::<Result<_, _>>()?;
+    Ok(Library { entries, older })
+}
+
+static LIBRARY: LazyLock<Result<Library, LibraryError>> =
     LazyLock::new(|| load().inspect_err(|e| log::error!("the standard library isn't loaded: {e}")));
 
-/// The library's entries in menu order; empty if the embedded files are broken.
+fn loaded() -> Option<&'static Library> {
+    (*LIBRARY).as_ref().ok()
+}
+
+/// The library's current entries in menu order; empty if the embedded files are broken.
 pub fn entries() -> &'static [LibraryEntry] {
-    LIBRARY.as_deref().unwrap_or_default()
+    loaded().map_or(&[], |l| l.entries.as_slice())
 }
 
 #[cfg(test)]
 pub fn load_error() -> Option<&'static LibraryError> {
-    LIBRARY.as_ref().err()
+    (*LIBRARY).as_ref().err()
 }
 
-/// The entry a ref of any of its versions stands for: the latest.
+fn find_in<'a>(library: &'a Library, reference: &str) -> Option<&'a LibraryEntry> {
+    library
+        .entries
+        .iter()
+        .chain(&library.older)
+        .find(|e| e.reference == reference)
+}
+
+/// The stored entry whose id and version are exactly `reference`.
 pub fn entry_for_ref(reference: &str) -> Option<&'static LibraryEntry> {
-    let (id, _) = parse_ref(reference)?;
-    entries().iter().find(|e| e.id == id)
+    find_in(loaded()?, reference)
 }
 
-/// Gives `project` a definition for every library entry, and for every
-/// library version its group nodes reference (the latest stands in for an
-/// older one).
+/// Gives `project` a definition for every current library entry, and for each
+/// stored version its group nodes reference. A ref to a version that isn't
+/// stored stays unresolved, which validation reports.
 pub fn register(project: &mut GraphProject) {
-    for entry in entries() {
+    if let Some(library) = loaded() {
+        register_in(project, library);
+    }
+}
+
+fn register_in(project: &mut GraphProject, library: &Library) {
+    for entry in &library.entries {
         project
             .definitions
             .entry(entry.reference.clone())
             .or_insert_with(|| entry.definition.clone());
     }
     loop {
-        let missing: Vec<(String, &'static LibraryEntry)> = project
+        let missing: Vec<(String, &LibraryEntry)> = project
             .definitions
             .values()
             .flat_map(GraphDocument::group_refs)
             .filter(|r| !project.definitions.contains_key(*r))
-            .filter_map(|r| Some((r.to_owned(), entry_for_ref(r)?)))
+            .filter_map(|r| Some((r.to_owned(), find_in(library, r)?)))
             .collect();
         if missing.is_empty() {
             return;
@@ -340,6 +377,57 @@ pub fn register(project: &mut GraphProject) {
                 .insert(reference, entry.definition.clone());
         }
     }
+}
+
+/// The label of the entry a stored ref names when its id has a newer version
+/// stored; `None` for the current version or a ref that isn't stored.
+pub fn outdated_label(reference: &str) -> Option<String> {
+    newer_version_label_in(loaded()?, reference)
+}
+
+fn newer_version_label_in(library: &Library, reference: &str) -> Option<String> {
+    find_in(library, reference)?;
+    let (id, _) = parse_ref(reference)?;
+    let latest = library.entries.iter().find(|e| e.id == id)?;
+    (latest.reference != reference).then(|| latest.label.clone())
+}
+
+/// The library with an extra stored older version of `id`, whose definition
+/// differs from the current one's. Returns the library and the older ref.
+#[cfg(test)]
+pub fn library_with_older_version(id: &str) -> (Library, String) {
+    let entries: Vec<LibraryEntry> = loaded().expect("the library loads").entries.clone();
+    let mut older = entries
+        .iter()
+        .find(|e| e.id == id)
+        .expect("the entry is in the library")
+        .clone();
+    older.version = "0000000000000a".to_owned();
+    older.reference = format!("{}{VERSION_SEPARATOR}{}", older.id, older.version);
+    older.definition.label = Some("Older test version".to_owned());
+    let reference = older.reference.clone();
+    (
+        Library {
+            entries,
+            older: vec![older],
+        },
+        reference,
+    )
+}
+
+#[cfg(test)]
+pub fn register_with(project: &mut GraphProject, library: &Library) {
+    register_in(project, library);
+}
+
+#[cfg(test)]
+pub fn newer_version_label_with(library: &Library, reference: &str) -> Option<String> {
+    newer_version_label_in(library, reference)
+}
+
+#[cfg(test)]
+pub fn resolve_with<'a>(library: &'a Library, reference: &str) -> Option<&'a LibraryEntry> {
+    find_in(library, reference)
 }
 
 /// A version id derived from what a definition computes and exposes: node

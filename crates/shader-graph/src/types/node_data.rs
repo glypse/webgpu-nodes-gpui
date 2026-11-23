@@ -145,7 +145,6 @@ pub enum ColorDisplay {
 /// same when cases are renamed or reordered.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnumVariant {
-    #[serde(deserialize_with = "whole_number")]
     pub value: i64,
     pub label: String,
     /// On an enum input with `variants_by`: the types of that variable the
@@ -164,20 +163,6 @@ impl EnumVariant {
     }
 }
 
-/// An integer that older files stored as a float (`2.0`).
-fn whole_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number {
-        Int(i64),
-        Float(f64),
-    }
-    Ok(match Number::deserialize(d)? {
-        Number::Int(n) => n,
-        Number::Float(n) => n as i64,
-    })
-}
-
 /// The variants of a checkbox.
 pub fn toggle_variants() -> Vec<EnumVariant> {
     vec![EnumVariant::new(0, "Off"), EnumVariant::new(1, "On")]
@@ -188,7 +173,6 @@ pub fn toggle_variants() -> Vec<EnumVariant> {
 #[serde(rename_all = "camelCase")]
 pub struct InputOwner {
     pub enum_id: String,
-    #[serde(deserialize_with = "whole_number")]
     pub value: i64,
 }
 

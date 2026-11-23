@@ -1,5 +1,5 @@
 use crate::graph::{Connection, FRAG_OUTPUT, GraphModel, GroupWidget, Point};
-use crate::library::{entries, entry_for_ref};
+use crate::library::entries;
 use crate::testing::validate_wgsl;
 use crate::types::{InputControl, InputValue, NodeWidget};
 
@@ -237,12 +237,7 @@ fn compiles_each_converter() {
             panic!("{id} has an output")
         };
         let mut model = GraphModel::default();
-        let node = model.add_group_instance(
-            &entry_for_ref(&entry(id).reference)
-                .expect("entry")
-                .reference,
-            Point::default(),
-        );
+        let node = model.add_group_instance(&entry(id).reference, Point::default());
         shader_of(&mut model, &node.expect("adds"), &out);
     }
 }

@@ -557,12 +557,11 @@ impl GraphModel {
         refs
     }
 
-    /// The label of the standard-library group a node uses an older version
-    /// of. The latest version stands in for it, so its links may not match.
+    /// The label of the standard-library group a node uses a superseded version
+    /// of, when a newer version of it is stored.
     pub fn outdated_library_label(&self, node_id: &str) -> Option<String> {
         let reference = self.project.resolve_node(node_id)?.definition_ref()?;
-        let latest = library::entry_for_ref(reference)?;
-        (latest.reference != reference).then(|| latest.label.clone())
+        library::outdated_label(reference)
     }
 
     // ── Interface ────────────────────────────────────────────────────────────

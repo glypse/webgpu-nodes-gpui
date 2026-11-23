@@ -23,6 +23,7 @@ Loops of repeated waits are the most common way agents waste a session. Follow t
 - Before re-running a command, check whether its previous result already answers the question.
 
 ## Code
+- Pre-alpha: never keep backwards compatibility. No migrations, fallbacks or lenient parsing for old project, library, preference or layout formats; change formats freely and regenerate checked-in files. The one exception is library entry versions, whose loading of older stored versions stays in place but unused until Beta.
 - Errors: no `unwrap`/`expect`/`panic!`/fallible indexing on user, file or GPU data in non-test code. Libraries use `thiserror`, the app `anyhow`; report through `Result`, log with `log::error!/warn!`, and surface user-facing failures in the UI.
 - UI listeners: `cx.safe_listener(...)` (trait `guard::SafeListener`). Other callback bodies (subscriptions, `on_mouse_event`, `on_next_frame`, closures calling `entity.update`) go in `guard::guard("context", || ...)`. Wrap `Render::render`/`RenderOnce::render` bodies in `guard::render("context", || ...)` and `canvas` closures in `guard::guard`. Never call `window.request_animation_frame()` or other paint-phase-only window APIs from event handlers.
 - Performance: views that change often (playback readouts) are their own cached views; a cached view only skips re-rendering if every child view that changes is cached too.

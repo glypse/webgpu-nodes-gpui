@@ -816,10 +816,3 @@ fn a_file_with_negative_or_repeated_variant_values_is_rejected() {
     let model = two_documents(Vec::new(), &[], def);
     assert!(GraphProject::from_json(&model.project().to_json()).is_ok());
 }
-
-#[test]
-fn variant_values_saved_as_floats_still_load() {
-    let json = r#"{"value": 2.0, "label": "Two"}"#;
-    let variant: EnumVariant = serde_json::from_str(json).expect("loads");
-    assert_eq!(variant.value, 2);
-}

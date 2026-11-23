@@ -15,6 +15,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - `src/evaluate.rs`: CPU evaluation of a graph (`evaluate`, `evaluate_with`) for nodes with a `cpu` fn.
 - `src/library.rs`: standard library groups, embedded from `src/library/*.json` via `include_str!` (`SOURCES`, id and text per file), loaded lazily (`LIBRARY`); a broken file is logged and leaves the library empty.
 - `src/library/*.json`: group definitions, one file per group.
+- Library versions: only the latest version of each library entry is stored until Beta; from Beta on, changed library entries keep their previous versions (`OLDER_SOURCES`) so saved projects load them. A ref resolves only to its exact stored id and version.
 - `src/catalog.rs`: add-menu entries (nodes, groups, zones, links) and search.
 - `src/assets/`: project asset metadata (`asset.rs`), bundles beside project JSON (`bundle.rs`), import description (`import.rs`).
 - `src/layout/`: auto-layout via ELK. `compute.rs` (`compute_layout`), `elk.rs` (the only call into `elk-layout`), `geometry.rs` (node sizes and handle offsets), `branches.rs` (splits branching outputs at reroutes).
@@ -39,6 +40,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - `ShaderOptions::uniform_scopes` decides which unlinked input values are read from uniforms instead of written as literals; `hoist_frame_values` reads the root's frame values from a block the runtime writes once a frame.
 - Zone item handle ids are shared between the input and output nodes of a zone.
 - Layout: ELK is pinned exactly (`elk-layout = "=0.12.2"`) because placement changes between releases. `serde_json` has `float_roundtrip` so saved floats round-trip exactly.
+- Gestures: `edit_gesture(first, ..)` steps after the first only mark the gesture pending; `end_gesture()` (also run by `edit`, `batched`, `undo`, `redo`, `saved_marker` and a new gesture) takes the one snapshot. `saved_marker()`/`mark_saved_as()` let a save mark the project as it was when the save began.
 - Format: serde names (`camelCase`, `tag = "kind"`) define the saved file. Changing them breaks existing projects; `hydrate.rs` fills defaults for fields missing from older files.
 - `limits.rs` caps what a file can ask for; keep new expensive features under those caps.
 - Node ids, edge ids and definitions are UUID v4 (`document::new_id`).

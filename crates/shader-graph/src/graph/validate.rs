@@ -53,6 +53,12 @@ pub enum GraphIssue {
         node: String,
         reference: String,
     },
+    /// A standard-library group node names a version this app doesn't ship.
+    UnknownLibraryVersion {
+        definition: String,
+        node: String,
+        reference: String,
+    },
     TooManyDefinitions,
     TooManyNodes,
     InvalidSocketNames {
@@ -540,10 +546,20 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
             }
             if let Some(reference) = node.definition_ref() {
                 if !project.definitions.contains_key(reference) {
-                    issues.push(GraphIssue::MissingDefinition {
-                        definition: key.clone(),
-                        node: node.id.clone(),
-                        reference: reference.to_owned(),
+                    let (definition, node_id, reference) =
+                        (key.clone(), node.id.clone(), reference.to_owned());
+                    issues.push(if is_library_ref(&reference) {
+                        GraphIssue::UnknownLibraryVersion {
+                            definition,
+                            node: node_id,
+                            reference,
+                        }
+                    } else {
+                        GraphIssue::MissingDefinition {
+                            definition,
+                            node: node_id,
+                            reference,
+                        }
                     });
                 }
                 if reference == ROOT_ID {

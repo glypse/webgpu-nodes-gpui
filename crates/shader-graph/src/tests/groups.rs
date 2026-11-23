@@ -184,29 +184,23 @@ fn pruning_does_nothing_inside_a_locked_group() {
 }
 
 #[test]
-fn a_node_on_an_older_library_version_is_outdated() {
+fn a_node_on_a_superseded_library_version_is_outdated() {
     let entry = library_entry("std-aspect-uv");
+    let (lib, old) = library::library_with_older_version(&entry.id);
+    assert_eq!(
+        library::newer_version_label_with(&lib, &old),
+        Some(entry.label.clone())
+    );
+    assert_eq!(
+        library::newer_version_label_with(&lib, &entry.reference),
+        None
+    );
+
     let mut model = GraphModel::default();
     let node = model
         .add_group_instance(&entry.reference, Point::default())
         .expect("adds");
     assert_eq!(model.outdated_library_label(&node), None);
-
-    let old = format!("{}@0000000000000a", entry.id);
-    model.edit(|project| {
-        if let Some(group) = project
-            .root_mut()
-            .node_mut(&node)
-            .and_then(|n| n.group.as_mut())
-        {
-            group.definition_ref = old.clone();
-        }
-    });
-    assert_eq!(
-        model.outdated_library_label(&node),
-        Some(entry.label.clone())
-    );
-
     let user = model.create_group(Point::new(400.0, 0.0)).expect("creates");
     assert_eq!(model.outdated_library_label(&user), None);
 }

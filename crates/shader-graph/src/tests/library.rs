@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::catalog::{EntryKind, add_menu_entries};
-use crate::graph::{GraphModel, GraphProject, Point, ROOT_ID};
+use crate::graph::{GraphIssue, GraphModel, GraphProject, LoadError, Point, ROOT_ID};
 use crate::library::{self, entries, is_library_ref};
 use crate::testing::TestGraph;
 use crate::types::{HandleType, WgslType};
@@ -17,8 +17,8 @@ fn the_library_loads() {
     let ids: HashSet<&str> = entries().iter().map(|e| e.id.as_str()).collect();
     assert_eq!(ids.len(), entries().len(), "library ids are unique");
     let (first, second) = (
-        library::load().expect("loads"),
-        library::load().expect("loads"),
+        library::load().expect("loads").entries,
+        library::load().expect("loads").entries,
     );
     let refs = |loaded: &[library::LibraryEntry]| {
         loaded
@@ -106,13 +106,13 @@ fn library_definitions_are_locked_and_never_saved() {
 }
 
 #[test]
-fn older_versions_resolve_to_the_latest_definition() {
+fn an_exact_stored_older_version_resolves_to_its_own_definition() {
     let entry = library::entries().first().expect("an entry");
+    let (lib, old) = library::library_with_older_version(&entry.id);
     let mut model = GraphModel::default();
     let node = model
         .add_group_instance(&entry.reference, Point::default())
         .expect("adds");
-    let old = format!("{}@0000000000000a", entry.id);
     model.edit(|project| {
         if let Some(group) = project
             .root_mut()
@@ -122,7 +122,50 @@ fn older_versions_resolve_to_the_latest_definition() {
             group.definition_ref = old.clone();
         }
     });
-    assert!(model.project().definitions.contains_key(&old));
+    let mut project = model.project().clone();
+    project.definitions.remove(&old);
+    library::register_with(&mut project, &lib);
+    assert_eq!(
+        project.definitions[&old].label.as_deref(),
+        Some("Older test version")
+    );
+    assert_eq!(
+        project.definitions[&entry.reference].label,
+        entry.definition.label
+    );
+}
+
+#[test]
+fn an_unknown_library_version_is_not_resolved() {
+    let entry = library::entries().first().expect("an entry");
+    let (lib, _) = library::library_with_older_version(&entry.id);
+    let unknown = format!("{}@0000000000000b", entry.id);
+    assert!(library::resolve_with(&lib, &unknown).is_none());
+    assert!(library::entry_for_ref(&unknown).is_none());
+}
+
+#[test]
+fn an_unknown_library_version_fails_to_load() {
+    let entry = library::entries().first().expect("an entry");
+    let mut model = GraphModel::default();
+    model
+        .add_group_instance(&entry.reference, Point::default())
+        .expect("adds");
+    let json = model.project().to_json();
+    let old = format!("{}@0000000000000a", entry.id);
+    let stale = json.replace(&entry.reference, &old);
+    assert_ne!(stale, json, "the saved project names the library group");
+    match GraphProject::from_json(&stale) {
+        Err(LoadError::InvalidGraph(issues)) => assert!(
+            issues.iter().any(|issue| matches!(
+                issue,
+                GraphIssue::UnknownLibraryVersion { reference, .. } if *reference == old
+            )),
+            "{issues:?}"
+        ),
+        other => panic!("expected an unknown library version, got {other:?}"),
+    }
+    assert!(GraphProject::from_json(&json).is_ok());
 }
 
 /// An instance of `reference` with every output linked, summed into the
