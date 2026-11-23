@@ -5,7 +5,7 @@
 	"category": "texture",
 	"section": ["Helpers", "Voronoi"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-noise-coordinates@e40ba35d8573e4af", "std-voronoi-nearest@5bce3e40c872f924", "std-hash@392514c3c7486a42", "std-voronoi-smooth@a1188c4f99e363ce", "std-voronoi-edges@f36b091ddeefc845", "std-voronoi-radius@2148d9fb57176239"],
+	"dependencies": ["std-noise-coordinates@e40ba35d8573e4af", "std-voronoi-nearest@5bce3e40c872f924", "std-hash@392514c3c7486a42", "std-voronoi-smooth@b94def1c5e581ebe", "std-voronoi-edges@9662cff1026ee8cd", "std-voronoi-radius@2148d9fb57176239"],
 	"definition": {
 		"nodes": [
 			{
@@ -472,7 +472,7 @@
 					"y": 531
 				},
 				"group": {
-					"definitionRef": "std-voronoi-smooth@a1188c4f99e363ce",
+					"definitionRef": "std-voronoi-smooth@b94def1c5e581ebe",
 					"locked": true
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
@@ -589,7 +589,7 @@
 					"y": 1382
 				},
 				"group": {
-					"definitionRef": "std-voronoi-edges@f36b091ddeefc845",
+					"definitionRef": "std-voronoi-edges@9662cff1026ee8cd",
 					"locked": true
 				},
 				"frame": "bc0aa380-f579-45b0-b7d5-685bc92efc65"

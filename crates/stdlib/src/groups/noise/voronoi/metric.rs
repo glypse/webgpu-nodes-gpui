@@ -151,6 +151,7 @@ fn voronoi_bisector_body(g: &GroupBuilder<'_>) {
                 .width_switch(a, (int(2.0), int(4.0), int(8.0), int(16.0)))
                 .first();
             let far_length = g.op("dot", (g.op("abs", far), 1.0)).first();
+            let difference = g.op("sub", (far, near)).first();
             g.repeat(
                 patterns,
                 vec![RepeatItem::new("Distance", WgslType::F32, 1e10)],
@@ -173,7 +174,7 @@ fn voronoi_bisector_body(g: &GroupBuilder<'_>) {
                     let sigma = g
                         .op("sub", (g.op("mul", (g.op("to-float", bits), 2.0)), 1.0))
                         .first();
-                    let ahead = compare(g, g.op("dot", (sigma, g.op("sub", (far, near)))), 0.0, ">=");
+                    let ahead = compare(g, g.op("dot", (sigma, difference)), 0.0, ">=");
                     let d = g
                         .op("mul", (g.op("add", (far_length, g.op("dot", (sigma, near)))), 0.5))
                         .first();

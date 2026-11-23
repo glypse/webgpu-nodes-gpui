@@ -222,10 +222,11 @@ fn voronoi_edges_body(g: &GroupBuilder<'_>) {
     // Looking around the point's own cell rather than the position's: the
     // position's neighbourhood would see other points across each cell line,
     // and the edges would jump there.
+    let bisector_count = neighbor_count(g, &p, 2.0);
     let closest_bisector = |point: Ref, offset: Ref| -> Ref {
         let from = g.op("sub", (point, local)).first();
         g.repeat(
-            neighbor_count(g, &p, 2.0),
+            bisector_count,
             vec![RepeatItem::new("Distance", WgslType::F32, 1e10)],
             |body| {
                 let neighbor = g
@@ -351,6 +352,7 @@ fn voronoi_smooth_body(g: &GroupBuilder<'_>) {
             "Every point of the 5×5(×5×5) cells around, blended in as they come:\nthe closer, the more, by the smoothness.",
         ),
         || {
+            let denominator = g.op("add", (1.0, g.op("mul", (3.0, smoothness)))).first();
             g.repeat(
                 neighbor_count(g, &p, 2.0),
                 vec![
@@ -397,7 +399,7 @@ fn voronoi_smooth_body(g: &GroupBuilder<'_>) {
                     let shared = g
                         .op(
                             "div",
-                            (correction, g.op("add", (1.0, g.op("mul", (3.0, smoothness))))),
+                            (correction, denominator),
                         )
                         .first();
                     let color = cell_hash(g, g.op("add", (p.cell, offset)).first(), color_seed);
