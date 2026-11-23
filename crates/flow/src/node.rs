@@ -18,6 +18,8 @@ use crate::theme::FlowTheme;
 #[derive(Default)]
 pub(crate) struct Measure {
     pub nodes: HashMap<Id, NodeMeasure>,
+    /// Bumped whenever a measurement changes size, place or handle set.
+    pub generation: u64,
 }
 
 pub(crate) struct NodeMeasure {
@@ -186,10 +188,6 @@ impl Handle {
         self
     }
 
-    pub fn state(&self) -> HandleState {
-        self.state
-    }
-
     /// Skips the default dot, for handles that draw their own shape.
     pub fn custom_look(mut self) -> Self {
         self.custom_look = true;
@@ -248,7 +246,8 @@ impl RenderOnce for Handle {
         let measurer = canvas(
             move |bounds, _, cx| { guard::guard("node measure", || {
                 let mut m = measure.borrow_mut();
-                let Some(entry) = m.nodes.get_mut(&measure_node) else {
+                let Measure { nodes, generation } = &mut *m;
+                let Some(entry) = nodes.get_mut(&measure_node) else {
                     return;
                 };
                 let moved = entry.previous.get(&measure_key).is_none_or(|p| {
@@ -280,12 +279,15 @@ impl RenderOnce for Handle {
                         connectable_end: end,
                     },
                 );
+                if moved {
+                    *generation += 1;
+                }
                 drop(m);
                 if moved {
                     flow.update(cx, |_, cx| cx.notify()).ok();
                 }
             }); },
-            |_, _, _, _| { guard::guard("node canvas", || {}); },
+            |_, _, _, _| {},
         )
         .absolute()
         .size_full();
@@ -294,7 +296,7 @@ impl RenderOnce for Handle {
         let kind = self.kind;
         let id = self.id.clone();
         let can_start = connectable && start;
-        base.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+        base.on_mouse_down(MouseButton::Left, move |event, window, cx| { guard::guard("flow handle", || {
             cx.stop_propagation();
             if !can_start {
                 return;
@@ -304,7 +306,7 @@ impl RenderOnce for Handle {
             down_flow
                 .update(cx, |flow, cx| flow.start_connection(node, id, kind, &event, window, cx))
                 .ok();
-        })
+        }); })
         .child(measurer)
     })
     }

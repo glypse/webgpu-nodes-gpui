@@ -138,7 +138,7 @@ fn main() {
             },
             |_, cx| cx.new(Demo::new),
         )
-        .unwrap();
+        .expect("open the demo window");
         cx.activate(true);
     });
 }

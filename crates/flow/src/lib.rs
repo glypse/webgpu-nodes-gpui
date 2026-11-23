@@ -27,7 +27,7 @@ pub use flow::{
 pub use geometry::{Extent, Rect, Viewport, Xy};
 pub use model::{
     Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeColor, EdgeKind, EdgeTag,
-    EdgeLabel, EdgeStyle, HandleType, Id, Node, NodeChange, NodeKind, add_edge,
+    EdgeLabel, EdgeStyle, HandleType, Id, Node, NodeChange, add_edge,
     apply_edge_changes, apply_node_changes, connected_edges, edge_id, incomers, outgoers,
     reconnect_edge,
 };

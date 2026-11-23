@@ -1,6 +1,7 @@
 //! The controlled data model: nodes, edges, connections and the changes the
 //! flow reports (`NodeChange`/`EdgeChange`, applied with `apply_*_changes`).
 
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui::{AnyElement, App, Hsla, SharedString, Window};
@@ -45,20 +46,10 @@ pub enum ConnectionMode {
 
 pub type NodeRender = Rc<dyn Fn(&NodeProps, &mut Window, &mut App) -> AnyElement>;
 
-/// Which of the built-in node bodies to draw when a node has no renderer.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum NodeKind {
-    #[default]
-    Default,
-    Input,
-    Output,
-}
-
 #[derive(Clone)]
 pub struct Node {
     pub id: Id,
     pub position: Xy,
-    pub kind: NodeKind,
     pub label: Option<SharedString>,
     /// Fixed size in flow units; the measured size is used otherwise.
     pub width: Option<f32>,
@@ -83,7 +74,6 @@ impl Node {
         Self {
             id: id.into(),
             position,
-            kind: NodeKind::Default,
             label: None,
             width: None,
             height: None,
@@ -111,11 +101,6 @@ impl Node {
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
-        self
-    }
-
-    pub fn kind(mut self, kind: NodeKind) -> Self {
-        self.kind = kind;
         self
     }
 
@@ -279,29 +264,23 @@ impl Edge {
         self
     }
 
-    pub fn style(mut self, style: EdgeStyle) -> Self {
-        self.style = Some(style);
-        self
-    }
-
-    pub fn connection(&self) -> Connection {
-        Connection {
-            source: self.source.clone(),
-            source_handle: self.source_handle.clone(),
-            target: self.target.clone(),
-            target_handle: self.target_handle.clone(),
-        }
-    }
 }
 
-/// The default edge id, as `getEdgeId`.
+/// The default edge id for a connection. Each part is length-prefixed (or `-`
+/// when absent), so no two distinct connections share an id.
 pub fn edge_id(c: &Connection) -> Id {
+    fn part(s: Option<&str>) -> String {
+        match s {
+            Some(s) => format!("{}:{s}", s.len()),
+            None => "-".into(),
+        }
+    }
     format!(
-        "xy-edge__{}{}-{}{}",
-        c.source,
-        c.source_handle.as_ref().map_or("", |s| s.as_str()),
-        c.target,
-        c.target_handle.as_ref().map_or("", |s| s.as_str())
+        "{}{}{}{}",
+        part(Some(c.source.as_ref())),
+        part(c.source_handle.as_deref()),
+        part(Some(c.target.as_ref())),
+        part(c.target_handle.as_deref()),
     )
     .into()
 }
@@ -309,7 +288,6 @@ pub fn edge_id(c: &Connection) -> Id {
 #[derive(Clone)]
 pub enum NodeChange {
     Position { id: Id, position: Option<Xy>, dragging: Option<bool> },
-    Dimensions { id: Id, width: f32, height: f32 },
     Select { id: Id, selected: bool },
     Remove { id: Id },
     Add { node: Node },
@@ -324,19 +302,48 @@ pub enum EdgeChange {
     Replace { id: Id, edge: Edge },
 }
 
+/// First position of each id. Changes address nodes by id, so this lets them
+/// avoid a scan per change.
+fn node_index(nodes: &[Node]) -> HashMap<Id, usize> {
+    let mut index = HashMap::with_capacity(nodes.len());
+    for (i, n) in nodes.iter().enumerate() {
+        index.entry(n.id.clone()).or_insert(i);
+    }
+    index
+}
+
+fn edge_index(edges: &[Edge]) -> HashMap<Id, usize> {
+    let mut index = HashMap::with_capacity(edges.len());
+    for (i, e) in edges.iter().enumerate() {
+        index.entry(e.id.clone()).or_insert(i);
+    }
+    index
+}
+
 pub fn apply_node_changes(changes: &[NodeChange], nodes: Vec<Node>) -> Vec<Node> {
     let mut nodes = nodes;
+    let mut index = node_index(&nodes);
     for change in changes {
         match change {
-            NodeChange::Add { node } => nodes.push(node.clone()),
-            NodeChange::Remove { id } => nodes.retain(|n| n.id != *id),
+            NodeChange::Add { node } => {
+                index.entry(node.id.clone()).or_insert(nodes.len());
+                nodes.push(node.clone());
+            }
+            NodeChange::Remove { id } => {
+                nodes.retain(|n| n.id != *id);
+                index = node_index(&nodes);
+            }
             NodeChange::Replace { id, node } => {
-                if let Some(n) = nodes.iter_mut().find(|n| n.id == *id) {
-                    *n = node.clone();
+                if let Some(&i) = index.get(id) {
+                    nodes[i] = node.clone();
+                    if node.id != *id {
+                        index = node_index(&nodes);
+                    }
                 }
             }
             NodeChange::Position { id, position, dragging } => {
-                if let Some(n) = nodes.iter_mut().find(|n| n.id == *id) {
+                if let Some(&i) = index.get(id) {
+                    let n = &mut nodes[i];
                     if let Some(p) = position {
                         n.position = *p;
                     }
@@ -345,17 +352,9 @@ pub fn apply_node_changes(changes: &[NodeChange], nodes: Vec<Node>) -> Vec<Node>
                     }
                 }
             }
-            NodeChange::Dimensions { id, width, height } => {
-                if let Some(n) = nodes.iter_mut().find(|n| n.id == *id)
-                    && (n.width.is_some() || n.height.is_some())
-                {
-                    n.width = n.width.map(|_| *width);
-                    n.height = n.height.map(|_| *height);
-                }
-            }
             NodeChange::Select { id, selected } => {
-                if let Some(n) = nodes.iter_mut().find(|n| n.id == *id) {
-                    n.selected = *selected;
+                if let Some(&i) = index.get(id) {
+                    nodes[i].selected = *selected;
                 }
             }
         }
@@ -365,18 +364,28 @@ pub fn apply_node_changes(changes: &[NodeChange], nodes: Vec<Node>) -> Vec<Node>
 
 pub fn apply_edge_changes(changes: &[EdgeChange], edges: Vec<Edge>) -> Vec<Edge> {
     let mut edges = edges;
+    let mut index = edge_index(&edges);
     for change in changes {
         match change {
-            EdgeChange::Add { edge } => edges.push(edge.clone()),
-            EdgeChange::Remove { id } => edges.retain(|e| e.id != *id),
+            EdgeChange::Add { edge } => {
+                index.entry(edge.id.clone()).or_insert(edges.len());
+                edges.push(edge.clone());
+            }
+            EdgeChange::Remove { id } => {
+                edges.retain(|e| e.id != *id);
+                index = edge_index(&edges);
+            }
             EdgeChange::Replace { id, edge } => {
-                if let Some(e) = edges.iter_mut().find(|e| e.id == *id) {
-                    *e = edge.clone();
+                if let Some(&i) = index.get(id) {
+                    edges[i] = edge.clone();
+                    if edge.id != *id {
+                        index = edge_index(&edges);
+                    }
                 }
             }
             EdgeChange::Select { id, selected } => {
-                if let Some(e) = edges.iter_mut().find(|e| e.id == *id) {
-                    e.selected = *selected;
+                if let Some(&i) = index.get(id) {
+                    edges[i].selected = *selected;
                 }
             }
         }
@@ -404,24 +413,18 @@ pub fn add_edge(connection: &Connection, mut edges: Vec<Edge>) -> Vec<Edge> {
 
 /// Edges with an end on any of the given nodes.
 pub fn connected_edges<'a>(node_ids: &[Id], edges: &'a [Edge]) -> Vec<&'a Edge> {
-    edges
-        .iter()
-        .filter(|e| node_ids.contains(&e.source) || node_ids.contains(&e.target))
-        .collect()
+    let ids: HashSet<&Id> = node_ids.iter().collect();
+    edges.iter().filter(|e| ids.contains(&e.source) || ids.contains(&e.target)).collect()
 }
 
 pub fn incomers<'a>(id: &Id, nodes: &'a [Node], edges: &[Edge]) -> Vec<&'a Node> {
-    nodes
-        .iter()
-        .filter(|n| edges.iter().any(|e| e.source == n.id && e.target == *id))
-        .collect()
+    let sources: HashSet<&Id> = edges.iter().filter(|e| e.target == *id).map(|e| &e.source).collect();
+    nodes.iter().filter(|n| sources.contains(&n.id)).collect()
 }
 
 pub fn outgoers<'a>(id: &Id, nodes: &'a [Node], edges: &[Edge]) -> Vec<&'a Node> {
-    nodes
-        .iter()
-        .filter(|n| edges.iter().any(|e| e.target == n.id && e.source == *id))
-        .collect()
+    let targets: HashSet<&Id> = edges.iter().filter(|e| e.source == *id).map(|e| &e.target).collect();
+    nodes.iter().filter(|n| targets.contains(&n.id)).collect()
 }
 
 /// Moves one end of an edge to a new connection, as `reconnectEdge`.
@@ -502,8 +505,19 @@ mod tests {
     fn add_edge_skips_duplicates() {
         let edges = add_edge(&conn("a", "b"), Vec::new());
         assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].id.as_ref(), "xy-edge__aout-bin");
         assert_eq!(add_edge(&conn("a", "b"), edges).len(), 1);
+    }
+
+    #[test]
+    fn edge_ids_do_not_collide_across_part_boundaries() {
+        let split = |source: &str, handle: &str, target: &str| Connection {
+            source: source.into(),
+            source_handle: Some(handle.into()),
+            target: target.into(),
+            target_handle: None,
+        };
+        assert_ne!(edge_id(&split("a", "bc", "d")), edge_id(&split("ab", "c", "d")));
+        assert_ne!(edge_id(&split("a", "-", "d")), edge_id(&split("a", "", "d")));
     }
 
     #[test]

@@ -77,10 +77,6 @@ impl Rect {
         x * y
     }
 
-    pub fn area(&self) -> f32 {
-        self.width * self.height
-    }
-
     pub fn inflate(&self, by: f32) -> Rect {
         Rect::new(self.x - by, self.y - by, self.width + 2.0 * by, self.height + 2.0 * by)
     }
@@ -112,11 +108,6 @@ impl Viewport {
 
     pub fn to_flow(&self, p: Xy) -> Xy {
         Xy::new((p.x - self.x) / self.zoom, (p.y - self.y) / self.zoom)
-    }
-
-    pub fn to_flow_snapped(&self, p: Xy, grid: Option<(f32, f32)>) -> Xy {
-        let flow = self.to_flow(p);
-        grid.map_or(flow, |g| snap_position(flow, g))
     }
 
     /// The flow-space rectangle visible in a canvas of the given size.

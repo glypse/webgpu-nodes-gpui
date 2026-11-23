@@ -91,12 +91,7 @@ pub fn edge_ends(
         return None;
     }
     let s = find_handle(source, HandleType::Source, source_handle, ConnectionMode::Strict)?;
-    let t = find_handle(target, HandleType::Target, target_handle, mode)
-        .or_else(|| {
-            (mode == ConnectionMode::Loose)
-                .then(|| find_handle(target, HandleType::Source, target_handle, mode))
-                .flatten()
-        })?;
+    let t = find_handle(target, HandleType::Target, target_handle, mode)?;
     Some(EdgeEnds {
         source: handle_position(source, Some(s), false),
         source_position: s.position,
@@ -115,8 +110,14 @@ pub struct Near {
 
 const ADDITIONAL_DISTANCE: f32 = 250.0;
 
-/// The handle closest to `at` within `radius`, skipping `from`; on a tie the
-/// one of the opposite type wins.
+/// The handle being dragged from, which is never a candidate for itself.
+fn is_origin(from: (&Id, HandleType, Option<&Id>), node: &Id, handle: &HandleBounds) -> bool {
+    *from.0 == *node && from.1 == handle.kind && from.2 == handle.id.as_ref()
+}
+
+/// The handle closest to `at` within `radius`. Among equal distances the
+/// opposite type wins, then the lower node and handle ids, so the result does
+/// not depend on the map's iteration order.
 pub fn closest_handle(
     at: Xy,
     radius: f32,
@@ -125,54 +126,45 @@ pub fn closest_handle(
 ) -> Option<Near> {
     let reach = radius + ADDITIONAL_DISTANCE;
     let area = Rect::new(at.x - reach, at.y - reach, reach * 2.0, reach * 2.0);
-    let mut best: Vec<Near> = Vec::new();
-    let mut min = f32::INFINITY;
-    for node in lookup.values() {
-        if node.rect().overlap_area(&area) <= 0.0 {
-            continue;
-        }
-        for handle in &node.handles {
-            if *from.0 == node.id && from.1 == handle.kind && from.2 == handle.id.as_ref() {
-                continue;
-            }
+    let wanted = from.1.opposite();
+    lookup
+        .values()
+        .filter(|node| node.rect().overlap_area(&area) > 0.0)
+        .flat_map(|node| node.handles.iter().map(move |h| (node, h)))
+        .filter(|(node, h)| !is_origin(from, &node.id, h))
+        .filter_map(|(node, handle)| {
             let center = handle_position(node, Some(handle), true);
             let d = center.distance(at);
-            if d > radius {
-                continue;
-            }
-            let near = Near { node: node.id.clone(), handle: handle.clone(), center };
-            if d < min {
-                min = d;
-                best = vec![near];
-            } else if d == min {
-                best.push(near);
-            }
-        }
-    }
-    if best.len() > 1 {
-        let wanted = from.1.opposite();
-        if let Some(i) = best.iter().position(|n| n.handle.kind == wanted) {
-            return Some(best.swap_remove(i));
-        }
-    }
-    best.into_iter().next()
-}
-
-/// The handle whose box contains `at`, preferred over a merely close one.
-pub fn handle_under(at: Xy, lookup: &Lookup, from: (&Id, HandleType, Option<&Id>)) -> Option<Near> {
-    lookup.values().find_map(|node| {
-        node.handles.iter().find_map(|h| {
-            if *from.0 == node.id && from.1 == h.kind && from.2 == h.id.as_ref() {
-                return None;
-            }
-            let rect = Rect::new(node.position.x + h.x, node.position.y + h.y, h.width, h.height);
-            rect.contains(at).then(|| Near {
-                node: node.id.clone(),
-                handle: h.clone(),
-                center: rect.center(),
+            (d <= radius).then(|| {
+                let near = Near { node: node.id.clone(), handle: handle.clone(), center };
+                (d, handle.kind != wanted, node.id.as_ref(), handle.id.as_deref(), near)
             })
         })
-    })
+        .min_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(b.2))
+                .then_with(|| a.3.cmp(&b.3))
+        })
+        .map(|(_, _, _, _, near)| near)
+}
+
+/// The handle whose box contains `at`, preferred over a merely close one. If
+/// several boxes contain it, the lowest node and handle ids win.
+pub fn handle_under(at: Xy, lookup: &Lookup, from: (&Id, HandleType, Option<&Id>)) -> Option<Near> {
+    lookup
+        .values()
+        .flat_map(|node| node.handles.iter().map(move |h| (node, h)))
+        .filter(|(node, h)| !is_origin(from, &node.id, h))
+        .filter_map(|(node, h)| {
+            let rect = Rect::new(node.position.x + h.x, node.position.y + h.y, h.width, h.height);
+            rect.contains(at).then(|| {
+                let near = Near { node: node.id.clone(), handle: h.clone(), center: rect.center() };
+                (node.id.as_ref(), h.id.as_deref(), near)
+            })
+        })
+        .min_by(|a, b| a.0.cmp(b.0).then_with(|| a.1.cmp(&b.1)))
+        .map(|(_, _, near)| near)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -346,5 +338,19 @@ mod tests {
         let out: Id = "out".into();
         let hit = handle_under(Xy::new(297.0, 126.0), &l, (&a, HandleType::Source, Some(&out)));
         assert_eq!(hit.unwrap().handle.id.as_ref().map(|s| s.as_str()), Some("in"));
+    }
+
+    #[test]
+    fn handle_under_breaks_overlaps_by_id() {
+        let mut l = lookup();
+        // A second node whose target handle sits on the same spot as b's.
+        let c = node("c", 300.0, 100.0, vec![handle("in", HandleType::Target, Position::Left, -4.0, 21.0)]);
+        l.insert(c.id.clone(), c);
+        let a: Id = "a".into();
+        let out: Id = "out".into();
+        for _ in 0..8 {
+            let hit = handle_under(Xy::new(297.0, 126.0), &l, (&a, HandleType::Source, Some(&out))).unwrap();
+            assert_eq!(hit.node.as_ref(), "b");
+        }
     }
 }

@@ -14,20 +14,20 @@ use gpui::{
 
 use crate::background::BackgroundOptions;
 use crate::edge_path::{
-    DEFAULT_CURVATURE, EdgePath, PathParams, Position, StepOptions, bezier_path, flatten,
-    smooth_step_path, straight_path,
+    DEFAULT_CURVATURE, EdgePath, PathParams, Position, Segment, StepOptions, bezier_path,
+    flatten, midpoint_angle, smooth_step_path, straight_path,
 };
 use crate::geometry::{
-    Extent, Rect, Viewport, Xy, auto_pan, bounds_of, clamp_position, constrain_viewport,
+    Extent, Rect, Viewport, Xy, auto_pan, bounds_of, clamp, clamp_position, constrain_viewport,
     snap_position, viewport_for_bounds, wheel_exponent,
 };
 use crate::lookup::{
-    EdgeEnds, InternalNode, Lookup, closest_handle, edge_ends, find_handle, handle_under,
+    EdgeEnds, InternalNode, Lookup, Near, closest_handle, edge_ends, find_handle, handle_under,
     validate,
 };
 use crate::model::{
-    Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeKind, EdgeStyle,
-    HandleBounds, HandleType, Id, Node, NodeChange, NodeKind,
+    Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeKind, EdgeStyle, EdgeTag,
+    HandleBounds, HandleType, Id, Node, NodeChange,
 };
 use crate::node::{Measure, NodeConnections, NodeMeasure, NodeProps};
 use crate::panels::{ControlsOptions, MiniMapOptions, Panel};
@@ -293,12 +293,31 @@ struct Anim {
     duration: Duration,
 }
 
+/// The geometry of one drawn edge. `index` is its position in `Flow::edges` at
+/// build time; users of it check the id, since the edge list may have changed since.
 pub(crate) struct EdgeGeom {
     pub id: Id,
     pub index: usize,
+    /// Stacking key: `z_index` plus the selection elevation.
+    pub z: i32,
     pub ends: EdgeEnds,
-    pub path: EdgePath,
+    pub segments: Rc<[Segment]>,
+    pub label: Xy,
+    /// Direction of the arrowhead at the label, in radians.
+    pub arrow_angle: f32,
+    /// Polyline for hit testing and stroke crossings, in flow units.
     pub flat: Vec<Xy>,
+    pub bounds: Rect,
+}
+
+/// Options the lookup and edge geometry read. Owners assign these fields
+/// directly, so they are compared on each render rather than tracked.
+#[derive(Clone, Copy, PartialEq)]
+struct GeometryOptions {
+    connection_mode: ConnectionMode,
+    nodes_connectable: bool,
+    elevate_nodes: bool,
+    elevate_edges: bool,
 }
 
 pub struct Flow {
@@ -311,6 +330,10 @@ pub struct Flow {
     pub(crate) measure: Rc<RefCell<Measure>>,
     pub(crate) lookup: Lookup,
     pub(crate) edge_geoms: Vec<EdgeGeom>,
+    connections: HashMap<Id, Rc<NodeConnections>>,
+    /// Set when nodes or edges are replaced; the lookup is rebuilt on the next render.
+    geometry_dirty: bool,
+    geometry_snapshot: Option<(GeometryOptions, u64)>,
     drag: Drag,
     connection_drag: Option<ConnectionDrag>,
     pub(crate) connection: Option<ConnectionState>,
@@ -352,6 +375,9 @@ impl Flow {
             measure: Rc::default(),
             lookup: Lookup::new(),
             edge_geoms: Vec::new(),
+            connections: HashMap::new(),
+            geometry_dirty: true,
+            geometry_snapshot: None,
             drag: Drag::None,
             connection_drag: None,
             connection: None,
@@ -393,11 +419,16 @@ impl Flow {
         if let Drag::Nodes(drag) | Drag::Grab(drag) = &self.drag
             && drag.started
         {
+            let dragged: HashSet<&Id> = drag.items.iter().map(|i| &i.id).collect();
+            let current: HashMap<&Id, Xy> = self
+                .nodes
+                .iter()
+                .filter(|n| dragged.contains(&n.id))
+                .map(|n| (&n.id, n.position))
+                .collect();
             for node in &mut nodes {
-                if let Some(current) = self.nodes.iter().find(|n| n.id == node.id)
-                    && drag.items.iter().any(|i| i.id == node.id)
-                {
-                    node.position = current.position;
+                if let Some(p) = current.get(&node.id) {
+                    node.position = *p;
                     node.dragging = true;
                 }
             }
@@ -405,11 +436,14 @@ impl Flow {
         let alive: HashSet<&Id> = nodes.iter().map(|n| &n.id).collect();
         self.measure.borrow_mut().nodes.retain(|id, _| alive.contains(id));
         self.nodes = nodes;
+        self.geometry_dirty = true;
         cx.notify();
     }
 
     pub fn set_edges(&mut self, edges: Vec<Edge>, cx: &mut Context<Self>) {
+        self.connections = connections_by_node(&edges);
         self.edges = edges;
+        self.geometry_dirty = true;
         cx.notify();
     }
 
@@ -424,6 +458,10 @@ impl Flow {
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport, duration: Option<Duration>, cx: &mut Context<Self>) {
+        let viewport = Viewport {
+            zoom: clamp(viewport.zoom, self.options.min_zoom, self.options.max_zoom),
+            ..viewport
+        };
         let (w, h) = self.size();
         let viewport = if w > 0.0 {
             constrain_viewport(viewport, w, h, &self.options.translate_extent)
@@ -547,19 +585,6 @@ impl Flow {
         cx.notify();
     }
 
-    pub fn fit_bounds(&mut self, bounds: Rect, options: FitViewOptions, cx: &mut Context<Self>) {
-        let (w, h) = self.size();
-        let vp = viewport_for_bounds(
-            bounds,
-            w,
-            h,
-            options.min_zoom.unwrap_or(self.options.min_zoom),
-            options.max_zoom.unwrap_or(self.options.max_zoom),
-            options.padding,
-        );
-        self.set_viewport(vp, options.duration, cx);
-    }
-
     pub fn zoom_by(&mut self, factor: f32, duration: Option<Duration>, cx: &mut Context<Self>) {
         let (w, h) = self.size();
         let target = self.anim.as_ref().map_or(self.viewport, |a| a.to);
@@ -575,21 +600,9 @@ impl Flow {
         self.zoom_by(1.0 / 1.2, Some(Duration::from_millis(200)), cx);
     }
 
-    /// Centres the view on a flow point.
-    pub fn set_center(&mut self, center: Xy, zoom: Option<f32>, duration: Option<Duration>, cx: &mut Context<Self>) {
-        let (w, h) = self.size();
-        let zoom = zoom.unwrap_or(self.viewport.zoom);
-        let vp = Viewport { x: w / 2.0 - center.x * zoom, y: h / 2.0 - center.y * zoom, zoom };
-        self.set_viewport(vp, duration, cx);
-    }
-
     /// Window pixels to flow units.
     pub fn screen_to_flow(&self, p: Point<Pixels>) -> Xy {
         self.viewport.to_flow(self.local(p))
-    }
-
-    pub fn screen_to_flow_snapped(&self, p: Point<Pixels>) -> Xy {
-        self.viewport.to_flow_snapped(self.local(p), self.options.snap_grid)
     }
 
     pub fn flow_to_screen(&self, p: Xy) -> Point<Pixels> {
@@ -656,10 +669,6 @@ impl Flow {
         self.apply_selection(|n| nodes.contains(n), |e| edges.contains(e), cx);
     }
 
-    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
-        self.apply_selection(|_| false, |_| false, cx);
-    }
-
     fn apply_selection(
         &mut self,
         node: impl Fn(&Id) -> bool,
@@ -723,7 +732,7 @@ impl Flow {
     fn rebuild_lookup(&mut self, cx: &mut Context<Self>) {
         let measure = self.measure.borrow();
         let mut lookup = Lookup::with_capacity(self.nodes.len());
-        for (z, node) in self.nodes.iter().enumerate() {
+        for node in &self.nodes {
             let measured = measure.nodes.get(&node.id);
             let size = match (node.width, node.height, measured) {
                 (Some(w), Some(h), _) => Some((w, h)),
@@ -771,7 +780,7 @@ impl Flow {
                     size,
                     handles,
                     connectable: self.node_connectable(node),
-                    z: node.z_index + elevated + (z as i32).min(0),
+                    z: node.z_index + elevated,
                 },
             );
         }
@@ -791,56 +800,86 @@ impl Flow {
         }
     }
 
-    fn rebuild_edges(&mut self) {
-        let mut geoms = Vec::new();
-        for (index, edge) in self.edges.iter().enumerate() {
-            if edge.hidden {
-                continue;
-            }
-            let (Some(source), Some(target)) = (self.lookup.get(&edge.source), self.lookup.get(&edge.target)) else {
-                continue;
-            };
-            let Some(ends) = edge_ends(
-                source,
-                edge.source_handle.as_ref(),
-                target,
-                edge.target_handle.as_ref(),
-                self.options.connection_mode,
-            ) else {
-                continue;
-            };
-            let path = edge_geometry(edge.kind, &ends);
-            let flat = match &edge.tag {
-                Some(tag) => {
-                    let y = ends.target.y + tag.offset;
-                    vec![Xy::new(ends.target.x - TAG_STUB, y), Xy::new(ends.target.x - 4.0, y), ends.target]
-                }
-                None => flatten(&path.segments, 24),
-            };
-            geoms.push(EdgeGeom { id: edge.id.clone(), index, ends, path, flat });
+    /// Rebuilds the lookup and edge geometry when their inputs changed: the
+    /// nodes or edges, the options they read, or a measurement.
+    fn refresh_geometry(&mut self, cx: &mut Context<Self>) {
+        let options = GeometryOptions {
+            connection_mode: self.options.connection_mode,
+            nodes_connectable: self.options.nodes_connectable,
+            elevate_nodes: self.options.elevate_nodes_on_select,
+            elevate_edges: self.options.elevate_edges_on_select,
+        };
+        let (generation, handles_removed) = {
+            let m = self.measure.borrow();
+            (m.generation, m.nodes.values().any(|n| n.previous.len() > n.handles.len()))
+        };
+        // A handle that stopped being painted leaves no measurement that bumps
+        // the generation, so a shrinking handle set is checked for directly.
+        if !self.geometry_dirty && !handles_removed && self.geometry_snapshot == Some((options, generation)) {
+            return;
         }
-        let elevate = self.options.elevate_edges_on_select;
-        geoms.sort_by_key(|g| {
-            let e = &self.edges[g.index];
-            e.z_index + if elevate && e.selected { 1000 } else { 0 }
-        });
-        self.edge_geoms = geoms;
+        self.geometry_dirty = false;
+        self.geometry_snapshot = Some((options, generation));
+        self.rebuild_lookup(cx);
+        self.rebuild_edges();
     }
 
-    fn connections_by_node(&self) -> HashMap<Id, Rc<NodeConnections>> {
-        let mut map: HashMap<Id, NodeConnections> = HashMap::new();
-        for e in &self.edges {
-            map.entry(e.source.clone()).or_default().outgoing.push((e.source_handle.clone(), e.id.clone()));
-            map.entry(e.target.clone()).or_default().incoming.push((e.target_handle.clone(), e.id.clone()));
-        }
-        map.into_iter().map(|(k, v)| (k, Rc::new(v))).collect()
+    /// The edge a geometry entry was built from, if the list still holds it there.
+    fn edge_of(&self, g: &EdgeGeom) -> Option<(usize, &Edge)> {
+        self.edges.get(g.index).filter(|e| e.id == g.id).map(|e| (g.index, e))
+    }
+
+    fn rebuild_edges(&mut self) {
+        let elevate = self.options.elevate_edges_on_select;
+        let mut geoms: Vec<EdgeGeom> = self
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.hidden)
+            .filter_map(|(index, edge)| {
+                let source = self.lookup.get(&edge.source)?;
+                let target = self.lookup.get(&edge.target)?;
+                let ends = edge_ends(
+                    source,
+                    edge.source_handle.as_ref(),
+                    target,
+                    edge.target_handle.as_ref(),
+                    self.options.connection_mode,
+                )?;
+                let path = path_for(edge.kind, &ends);
+                let flat = match &edge.tag {
+                    Some(tag) => target_stub(ends.target, tag.offset).to_vec(),
+                    None => flatten(&path.segments, 24),
+                };
+                let bounds = points_bounds(&flat);
+                let arrow_angle = match path.segments.get(1) {
+                    Some(Segment::Cubic(c1, c2, t)) => midpoint_angle(ends.source, *c1, *c2, *t),
+                    _ => (ends.target.y - ends.source.y).atan2(ends.target.x - ends.source.x),
+                };
+                Some(EdgeGeom {
+                    id: edge.id.clone(),
+                    index,
+                    z: edge.z_index + if elevate && edge.selected { 1000 } else { 0 },
+                    ends,
+                    segments: path.segments.into(),
+                    label: path.label,
+                    arrow_angle,
+                    flat,
+                    bounds,
+                })
+            })
+            .collect();
+        geoms.sort_by_key(|g| g.z);
+        self.edge_geoms = geoms;
     }
 
     fn edge_at(&self, flow: Xy) -> Option<usize> {
         self.edge_geoms.iter().rev().find_map(|g| {
-            let e = &self.edges[g.index];
+            let (index, e) = self.edge_of(g)?;
             let reach = e.interaction_width / 2.0;
-            (crate::edge_path::distance_to_polyline(flow, &g.flat) <= reach).then_some(g.index)
+            let hit = g.bounds.inflate(reach).contains(flow)
+                && crate::edge_path::distance_to_polyline(flow, &g.flat) <= reach;
+            hit.then_some(index)
         })
     }
 
@@ -851,14 +890,14 @@ impl Flow {
         }
         let r = self.options.reconnect_radius;
         self.edge_geoms.iter().rev().find_map(|g| {
-            let e = &self.edges[g.index];
+            let (index, e) = self.edge_of(g)?;
             if !e.reconnectable.unwrap_or(true) || !e.selected {
                 return None;
             }
             if g.ends.source.distance(flow) <= r {
-                Some((g.index, HandleType::Source))
+                Some((index, HandleType::Source))
             } else if g.ends.target.distance(flow) <= r {
-                Some((g.index, HandleType::Target))
+                Some((index, HandleType::Target))
             } else {
                 None
             }
@@ -972,6 +1011,13 @@ impl Flow {
         cx.notify();
     }
 
+    /// The handle a connection at `at` lands on: one whose box holds the point,
+    /// otherwise the closest within `connection_radius`.
+    fn resolve_target(&self, at: Xy, from: (&Id, HandleType, Option<&Id>)) -> Option<Near> {
+        handle_under(at, &self.lookup, from)
+            .or_else(|| closest_handle(at, self.options.connection_radius, &self.lookup, from))
+    }
+
     fn focus_flow(&self, window: &mut Window, cx: &mut App) {
         if !self.focus.contains_focused(window, cx) {
             window.focus(&self.focus, cx);
@@ -1010,16 +1056,9 @@ impl Flow {
         let from_pos = crate::lookup::handle_position(from_internal, Some(from_bounds), true);
         let from_position = from_bounds.position;
 
-        let target = handle_under(flow, &self.lookup, from_key)
-            .or_else(|| closest_handle(flow, self.options.connection_radius, &self.lookup, from_key));
+        let target = self.resolve_target(flow, from_key);
         let validity = target.as_ref().map(|near| {
-            let is_valid = self.options.is_valid_connection.clone();
-            validate(
-                from_key,
-                near,
-                self.options.connection_mode,
-                is_valid.as_deref().map(|f| f as &dyn Fn(&Connection) -> bool),
-            )
+            validate(from_key, near, self.options.connection_mode, self.options.is_valid_connection.as_deref())
         });
         let valid = validity.as_ref().map(|v| v.valid);
         let (to, to_position, to_node, to_handle) = match (&target, valid) {
@@ -1070,16 +1109,9 @@ impl Flow {
         let Some(state) = state else { return };
         let flow = self.viewport.to_flow(local);
         let from_key = (&drag.from_node, drag.from_type, drag.from_handle.as_ref());
-        let target = handle_under(flow, &self.lookup, from_key)
-            .or_else(|| closest_handle(flow, self.options.connection_radius, &self.lookup, from_key));
+        let target = self.resolve_target(flow, from_key);
         let verdict = target.as_ref().map(|near| {
-            let is_valid = self.options.is_valid_connection.clone();
-            validate(
-                from_key,
-                near,
-                self.options.connection_mode,
-                is_valid.as_deref().map(|f| f as &dyn Fn(&Connection) -> bool),
-            )
+            validate(from_key, near, self.options.connection_mode, self.options.is_valid_connection.as_deref())
         });
         if let Some(v) = verdict
             && v.valid
@@ -1116,9 +1148,7 @@ impl Flow {
         };
         let from_key = (&drag.from_node, drag.from_type, drag.from_handle.as_ref());
         let flow = self.viewport.to_flow(local);
-        let near = handle_under(flow, &self.lookup, from_key)
-            .or_else(|| closest_handle(flow, self.options.connection_radius, &self.lookup, from_key))
-            .is_some();
+        let near = self.resolve_target(flow, from_key).is_some();
         if !near {
             return false;
         }
@@ -1455,12 +1485,14 @@ impl Flow {
         let mut changes = Vec::new();
         let ids: Vec<Id> = d.items.iter().map(|i| i.id.clone()).collect();
         let clicked = d.clicked.clone();
-        let positions: Vec<(Id, Xy)> = d
+        let index: HashMap<&Id, usize> = self.nodes.iter().enumerate().map(|(i, n)| (&n.id, i)).collect();
+        let positions: Vec<(Id, Option<usize>, Xy)> = d
             .items
             .iter()
             .map(|item| {
+                let i = index.get(&item.id).copied();
                 let mut p = item.start + delta + snap_offset;
-                let node = self.nodes.iter().find(|n| n.id == item.id);
+                let node = i.and_then(|i| self.nodes.get(i));
                 let extent = node.and_then(|n| n.extent).unwrap_or(self.options.node_extent);
                 let (w, h) = self.lookup.get(&item.id).and_then(|i| i.size).unwrap_or((0.0, 0.0));
                 let origin = node.map_or((0.0, 0.0), |n| n.origin);
@@ -1468,11 +1500,11 @@ impl Flow {
                 let top_left = Xy::new(p.x - origin.0 * w, p.y - origin.1 * h);
                 let clamped = clamp_position(top_left, &extent, w, h);
                 p = Xy::new(clamped.x + origin.0 * w, clamped.y + origin.1 * h);
-                (item.id.clone(), p)
+                (item.id.clone(), i, p)
             })
             .collect();
-        for (id, p) in positions {
-            if let Some(n) = self.nodes.iter_mut().find(|n| n.id == id) {
+        for (id, i, p) in positions {
+            if let Some(n) = i.and_then(|i| self.nodes.get_mut(i)) {
                 n.position = p;
                 n.dragging = true;
             }
@@ -1616,7 +1648,8 @@ impl Flow {
                     cx.emit(FlowEvent::Delete { nodes, edges: edges.into_iter().collect() });
                 }
             }
-            "escape" if self.connection_drag.take().is_some() => {
+            "escape" if self.connection_drag.is_some() => {
+                self.connection_drag = None;
                 self.connection = None;
                 cx.stop_propagation();
                 self.drag = Drag::None;
@@ -1643,7 +1676,7 @@ impl Flow {
     }
 }
 
-fn edge_geometry(kind: EdgeKind, ends: &EdgeEnds) -> EdgePath {
+fn path_for(kind: EdgeKind, ends: &EdgeEnds) -> EdgePath {
     let params = PathParams::new(ends.source, ends.source_position, ends.target, ends.target_position);
     match kind {
         EdgeKind::Bezier => bezier_path(params, DEFAULT_CURVATURE),
@@ -1653,40 +1686,67 @@ fn edge_geometry(kind: EdgeKind, ends: &EdgeEnds) -> EdgePath {
     }
 }
 
+/// Each node's links by handle, in edge order.
+fn connections_by_node(edges: &[Edge]) -> HashMap<Id, Rc<NodeConnections>> {
+    let mut map: HashMap<Id, NodeConnections> = HashMap::new();
+    for e in edges {
+        map.entry(e.source.clone()).or_default().outgoing.push((e.source_handle.clone(), e.id.clone()));
+        map.entry(e.target.clone()).or_default().incoming.push((e.target_handle.clone(), e.id.clone()));
+    }
+    map.into_iter().map(|(k, v)| (k, Rc::new(v))).collect()
+}
+
+/// Drops a failed paint with a log line: one bad stroke or label must not take the frame down.
+fn logged<T, E: std::fmt::Display>(what: &str, result: Result<T, E>) -> Option<T> {
+    result.inspect_err(|e| log::warn!("{what}: {e}")).ok()
+}
+
+/// Bounding box of a bounds-less list of points: the smallest rect holding them all.
+fn points_bounds(points: &[Xy]) -> Rect {
+    bounds_of(points.iter().map(|p| Rect::new(p.x, p.y, 0.0, 0.0))).unwrap_or_default()
+}
 /// Length of the dashed stubs of a link drawn as a tag, in flow units.
 const TAG_STUB: f32 = 14.0;
 
+/// The dashed stub a tagged link ends in: where it starts, where it stops
+/// short of the handle, and the handle.
+fn target_stub(target: Xy, offset: f32) -> [Xy; 3] {
+    let y = target.y + offset;
+    [Xy::new(target.x - TAG_STUB, y), Xy::new(target.x - 4.0, y), target]
+}
+
 struct PaintEdge {
-    segments: Vec<crate::edge_path::Segment>,
+    segments: Rc<[Segment]>,
     style: EdgeStyle,
     selected: bool,
     hovered: bool,
+    /// Where the arrowhead sits, its angle, and its colour.
     arrow: Option<(Xy, f32, gpui::Hsla)>,
 }
 
 /// The pieces a tagged link is drawn as.
-fn tag_paint_edges(g: &EdgeGeom, tag: &crate::model::EdgeTag, hovered: bool) -> Vec<PaintEdge> {
-    use crate::edge_path::Segment;
-    let stub = |segments: Vec<Segment>, color: gpui::Hsla, dash: (f32, f32), opacity: f32| PaintEdge {
+fn tag_paint_edges(g: &EdgeGeom, tag: &EdgeTag, hovered: bool) -> Vec<PaintEdge> {
+    let stub = |segments: Rc<[Segment]>, color: gpui::Hsla, dash: (f32, f32), opacity: f32| PaintEdge {
         segments,
         style: EdgeStyle::solid(color).width(1.0).dash(dash.0, dash.1).opacity(opacity, opacity),
         selected: false,
         hovered: false,
         arrow: None,
     };
-    let (source, target) = (g.ends.source, g.ends.target);
-    let y = target.y + tag.offset;
+    let source = g.ends.source;
+    let [start, mid, end] = target_stub(g.ends.target, tag.offset);
     let mut pieces = Vec::new();
     if tag.revealed || hovered {
-        pieces.push(stub(g.path.segments.clone(), tag.source_color, (4.0, 4.0), 0.5));
+        pieces.push(stub(g.segments.clone(), tag.source_color, (4.0, 4.0), 0.5));
     }
-    pieces.push(stub(vec![Segment::Move(source), Segment::Line(Xy::new(source.x + TAG_STUB, source.y))], tag.source_color, (3.0, 2.0), 1.0));
     pieces.push(stub(
-        vec![
-            Segment::Move(Xy::new(target.x - TAG_STUB, y)),
-            Segment::Line(Xy::new(target.x - 4.0, y)),
-            Segment::Line(target),
-        ],
+        vec![Segment::Move(source), Segment::Line(Xy::new(source.x + TAG_STUB, source.y))].into(),
+        tag.source_color,
+        (3.0, 2.0),
+        1.0,
+    ));
+    pieces.push(stub(
+        vec![Segment::Move(start), Segment::Line(mid), Segment::Line(end)].into(),
         tag.target_color,
         (3.0, 2.0),
         1.0,
@@ -1710,11 +1770,10 @@ fn paint_tag(window: &mut Window, cx: &mut App, origin: Point<Pixels>, vp: &View
     let s = vp.to_screen(at);
     let height = size * 1.3;
     let position = point(origin.x + px(s.x) - line.width, origin.y + px(s.y) - height / 2.0);
-    line.paint(position, height, gpui::TextAlign::Left, None, window, cx).ok();
+    logged("tag label", line.paint(position, height, gpui::TextAlign::Left, None, window, cx));
 }
 
 fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &PaintEdge, hover: gpui::Hsla) {
-    use crate::edge_path::Segment;
     use crate::model::EdgeColor;
     let z = vp.zoom;
     let to_px = |p: Xy| {
@@ -1726,7 +1785,7 @@ fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &Pai
         if let Some((on, off)) = dash {
             b = b.dash_array(&[px((on * z).max(0.5)), px((off * z).max(0.5))]);
         }
-        for seg in &e.segments {
+        for seg in e.segments.iter() {
             match *seg {
                 Segment::Move(p) => b.move_to(to_px(p)),
                 Segment::Line(p) => b.line_to(to_px(p)),
@@ -1734,7 +1793,7 @@ fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &Pai
                 Segment::Cubic(c1, c2, p) => b.cubic_bezier_to(to_px(p), to_px(c1), to_px(c2)),
             }
         }
-        b.build().ok()
+        logged("edge path", b.build())
     };
     let opacity = if e.selected { e.style.selected_opacity } else { e.style.opacity };
     let background: gpui::Background = match e.style.color {
@@ -1771,7 +1830,7 @@ fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &Pai
         };
         let mut b = gpui::PathBuilder::fill();
         b.add_polygon(&[pt(-4.0, -4.5), pt(5.0, 0.0), pt(-4.0, 4.5)], true);
-        if let Ok(path) = b.build() {
+        if let Some(path) = logged("edge arrow", b.build()) {
             window.paint_path(path, color.opacity(opacity));
         }
     }
@@ -1780,7 +1839,7 @@ fn paint_edge(window: &mut Window, origin: Point<Pixels>, vp: &Viewport, e: &Pai
 fn default_node(node: &Node, props: &NodeProps) -> AnyElement {
     let theme = props.theme;
     let s = |v: f32| props.scaled(v);
-    let mut body = div()
+    let body = div()
         .relative()
         .min_w(s(150.0))
         .px(s(10.0))
@@ -1794,115 +1853,108 @@ fn default_node(node: &Node, props: &NodeProps) -> AnyElement {
         .flex()
         .justify_center()
         .child(node.label.clone().unwrap_or_else(|| node.id.clone()));
-    if node.kind != NodeKind::Input {
-        body = body.child(props.handle(None, HandleType::Target, Position::Top));
-    }
-    if node.kind != NodeKind::Output {
-        body = body.child(props.handle(None, HandleType::Source, Position::Bottom));
-    }
-    body.into_any_element()
+    body.child(props.handle(None, HandleType::Target, Position::Top))
+        .child(props.handle(None, HandleType::Source, Position::Bottom))
+        .into_any_element()
 }
 
-impl Render for Flow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("flow", || {
-        self.rebuild_lookup(cx);
-        self.rebuild_edges();
-        self.tick(window, cx);
-
-        let vp = self.viewport;
-        let theme = self.options.theme;
-        let entity: WeakEntity<Flow> = cx.entity().downgrade();
-        let connections = self.connections_by_node();
-        let connection = self.connection.clone().map(Rc::new);
-
-        // Back layer: background, flow-space painters, then edges.
-        let background = self.options.background;
-        let back_layers = self.layers.back.clone();
-        let front_layers = self.layers.front.clone();
+impl Flow {
+    fn paint_edges(&self, theme: FlowTheme) -> Vec<PaintEdge> {
         let reconnecting = self.connection.as_ref().and_then(|c| c.reconnecting.clone());
         let default_style = self.options.default_edge_style;
-        let paint_edges: Vec<PaintEdge> = self
-            .edge_geoms
-            .iter()
-            .filter(|g| reconnecting.as_ref() != Some(&g.id))
-            .flat_map(|g| {
-                let e = &self.edges[g.index];
-                if let Some(tag) = &e.tag {
-                    return tag_paint_edges(g, tag, e.selected || self.hovered_edge.as_ref() == Some(&e.id));
-                }
-                let style = e
-                    .style
-                    .or(default_style)
-                    .unwrap_or_else(|| EdgeStyle::solid(theme.edge).opacity(1.0, 1.0));
-                let style = if e.selected && e.style.is_none() && default_style.is_none() {
-                    EdgeStyle::solid(theme.edge_selected)
-                } else {
-                    style
-                };
-                let arrow = e.arrow.map(|color| {
-                    let angle = match g.path.segments.get(1) {
-                        Some(crate::edge_path::Segment::Cubic(c1, c2, t)) => {
-                            crate::edge_path::midpoint_angle(g.ends.source, *c1, *c2, *t)
-                        }
-                        _ => (g.ends.target.y - g.ends.source.y).atan2(g.ends.target.x - g.ends.source.x),
-                    };
-                    (g.path.label, angle, color)
-                });
-                vec![PaintEdge {
-                    segments: g.path.segments.clone(),
-                    style,
-                    selected: e.selected,
-                    hovered: self.hovered_edge.as_ref() == Some(&e.id),
-                    arrow,
-                }]
-            })
-            .collect();
-        let tags: Vec<(Xy, String, gpui::Hsla)> = self
-            .edge_geoms
+        let mut out = Vec::new();
+        for g in &self.edge_geoms {
+            if reconnecting.as_ref() == Some(&g.id) {
+                continue;
+            }
+            let Some((_, e)) = self.edge_of(g) else {
+                continue;
+            };
+            let hovered = self.hovered_edge.as_ref() == Some(&e.id);
+            if let Some(tag) = &e.tag {
+                out.extend(tag_paint_edges(g, tag, e.selected || hovered));
+                continue;
+            }
+            let style = e
+                .style
+                .or(default_style)
+                .unwrap_or_else(|| EdgeStyle::solid(theme.edge).opacity(1.0, 1.0));
+            let style = if e.selected && e.style.is_none() && default_style.is_none() {
+                EdgeStyle::solid(theme.edge_selected)
+            } else {
+                style
+            };
+            out.push(PaintEdge {
+                segments: g.segments.clone(),
+                style,
+                selected: e.selected,
+                hovered,
+                arrow: e.arrow.map(|color| (g.label, g.arrow_angle, color)),
+            });
+        }
+        out
+    }
+
+    fn tag_labels(&self, theme: FlowTheme) -> Vec<(Xy, String, gpui::Hsla)> {
+        self.edge_geoms
             .iter()
             .filter_map(|g| {
-                let tag = self.edges[g.index].tag.as_ref()?;
-                Some((Xy::new(g.ends.target.x - TAG_STUB - 3.0, g.ends.target.y + tag.offset), tag.text.clone(), theme.edge_selected))
+                let (_, e) = self.edge_of(g)?;
+                let tag = e.tag.as_ref()?;
+                let [start, ..] = target_stub(g.ends.target, tag.offset);
+                Some((Xy::new(start.x - 3.0, start.y), tag.text.clone(), theme.edge_selected))
             })
-            .collect();
+            .collect()
+    }
+
+    /// Background, flow-space painters, then the edges and tag labels.
+    fn back_layer(&self, vp: Viewport) -> AnyElement {
+        let theme = self.options.theme;
+        let background = self.options.background;
+        let back_layers = self.layers.back.clone();
+        let paint_edges = self.paint_edges(theme);
+        let tags = self.tag_labels(theme);
         let bounds_cell = self.bounds.clone();
         let background_cache = self.background_cache.clone();
-        let back = canvas(
+        canvas(
             move |b, _, _| bounds_cell.set(b),
-            move |b, _, window, cx| { guard::guard("flow background", || {
-                let ctx = LayerContext { viewport: vp, bounds: b };
-                window.paint_quad(gpui::fill(b, theme.background));
-                if let Some(opts) = background {
-                    let color = opts.color.unwrap_or(theme.pattern);
-                    if let Some(bg) = opts.background {
-                        window.paint_quad(gpui::fill(b, bg));
+            move |b, _, window, cx| {
+                guard::guard("flow background", || {
+                    let ctx = LayerContext { viewport: vp, bounds: b };
+                    window.paint_quad(gpui::fill(b, theme.background));
+                    if let Some(opts) = background {
+                        let color = opts.color.unwrap_or(theme.pattern);
+                        if let Some(bg) = opts.background {
+                            window.paint_quad(gpui::fill(b, bg));
+                        }
+                        background_cache.borrow_mut().paint(window, b, &vp, &opts, color);
                     }
-                    background_cache.borrow_mut().paint(window, b, &vp, &opts, color);
-                }
-                window.with_content_mask(Some(gpui::ContentMask { bounds: b }), |window| {
-                    for layer in &back_layers {
-                        layer(&ctx, window, cx);
-                    }
-                    for e in &paint_edges {
-                        paint_edge(window, b.origin, &vp, e, theme.edge_hover);
-                    }
-                    for (at, text, color) in &tags {
-                        paint_tag(window, cx, b.origin, &vp, *at, text, *color);
-                    }
+                    window.with_content_mask(Some(gpui::ContentMask { bounds: b }), |window| {
+                        for layer in &back_layers {
+                            layer(&ctx, window, cx);
+                        }
+                        for e in &paint_edges {
+                            paint_edge(window, b.origin, &vp, e, theme.edge_hover);
+                        }
+                        for (at, text, color) in &tags {
+                            paint_tag(window, cx, b.origin, &vp, *at, text, *color);
+                        }
+                    });
                 });
-            }); },
+            },
         )
         .absolute()
-        .size_full();
+        .size_full()
+        .into_any_element()
+    }
 
-        // Edge labels.
-        let labels: Vec<AnyElement> = self
-            .edge_geoms
+    fn edge_labels(&self, vp: Viewport, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.edge_geoms
             .iter()
             .filter_map(|g| {
-                let e = &self.edges[g.index];
+                let (_, e) = self.edge_of(g)?;
                 let label = e.label.clone()?;
-                let at = vp.to_screen(g.path.label);
+                let at = vp.to_screen(g.label);
                 let id = e.id.clone();
                 let on_down = cx.safe_listener(move |this: &mut Flow, ev: &MouseDownEvent, w, cx| {
                     cx.stop_propagation();
@@ -1939,14 +1991,23 @@ impl Render for Flow {
                         .into_any_element(),
                 )
             })
-            .collect();
+            .collect()
+    }
 
-        // Nodes.
+    fn node_elements(
+        &self,
+        vp: Viewport,
+        entity: &WeakEntity<Flow>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let theme = self.options.theme;
+        let connection = self.connection.clone().map(Rc::new);
         let mut order: Vec<usize> = (0..self.nodes.len()).filter(|&i| !self.nodes[i].hidden).collect();
         order.sort_by_key(|&i| self.lookup.get(&self.nodes[i].id).map_or(0, |n| n.z));
-        let mut node_elements = Vec::with_capacity(order.len());
+        let mut out = Vec::with_capacity(order.len());
         for i in order {
-            let node = self.nodes[i].clone();
+            let node = &self.nodes[i];
             let Some(internal) = self.lookup.get(&node.id) else {
                 continue;
             };
@@ -1958,18 +2019,18 @@ impl Render for Flow {
                 size: internal.size,
                 connectable: internal.connectable,
                 theme,
-                connections: connections.get(&node.id).cloned().unwrap_or_default(),
+                connections: self.connections.get(&node.id).cloned().unwrap_or_default(),
                 connection: connection.clone(),
                 flow: entity.clone(),
                 measure: self.measure.clone(),
             };
             let body = match &node.render {
                 Some(f) => f(&props, window, cx),
-                None => default_node(&node, &props),
+                None => default_node(node, &props),
             };
             let at = vp.to_screen(internal.position);
             let measured = internal.size.is_some();
-            let draggable = self.node_draggable(&node);
+            let draggable = self.node_draggable(node);
             let measure = self.measure.clone();
             let measure_entity = entity.clone();
             let (measure_id, zoom) = (node.id.clone(), vp.zoom);
@@ -1999,12 +2060,15 @@ impl Render for Flow {
                             true
                         }
                     };
+                    if changed {
+                        m.generation += 1;
+                    }
                     drop(m);
                     if changed {
                         measure_entity.update(cx, |_, cx| cx.notify()).ok();
                     }
                 }); },
-                |_, _, _, _| { guard::guard("flow canvas", || {}); },
+                |_, _, _, _| {},
             )
             .absolute()
             .size_full();
@@ -2033,56 +2097,66 @@ impl Render for Flow {
             if let Some(h) = node.height {
                 wrapper = wrapper.h(px(h * vp.zoom));
             }
-            node_elements.push(wrapper.child(measurer).child(body).into_any_element());
+            out.push(wrapper.child(measurer).child(body).into_any_element());
         }
+        out
+    }
 
-        // Portals.
-        let portal = |front: bool, window: &mut Window, cx: &mut Context<Self>| -> Vec<AnyElement> {
-            self.layers
-                .portals
-                .iter()
-                .filter(|p| p.front == front)
-                .map(|p| {
-                    let at = vp.to_screen(p.position);
-                    let props = NodeProps {
-                        id: "".into(),
-                        selected: false,
-                        dragging: false,
-                        zoom: vp.zoom,
-                        size: None,
-                        connectable: false,
-                        theme,
-                        connections: Rc::default(),
-                        connection: None,
-                        flow: entity.clone(),
-                        measure: self.measure.clone(),
-                    };
-                    div()
-                        .absolute()
-                        .left(px(at.x))
-                        .top(px(at.y))
-                        .child((p.render)(&props, window, cx))
-                        .into_any_element()
-                })
-                .collect()
-        };
-        let back_portals = portal(false, window, cx);
-        let front_portals = portal(true, window, cx);
+    fn portal_elements(
+        &self,
+        front: bool,
+        vp: Viewport,
+        entity: &WeakEntity<Flow>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let theme = self.options.theme;
+        self.layers
+            .portals
+            .iter()
+            .filter(|p| p.front == front)
+            .map(|p| {
+                let at = vp.to_screen(p.position);
+                let props = NodeProps {
+                    id: "".into(),
+                    selected: false,
+                    dragging: false,
+                    zoom: vp.zoom,
+                    size: None,
+                    connectable: false,
+                    theme,
+                    connections: Rc::default(),
+                    connection: None,
+                    flow: entity.clone(),
+                    measure: self.measure.clone(),
+                };
+                div()
+                    .absolute()
+                    .left(px(at.x))
+                    .top(px(at.y))
+                    .child((p.render)(&props, window, cx))
+                    .into_any_element()
+            })
+            .collect()
+    }
 
-        // Front layer: connection line, selection boxes, listeners.
-        let connection_line = self.connection.clone().map(|c| {
-            let params = PathParams::new(c.from, c.from_position, c.to, c.to_position);
-            let path = match self.options.default_edge_kind {
-                EdgeKind::Straight => straight_path(c.from, c.to),
-                EdgeKind::SmoothStep => smooth_step_path(params, StepOptions::default()),
-                EdgeKind::Step => smooth_step_path(params, StepOptions { border_radius: 0.0, ..StepOptions::default() }),
-                EdgeKind::Bezier => bezier_path(params, DEFAULT_CURVATURE),
+    /// Connection line, selection box, marquee and strokes, drawn over the nodes.
+    fn front_layer(&self, vp: Viewport, entity: &WeakEntity<Flow>) -> AnyElement {
+        let theme = self.options.theme;
+        let front_layers = self.layers.front.clone();
+        let connection_line = self.connection.as_ref().map(|c| {
+            let ends = EdgeEnds {
+                source: c.from,
+                source_position: c.from_position,
+                target: c.to,
+                target_position: c.to_position,
             };
+            let path = path_for(self.options.default_edge_kind, &ends);
             let style = match &self.options.connection_line_style {
-                Some(f) => f(&c),
+                Some(f) => f(c),
                 None => EdgeStyle::solid(if c.is_valid == Some(false) { theme.connection_invalid } else { theme.connection_line }),
             };
-            PaintEdge { segments: path.segments, style, selected: true, hovered: false, arrow: None }
+            PaintEdge { segments: path.segments.into(), style, selected: true, hovered: false, arrow: None }
         });
         let marquee = match &self.drag {
             Drag::Select { start, current } => Some(Rect::from_corners(*start, *current)),
@@ -2103,107 +2177,126 @@ impl Render for Flow {
         };
         let on_move = entity.clone();
         let on_up = entity.clone();
-        let front = canvas(
+        canvas(
             |_, _, _| {},
-            move |b, _, window, cx| { guard::guard("flow canvas", || {
-                let ctx = LayerContext { viewport: vp, bounds: b };
-                window.with_content_mask(Some(gpui::ContentMask { bounds: b }), |window| {
-                    for layer in &front_layers {
-                        layer(&ctx, window, cx);
-                    }
-                    let screen_rect = |r: Rect| {
-                        let o = vp.to_screen(Xy::new(r.x, r.y));
-                        Bounds::new(
-                            point(b.origin.x + px(o.x), b.origin.y + px(o.y)),
-                            size(px(r.width * vp.zoom), px(r.height * vp.zoom)),
-                        )
-                    };
-                    if let Some(r) = selected_bounds {
-                        let r = r.inflate(4.0);
-                        window.paint_quad(gpui::quad(
-                            screen_rect(r),
-                            px(2.0),
-                            theme.selection_fill,
-                            px(1.0),
-                            theme.nodes_selection_stroke,
-                            gpui::BorderStyle::Solid,
-                        ));
-                    }
-                    if let Some(c) = &connection_line {
-                        paint_edge(window, b.origin, &vp, c, theme.edge_hover);
-                    }
-                    if let Some((kind, points)) = &stroke {
-                        let mut path = gpui::PathBuilder::stroke(px(2.0));
-                        if *kind == StrokeKind::Cut {
-                            path = path.dash_array(&[px(6.0), px(4.0)]);
+            move |b, _, window, cx| {
+                guard::guard("flow canvas", || {
+                    let ctx = LayerContext { viewport: vp, bounds: b };
+                    window.with_content_mask(Some(gpui::ContentMask { bounds: b }), |window| {
+                        for layer in &front_layers {
+                            layer(&ctx, window, cx);
                         }
-                        for (i, p) in points.iter().enumerate() {
-                            let s = vp.to_screen(*p);
-                            let at = point(b.origin.x + px(s.x), b.origin.y + px(s.y));
-                            if i == 0 { path.move_to(at) } else { path.line_to(at) }
+                        let screen_rect = |r: Rect| {
+                            let o = vp.to_screen(Xy::new(r.x, r.y));
+                            Bounds::new(
+                                point(b.origin.x + px(o.x), b.origin.y + px(o.y)),
+                                size(px(r.width * vp.zoom), px(r.height * vp.zoom)),
+                            )
+                        };
+                        if let Some(r) = selected_bounds {
+                            let r = r.inflate(4.0);
+                            window.paint_quad(gpui::quad(
+                                screen_rect(r),
+                                px(2.0),
+                                theme.selection_fill,
+                                px(1.0),
+                                theme.nodes_selection_stroke,
+                                gpui::BorderStyle::Solid,
+                            ));
                         }
-                        if let Ok(path) = path.build() {
-                            let color = if *kind == StrokeKind::Cut { theme.connection_invalid } else { theme.connection_line };
-                            window.paint_path(path, color);
+                        if let Some(c) = &connection_line {
+                            paint_edge(window, b.origin, &vp, c, theme.edge_hover);
                         }
-                    }
-                    if let Some(r) = marquee {
-                        let o = point(b.origin.x + px(r.x), b.origin.y + px(r.y));
-                        window.paint_quad(gpui::quad(
-                            Bounds::new(o, size(px(r.width), px(r.height))),
-                            px(0.0),
-                            theme.selection_fill,
-                            px(1.0),
-                            theme.selection_stroke,
-                            gpui::BorderStyle::Solid,
-                        ));
-                    }
+                        if let Some((kind, points)) = &stroke {
+                            let mut path = gpui::PathBuilder::stroke(px(2.0));
+                            if *kind == StrokeKind::Cut {
+                                path = path.dash_array(&[px(6.0), px(4.0)]);
+                            }
+                            for (i, p) in points.iter().enumerate() {
+                                let s = vp.to_screen(*p);
+                                let at = point(b.origin.x + px(s.x), b.origin.y + px(s.y));
+                                if i == 0 { path.move_to(at) } else { path.line_to(at) }
+                            }
+                            if let Some(path) = logged("stroke", path.build()) {
+                                let color = if *kind == StrokeKind::Cut { theme.connection_invalid } else { theme.connection_line };
+                                window.paint_path(path, color);
+                            }
+                        }
+                        if let Some(r) = marquee {
+                            let o = point(b.origin.x + px(r.x), b.origin.y + px(r.y));
+                            window.paint_quad(gpui::quad(
+                                Bounds::new(o, size(px(r.width), px(r.height))),
+                                px(0.0),
+                                theme.selection_fill,
+                                px(1.0),
+                                theme.selection_stroke,
+                                gpui::BorderStyle::Solid,
+                            ));
+                        }
+                    });
+                    // Drags follow the pointer beyond the canvas.
+                    window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble {
+                            on_move.update(cx, |this, cx| guard::guard("flow mouse move", || this.mouse_move(e, cx))).ok();
+                        }
+                    });
+                    window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble {
+                            on_up.update(cx, |this, cx| guard::guard("flow mouse up", || this.mouse_up(e, cx))).ok();
+                        }
+                    });
                 });
-                // Drags follow the pointer beyond the canvas.
-                window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Bubble {
-                        on_move.update(cx, |this, cx| guard::guard("flow mouse move", || this.mouse_move(e, cx))).ok();
-                    }
-                });
-                window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Bubble {
-                        on_up.update(cx, |this, cx| guard::guard("flow mouse up", || this.mouse_up(e, cx))).ok();
-                    }
-                });
-            }); },
+            },
         )
         .absolute()
-        .size_full();
+        .size_full()
+        .into_any_element()
+    }
+}
 
-        let panels = self.render_panels(window, cx);
-        let cursor = match &self.drag {
-            Drag::Pan { moved: true, .. } => CursorStyle::ClosedHand,
-            Drag::Select { .. } => CursorStyle::Crosshair,
-            Drag::Connect => CursorStyle::Crosshair,
-            Drag::Grab(_) => CursorStyle::ClosedHand,
-            _ if self.hovered_edge.is_some() => CursorStyle::PointingHand,
-            _ => CursorStyle::OpenHand,
-        };
+impl Render for Flow {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("flow", || {
+            self.refresh_geometry(cx);
+            self.tick(window, cx);
 
-        div()
-            .id("flow")
-            .track_focus(&self.focus)
-            .relative()
-            .size_full()
-            .overflow_hidden()
-            .cursor(cursor)
-            .on_mouse_down(MouseButton::Left, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_mouse_down(MouseButton::Middle, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_mouse_down(MouseButton::Right, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
-            .on_scroll(cx.safe_listener(|this, e, _, cx| this.scroll(e, cx)))
-            .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
-            .child(back)
-            .children(back_portals)
-            .children(labels)
-            .children(node_elements)
-            .children(front_portals)
-            .child(front)
-            .children(panels)
-    })
+            let vp = self.viewport;
+            let entity: WeakEntity<Flow> = cx.entity().downgrade();
+            let back = self.back_layer(vp);
+            let labels = self.edge_labels(vp, cx);
+            let node_elements = self.node_elements(vp, &entity, window, cx);
+            let back_portals = self.portal_elements(false, vp, &entity, window, cx);
+            let front_portals = self.portal_elements(true, vp, &entity, window, cx);
+            let front = self.front_layer(vp, &entity);
+            let panels = self.render_panels(window, cx);
+            let cursor = match &self.drag {
+                Drag::Pan { moved: true, .. } => CursorStyle::ClosedHand,
+                Drag::Select { .. } => CursorStyle::Crosshair,
+                Drag::Connect => CursorStyle::Crosshair,
+                Drag::Grab(_) => CursorStyle::ClosedHand,
+                _ if self.hovered_edge.is_some() => CursorStyle::PointingHand,
+                _ => CursorStyle::OpenHand,
+            };
+
+            div()
+                .id("flow")
+                .track_focus(&self.focus)
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .cursor(cursor)
+                .on_mouse_down(MouseButton::Left, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
+                .on_mouse_down(MouseButton::Middle, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
+                .on_mouse_down(MouseButton::Right, cx.safe_listener(|this, e, w, cx| this.pane_down(e, w, cx)))
+                .on_scroll(cx.safe_listener(|this, e, _, cx| this.scroll(e, cx)))
+                .on_key_down(cx.safe_listener(|this, e, _, cx| this.key_down(e, cx)))
+                .child(back)
+                .children(back_portals)
+                .children(labels)
+                .children(node_elements)
+                .children(front_portals)
+                .child(front)
+                .children(panels)
+        })
     }
 }

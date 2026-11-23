@@ -86,6 +86,7 @@ struct Layout {
     gap: (f32, f32),
     /// Offset of the first mark from the canvas origin.
     phase: (f32, f32),
+    offset: (f32, f32),
     periods: (u32, u32),
     /// Dot diameter, or cross arm length.
     mark: f32,
@@ -116,6 +117,7 @@ impl Layout {
         Some(Self {
             gap,
             phase: (phase(vp.x, offset.0, gap.0), phase(vp.y, offset.1, gap.1)),
+            offset,
             periods: (periods_per_tile(gap.0), periods_per_tile(gap.1)),
             mark: opts.size * vp.zoom,
             line: opts.line_width * vp.zoom,
@@ -373,9 +375,8 @@ fn paint_marks(
 ) {
     let w = f32::from(bounds.size.width);
     let h = f32::from(bounds.size.height);
-    let offset = (opts.offset.0 * vp.zoom, opts.offset.1 * vp.zoom);
-    let xs: Vec<f32> = pattern_positions(w, vp.x, layout.gap.0, offset.0).collect();
-    let ys: Vec<f32> = pattern_positions(h, vp.y, layout.gap.1, offset.1).collect();
+    let xs: Vec<f32> = pattern_positions(w, vp.x, layout.gap.0, layout.offset.0).collect();
+    let ys: Vec<f32> = pattern_positions(h, vp.y, layout.gap.1, layout.offset.1).collect();
     let at = |x: f32, y: f32| -> Point<Pixels> { point(bounds.origin.x + px(x), bounds.origin.y + px(y)) };
     let rect = |window: &mut Window, x: f32, y: f32, rw: f32, rh: f32, r: f32| {
         window.paint_quad(quad(

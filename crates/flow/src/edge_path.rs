@@ -45,8 +45,6 @@ pub enum Segment {
 pub struct EdgePath {
     pub segments: Vec<Segment>,
     pub label: Xy,
-    /// Distance from the source to the label, per axis.
-    pub offset: Xy,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -63,13 +61,13 @@ impl PathParams {
     }
 }
 
-/// The midpoint and its distance from the source, as `getEdgeCenter`.
-pub fn edge_center(source: Xy, target: Xy) -> (Xy, Xy) {
+/// The midpoint between the ends, as `getEdgeCenter`.
+pub fn edge_center(source: Xy, target: Xy) -> Xy {
     let ox = (target.x - source.x).abs() / 2.0;
     let cx = if target.x < source.x { target.x + ox } else { target.x - ox };
     let oy = (target.y - source.y).abs() / 2.0;
     let cy = if target.y < source.y { target.y + oy } else { target.y - oy };
-    (Xy::new(cx, cy), Xy::new(ox, oy))
+    Xy::new(cx, cy)
 }
 
 fn control_offset(distance: f32, curvature: f32) -> f32 {
@@ -98,33 +96,22 @@ pub fn bezier_path(p: PathParams, curvature: f32) -> EdgePath {
         p.source.x * 0.125 + c1.x * 0.375 + c2.x * 0.375 + p.target.x * 0.125,
         p.source.y * 0.125 + c1.y * 0.375 + c2.y * 0.375 + p.target.y * 0.125,
     );
-    EdgePath {
-        segments: vec![Segment::Move(p.source), Segment::Cubic(c1, c2, p.target)],
-        label,
-        offset: Xy::new((label.x - p.source.x).abs(), (label.y - p.source.y).abs()),
-    }
+    EdgePath { segments: vec![Segment::Move(p.source), Segment::Cubic(c1, c2, p.target)], label }
 }
 
 pub fn straight_path(source: Xy, target: Xy) -> EdgePath {
-    let (label, offset) = edge_center(source, target);
-    EdgePath {
-        segments: vec![Segment::Move(source), Segment::Line(target)],
-        label,
-        offset,
-    }
+    EdgePath { segments: vec![Segment::Move(source), Segment::Line(target)], label: edge_center(source, target) }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct StepOptions {
     pub border_radius: f32,
     pub offset: f32,
-    pub step_position: f32,
-    pub center: (Option<f32>, Option<f32>),
 }
 
 impl Default for StepOptions {
     fn default() -> Self {
-        Self { border_radius: 5.0, offset: 20.0, step_position: 0.5, center: (None, None) }
+        Self { border_radius: 5.0, offset: 20.0 }
     }
 }
 
@@ -140,7 +127,7 @@ fn set_axis(p: &mut Xy, horizontal: bool, v: f32) {
     }
 }
 
-fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy, Xy) {
+fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy) {
     let source_dir = p.source_position.direction();
     let target_dir = p.target_position.direction();
     let source_gapped = Xy::new(
@@ -160,7 +147,6 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy, Xy) {
     };
     let horizontal = dir.x != 0.0;
     let curr_dir = axis(dir, horizontal);
-    let (_, default_offset) = edge_center(p.source, p.target);
 
     let mut points: Vec<Xy>;
     let center;
@@ -170,17 +156,13 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy, Xy) {
     if axis(source_dir, horizontal) * axis(target_dir, horizontal) == -1.0 {
         let (cx, cy) = if horizontal {
             (
-                opts.center.0.unwrap_or(
-                    source_gapped.x + (target_gapped.x - source_gapped.x) * opts.step_position,
-                ),
-                opts.center.1.unwrap_or((source_gapped.y + target_gapped.y) / 2.0),
+                source_gapped.x + (target_gapped.x - source_gapped.x) * 0.5,
+                (source_gapped.y + target_gapped.y) / 2.0,
             )
         } else {
             (
-                opts.center.0.unwrap_or((source_gapped.x + target_gapped.x) / 2.0),
-                opts.center.1.unwrap_or(
-                    source_gapped.y + (target_gapped.y - source_gapped.y) * opts.step_position,
-                ),
+                (source_gapped.x + target_gapped.x) / 2.0,
+                source_gapped.y + (target_gapped.y - source_gapped.y) * 0.5,
             )
         };
         center = Xy::new(cx, cy);
@@ -263,7 +245,7 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy, Xy) {
         all.push(gapped_target);
     }
     all.push(p.target);
-    (all, center, default_offset)
+    (all, center)
 }
 
 fn bend(a: Xy, b: Xy, c: Xy, size: f32, out: &mut Vec<Segment>) {
@@ -287,13 +269,13 @@ fn bend(a: Xy, b: Xy, c: Xy, size: f32, out: &mut Vec<Segment>) {
 
 /// Orthogonal routing with rounded corners; a zero radius gives step edges.
 pub fn smooth_step_path(p: PathParams, opts: StepOptions) -> EdgePath {
-    let (points, label, offset) = step_points(p, opts);
+    let (points, label) = step_points(p, opts);
     let mut segments = vec![Segment::Move(points[0])];
     for i in 1..points.len() - 1 {
         bend(points[i - 1], points[i], points[i + 1], opts.border_radius, &mut segments);
     }
     segments.push(Segment::Line(*points.last().unwrap()));
-    EdgePath { segments, label, offset }
+    EdgePath { segments, label }
 }
 
 /// Polyline approximation, for hit testing and bounds.
@@ -378,7 +360,6 @@ mod tests {
             Segment::Cubic(Xy::new(75.0, 20.0), Xy::new(75.0, 100.0), Xy::new(150.0, 100.0))
         );
         assert_eq!(path.label, Xy::new(75.0, 60.0));
-        assert_eq!(path.offset, Xy::new(75.0, 40.0));
     }
 
     #[test]

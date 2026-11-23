@@ -152,7 +152,11 @@ fn fit_animation_advances_without_input(cx: &mut TestAppContext) {
         "the animation should still be running after its first frame"
     );
 
-    for _ in 0..40 {
+    // The animation runs on wall-clock time, so poll until it lands.
+    for _ in 0..400 {
+        if close(flow.read_with(cx, |f, _| f.viewport()), target) {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(10));
         frame(cx);
     }

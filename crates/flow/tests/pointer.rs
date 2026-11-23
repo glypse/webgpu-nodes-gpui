@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::{
     AnyElement, App, Entity, IntoElement as _, Modifiers, MouseButton,
     ParentElement as _, ScrollDelta, Styled as _, TestAppContext, VisualTestContext, Window, div,
@@ -32,8 +35,7 @@ fn setup(cx: &mut TestAppContext, with_edge: bool) -> (Entity<Flow>, &mut Visual
         flow.options.fit_view_on_init = true;
         flow
     });
-    cx.update(|window, cx| {
-        let _ = window;
+    cx.update(|_, cx| {
         flow.update(cx, |f, cx| {
             f.set_nodes(nodes(), cx);
             if with_edge {
@@ -80,6 +82,21 @@ fn settle(cx: &mut VisualTestContext) {
     }
 }
 
+/// Sets a flag when the flow emits an event matching `wanted`.
+fn record(cx: &mut VisualTestContext, flow: &Entity<Flow>, wanted: fn(&FlowEvent) -> bool) -> Rc<Cell<bool>> {
+    let seen = Rc::new(Cell::new(false));
+    let flag = seen.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(flow, move |_, event: &FlowEvent, _| {
+            if wanted(event) {
+                flag.set(true);
+            }
+        })
+        .detach();
+    });
+    seen
+}
+
 fn screen_of(flow: &Entity<Flow>, cx: &mut VisualTestContext, id: &'static str, local: Xy) -> gpui::Point<gpui::Pixels> {
     let id: gpui_flow::Id = id.into();
     let rect = cx.read(|cx| flow.read(cx).node_rect(&id)).expect("node measured");
@@ -102,15 +119,23 @@ fn the_initial_fit_pads_the_measured_nodes(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn click_and_drag_on_the_empty_pane(cx: &mut TestAppContext) {
-    let (_flow, cx) = setup(cx, false);
+    let (flow, cx) = setup(cx, false);
     let before = guard::recovered();
-    let start = point(px(700.0), px(500.0));
+    let viewport = cx.read(|cx| flow.read(cx).viewport());
+    // Below node a and left of node b, so the press lands on the pane.
+    let start = screen_of(&flow, cx, "a", Xy::new(0.0, 220.0));
+    let end = point(start.x + px(40.0), start.y + px(30.0));
     cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
-    cx.simulate_mouse_move(point(px(740.0), px(530.0)), Some(MouseButton::Left), Modifiers::default());
-    cx.simulate_mouse_up(point(px(740.0), px(530.0)), MouseButton::Left, Modifiers::default());
-    cx.simulate_click(start, Modifiers::default());
+    cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+    cx.simulate_click(end, Modifiers::default());
     settle(cx);
     assert_eq!(guard::recovered(), before);
+    // The drag pans the pane by its offset and leaves the zoom alone.
+    let panned = cx.read(|cx| flow.read(cx).viewport());
+    assert!((panned.x - viewport.x - 40.0).abs() < 0.5, "pan x {} from {}", panned.x, viewport.x);
+    assert!((panned.y - viewport.y - 30.0).abs() < 0.5, "pan y {} from {}", panned.y, viewport.y);
+    assert_eq!(panned.zoom, viewport.zoom);
 }
 
 #[gpui::test]
@@ -148,16 +173,7 @@ fn dragging_a_node_moves_it(cx: &mut TestAppContext) {
 fn connecting_two_handles_adds_an_edge(cx: &mut TestAppContext) {
     let (flow, cx) = setup(cx, false);
     let before = guard::recovered();
-    let connected = std::rc::Rc::new(std::cell::Cell::new(false));
-    let seen = connected.clone();
-    cx.update(|_, cx| {
-        cx.subscribe(&flow, move |_, event: &FlowEvent, _| {
-            if matches!(event, FlowEvent::Connect(_)) {
-                seen.set(true);
-            }
-        })
-        .detach();
-    });
+    let connected = record(cx, &flow, |event| matches!(event, FlowEvent::Connect(_)));
     let a = cx.read(|cx| flow.read(cx).node_rect(&"a".into())).expect("measured");
     let b = cx.read(|cx| flow.read(cx).node_rect(&"b".into())).expect("measured");
     let source = cx.read(|cx| flow.read(cx).flow_to_screen(Xy::new(a.x + a.width, a.y + 40.0)));
@@ -175,16 +191,7 @@ fn connecting_two_handles_adds_an_edge(cx: &mut TestAppContext) {
 fn dropping_a_connection_on_empty_space(cx: &mut TestAppContext) {
     let (flow, cx) = setup(cx, false);
     let before = guard::recovered();
-    let ended = std::rc::Rc::new(std::cell::Cell::new(false));
-    let seen = ended.clone();
-    cx.update(|_, cx| {
-        cx.subscribe(&flow, move |_, event: &FlowEvent, _| {
-            if matches!(event, FlowEvent::ConnectEnd(_)) {
-                seen.set(true);
-            }
-        })
-        .detach();
-    });
+    let ended = record(cx, &flow, |event| matches!(event, FlowEvent::ConnectEnd(_)));
     let a = cx.read(|cx| flow.read(cx).node_rect(&"a".into())).expect("measured");
     let source = cx.read(|cx| flow.read(cx).flow_to_screen(Xy::new(a.x + a.width, a.y + 40.0)));
     let empty = point(px(900.0), px(900.0));
@@ -218,16 +225,7 @@ fn scrolling_zooms(cx: &mut TestAppContext) {
 fn delete_key_reports_the_selection(cx: &mut TestAppContext) {
     let (flow, cx) = setup(cx, true);
     let before = guard::recovered();
-    let deleted = std::rc::Rc::new(std::cell::Cell::new(false));
-    let seen = deleted.clone();
-    cx.update(|_, cx| {
-        cx.subscribe(&flow, move |_, event: &FlowEvent, _| {
-            if matches!(event, FlowEvent::Delete { .. }) {
-                seen.set(true);
-            }
-        })
-        .detach();
-    });
+    let deleted = record(cx, &flow, |event| matches!(event, FlowEvent::Delete { .. }));
     let on_node = screen_of(&flow, cx, "a", Xy::new(80.0, 40.0));
     cx.simulate_click(on_node, Modifiers::default());
     cx.simulate_keystrokes("delete");
@@ -281,16 +279,7 @@ fn escape_cancels_a_grab(cx: &mut TestAppContext) {
 fn clicking_two_handles_connects_them(cx: &mut TestAppContext) {
     let (flow, cx) = setup(cx, false);
     let before = guard::recovered();
-    let connected = std::rc::Rc::new(std::cell::Cell::new(false));
-    let seen = connected.clone();
-    cx.update(|_, cx| {
-        cx.subscribe(&flow, move |_, event: &FlowEvent, _| {
-            if matches!(event, FlowEvent::Connect(_)) {
-                seen.set(true);
-            }
-        })
-        .detach();
-    });
+    let connected = record(cx, &flow, |event| matches!(event, FlowEvent::Connect(_)));
     let a = cx.read(|cx| flow.read(cx).node_rect(&"a".into())).expect("measured");
     let b = cx.read(|cx| flow.read(cx).node_rect(&"b".into())).expect("measured");
     let source = cx.read(|cx| flow.read(cx).flow_to_screen(Xy::new(a.x + a.width, a.y + 40.0)));
