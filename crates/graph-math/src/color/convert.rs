@@ -108,8 +108,29 @@ pub fn hsv_to_rgb(Hsv { h, s, v }: Hsv) -> Rgb {
     Rgb::new(rgb.red, rgb.green, rgb.blue)
 }
 
-// Björn Ottosson's OKLab matrices, as f64 constants to emit as WGSL. The CPU
-// conversions use `palette`; a test checks these agree with it.
+// The sRGB, XYZ (D65) and LMS matrices behind OKLab, as f64 constants to emit
+// as WGSL. Björn Ottosson's OKLab post gives the LMS ones. The CPU conversions
+// use `palette`; tests check these agree with it and with each other.
+pub const LINEAR_RGB_TO_XYZ: Mat3 = [
+    [0.4123907993, 0.3575843394, 0.1804807884],
+    [0.2126390059, 0.7151686788, 0.0721923054],
+    [0.0193308187, 0.1191947798, 0.9505321522],
+];
+pub const XYZ_TO_LINEAR_RGB: Mat3 = [
+    [3.2409699419, -1.5373831776, -0.4986107603],
+    [-0.9692436363, 1.8759675015, 0.0415550574],
+    [0.0556300797, -0.2039769589, 1.0569715142],
+];
+pub const XYZ_TO_LMS: Mat3 = [
+    [0.8190224432, 0.3619062563, -0.1288737826],
+    [0.0329836672, 0.9292868469, 0.0361446682],
+    [0.0481771996, 0.2642395249, 0.6335478258],
+];
+pub const LMS_TO_XYZ: Mat3 = [
+    [1.2268798737, -0.5578149969, 0.2813910503],
+    [-0.0405757627, 1.1122868365, -0.0717110837],
+    [-0.0763729496, -0.4214933241, 1.5869240244],
+];
 pub const LINEAR_RGB_TO_LMS: Mat3 = [
     [0.4122214708, 0.5363325363, 0.0514459929],
     [0.2119034982, 0.6806995451, 0.1073969566],
@@ -463,6 +484,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn mat3_from_palette(flat: [f64; 9]) -> Mat3 {
+        [
+            [flat[0], flat[1], flat[2]],
+            [flat[3], flat[4], flat[5]],
+            [flat[6], flat[7], flat[8]],
+        ]
+    }
+
+    fn mat3_product(a: &Mat3, b: &Mat3) -> Mat3 {
+        std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
+    }
+
+    fn assert_mat3_close(actual: &Mat3, expected: &Mat3, digits: i32) {
+        for i in 0..3 {
+            for j in 0..3 {
+                close(actual[i][j], expected[i][j], digits);
+            }
+        }
+    }
+
+    #[test]
+    fn the_xyz_matrices_match_palette_and_invert_each_other() {
+        let rgb_to_xyz = mat3_from_palette(palette::matrix::rgb_to_xyz_matrix::<
+            palette::encoding::Srgb,
+            f64,
+        >());
+        let xyz_to_rgb = mat3_from_palette(palette::matrix::matrix_inverse(
+            palette::matrix::rgb_to_xyz_matrix::<palette::encoding::Srgb, f64>(),
+        ));
+        // palette derives its matrix from the primaries and white point; the
+        // published constants differ from it by up to about 2e-4.
+        for (ours, theirs) in [
+            (&LINEAR_RGB_TO_XYZ, &rgb_to_xyz),
+            (&XYZ_TO_LINEAR_RGB, &xyz_to_rgb),
+        ] {
+            for i in 0..3 {
+                for j in 0..3 {
+                    assert!(
+                        (ours[i][j] - theirs[i][j]).abs() < 1e-3,
+                        "{} vs {}",
+                        ours[i][j],
+                        theirs[i][j]
+                    );
+                }
+            }
+        }
+        let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        assert_mat3_close(
+            &mat3_product(&XYZ_TO_LINEAR_RGB, &LINEAR_RGB_TO_XYZ),
+            &identity,
+            6,
+        );
+        assert_mat3_close(&mat3_product(&LMS_TO_XYZ, &XYZ_TO_LMS), &identity, 6);
+    }
+
+    #[test]
+    fn the_lms_matrix_composes_from_the_xyz_one() {
+        assert_mat3_close(
+            &mat3_product(&XYZ_TO_LMS, &LINEAR_RGB_TO_XYZ),
+            &LINEAR_RGB_TO_LMS,
+            6,
+        );
+        assert_mat3_close(
+            &mat3_product(&LMS_TO_LINEAR_RGB, &mat3_product(&LMS_TO_XYZ, &XYZ_TO_LMS)),
+            &LMS_TO_LINEAR_RGB,
+            6,
+        );
     }
 
     #[test]
