@@ -21,14 +21,6 @@ pub const MAX_ZOOM: f32 = 32.0;
 const ZOOM_STEP: f32 = 1.2;
 const WHEEL_SPEED: f32 = 0.002;
 const PERCENTAGES: [f32; 4] = [0.5, 1.0, 2.0, 4.0];
-const RESOLUTIONS: [(u32, u32); 6] = [
-    (256, 256),
-    (512, 512),
-    (1024, 1024),
-    (2048, 2048),
-    (1280, 720),
-    (1920, 1080),
-];
 
 /// A zoom (device pixels per canvas pixel) and the canvas centre's offset
 /// from the pane's, in logical pixels.
@@ -358,7 +350,6 @@ impl Render for PreviewArea {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Open {
-    Resolution,
     Zoom,
     Export,
 }
@@ -370,7 +361,7 @@ struct OpenMenu {
     popup: Option<popup::Open>,
 }
 
-/// The preview area's header controls: canvas size, zoom and export.
+/// The preview area's header controls: zoom and export.
 pub struct PreviewToolbar {
     area: Entity<PreviewArea>,
     playback: Entity<Playback>,
@@ -404,28 +395,6 @@ impl PreviewToolbar {
         let area = self.area.clone();
         let playback = self.playback.clone();
         match kind {
-            Open::Resolution => {
-                // While following, the stored size has no effect, so it can't be picked.
-                let following = playback.read(cx).following();
-                let current = playback.read(cx).resolution;
-                PopupMenu::build(window, cx, move |menu, _, _| {
-                    RESOLUTIONS
-                        .iter()
-                        .fold(menu.min_w(px(176.0)), |menu, &(width, height)| {
-                            let playback = playback.clone();
-                            let size = Size::new(width, height);
-                            menu.item(
-                                PopupMenuItem::new(format!("{width} × {height}"))
-                                    .checked(current == size)
-                                    .disabled(following)
-                                    .on_click(popup::on_select(move |window, cx| {
-                                        playback
-                                            .update(cx, |p, cx| p.set_resolution(size, window, cx));
-                                    })),
-                            )
-                        })
-                })
-            }
             Open::Zoom => {
                 let act = |f: fn(&mut PreviewArea, &mut Context<PreviewArea>)| {
                     let area = area.clone();
@@ -528,7 +497,6 @@ impl Render for PreviewToolbar {
                     open.popup = Some(opened);
                 }
             }
-            let resolution = self.playback.read(cx).size_of(self.area.entity_id());
             let zoom = self.area.read(cx).zoom(cx);
             let this = cx.entity();
             let open = move |kind: Open| {
@@ -555,16 +523,6 @@ impl Render for PreviewToolbar {
                 .items_center()
                 .justify_end()
                 .gap_1()
-                .child(
-                    Button::new("resolution")
-                        .debug_selector(|| "preview-resolution".into())
-                        .ghost()
-                        .xsmall()
-                        .label(format!("{} × {}", resolution.width, resolution.height))
-                        .selected(is_open(Open::Resolution))
-                        .tooltip("Canvas size")
-                        .on_click(open(Open::Resolution)),
-                )
                 .child(
                     Button::new("zoom")
                         .debug_selector(|| "preview-zoom".into())
@@ -780,7 +738,7 @@ mod tests {
 
         let header = cx.debug_bounds("header").expect("the header is drawn");
         let centre = header.origin.y + header.size.height / 2.0;
-        let controls = ["preview-resolution", "preview-zoom", "preview-export"];
+        let controls = ["preview-zoom", "preview-export"];
         let bounds: Vec<_> = controls
             .iter()
             .map(|name| {
@@ -796,15 +754,15 @@ mod tests {
                 "{name} isn't vertically centred: {b:?} in {header:?}"
             );
         }
-        let export = bounds[2];
+        let export = bounds[1];
         assert!(
             export.right() >= header.right() - px(6.0) - px(1.0),
             "the export button isn't at the right end: {export:?} in {header:?}"
         );
-        let resolution = bounds[0];
+        let zoom = bounds[0];
         assert!(
-            resolution.origin.x > header.origin.x + header.size.width / 2.0,
-            "the controls are still at the left: {resolution:?} in {header:?}"
+            zoom.origin.x > header.origin.x + header.size.width / 2.0,
+            "the controls are still at the left: {zoom:?} in {header:?}"
         );
     }
 }
