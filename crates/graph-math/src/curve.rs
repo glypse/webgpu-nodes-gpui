@@ -22,6 +22,10 @@ impl Vec2 {
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
+
+    fn length(self) -> f64 {
+        self.x.hypot(self.y)
+    }
 }
 
 fn to_point(v: Vec2) -> Point {
@@ -59,7 +63,8 @@ pub struct CurvePoint {
 }
 
 impl CurvePoint {
-    fn handles(&self) -> (Vec2, Vec2) {
+    /// The handles shaping the curve around this point.
+    pub fn handles(&self) -> (Vec2, Vec2) {
         match self.kind {
             CurvePointKind::Vector => (Vec2::default(), Vec2::default()),
             _ => (self.left, self.right),
@@ -226,12 +231,6 @@ pub fn split_segment(points: &[CurvePoint], index: usize, x: f64) -> Option<[Cur
     Some([before, added, after])
 }
 
-impl Vec2 {
-    fn length(self) -> f64 {
-        self.x.hypot(self.y)
-    }
-}
-
 const ZERO: Vec2 = Vec2::new(0.0, 0.0);
 
 fn clamp01(n: f64) -> f64 {
@@ -243,11 +242,6 @@ fn clamp01(n: f64) -> f64 {
 pub enum HandleSide {
     Left,
     Right,
-}
-
-/// The handles shaping the curve around `point`.
-pub fn point_handles(point: &CurvePoint) -> (Vec2, Vec2) {
-    point.handles()
 }
 
 fn replaced(points: &[CurvePoint], index: usize, point: CurvePoint) -> Vec<CurvePoint> {
@@ -337,15 +331,10 @@ pub fn add_curve_point(points: &[CurvePoint], x: f64, y: f64) -> (Vec<CurvePoint
     let mut next = points.to_vec();
     next.insert(index, added);
     let (left, right) = smooth_handles(&next, index);
-    let next = replaced(
-        &next,
-        index,
-        CurvePoint {
-            left,
-            right,
-            ..added
-        },
-    );
+    if let Some(point) = next.get_mut(index) {
+        point.left = left;
+        point.right = right;
+    }
     (next, index)
 }
 

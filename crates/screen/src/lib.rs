@@ -246,13 +246,15 @@ impl<E: Clone> Screen<E> {
         Ok(())
     }
 
-    fn fresh_id(&mut self) -> AreaId {
+    /// `None` when ids run out (a saved file can hold ids up to `u64::MAX`).
+    fn fresh_id(&mut self) -> Option<AreaId> {
         // Deserialized screens may hold ids past the counter.
-        let max = self.areas.iter().map(|a| a.id.0 + 1).max().unwrap_or(0);
-        self.next_id = self.next_id.max(max);
-        let id = AreaId(self.next_id);
-        self.next_id += 1;
-        id
+        let mut next = self.next_id;
+        for a in &self.areas {
+            next = next.max(a.id.0.checked_add(1)?);
+        }
+        self.next_id = next.checked_add(1)?;
+        Some(AreaId(next))
     }
 
     fn area_mut(&mut self, id: AreaId) -> Option<&mut Area<E>> {
@@ -275,11 +277,11 @@ impl<E: Clone> Screen<E> {
 
     /// Exchange two areas' editors.
     pub fn swap(&self, a: AreaId, b: AreaId) -> Option<Self> {
-        let first = self.area(a)?.editor.clone();
-        let second = self.area(b)?.editor.clone();
         if a == b {
             return None;
         }
+        let first = self.area(a)?.editor.clone();
+        let second = self.area(b)?.editor.clone();
         let mut next = self.clone();
         next.set_editor(a, second);
         next.set_editor(b, first);
@@ -313,7 +315,7 @@ impl<E: Clone> Screen<E> {
         };
         let editor = area.editor.clone();
         let mut next = self.clone();
-        let new_id = next.fresh_id();
+        let new_id = next.fresh_id()?;
         next.area_mut(id)?.rect = kept;
         next.areas.push(Area {
             id: new_id,
@@ -415,39 +417,27 @@ impl<E: Clone> Screen<E> {
         let mut next = self.clone();
         let mut keep_pieces = Vec::new();
         let mut remove_pieces = Vec::new();
-        // Overhang at the start: the one starting first is cut where the other starts.
-        if o1.abs() >= limit {
-            let cut_keep = o1 > 0.0;
+        // At each end, the area reaching further out is cut where the other one ends.
+        let overhangs = [
+            (lo, Part::Before, o1 > 0.0, o1),
+            (hi, Part::After, o2 < 0.0, o2),
+        ];
+        for (edge, part, cut_keep, overhang) in overhangs {
+            if overhang.abs() < limit {
+                continue;
+            }
             let (target, at) = if cut_keep {
-                (keep, r_rect.get(lo))
+                (keep, r_rect.get(edge))
             } else {
-                (remove, k_rect.get(lo))
+                (remove, k_rect.get(edge))
             };
-            let (cut, piece) = next.split(target, axis, at, Part::Before, MinSize::NONE)?;
+            let (cut, piece) = next.split(target, axis, at, part, MinSize::NONE)?;
             next = cut;
             if cut_keep {
-                &mut keep_pieces
+                keep_pieces.push(piece);
             } else {
-                &mut remove_pieces
+                remove_pieces.push(piece);
             }
-            .push(piece);
-        }
-        // Overhang at the end: the one ending last is cut where the other ends.
-        if o2.abs() >= limit {
-            let cut_keep = o2 < 0.0;
-            let (target, at) = if cut_keep {
-                (keep, r_rect.get(hi))
-            } else {
-                (remove, k_rect.get(hi))
-            };
-            let (cut, piece) = next.split(target, axis, at, Part::After, MinSize::NONE)?;
-            next = cut;
-            if cut_keep {
-                &mut keep_pieces
-            } else {
-                &mut remove_pieces
-            }
-            .push(piece);
         }
 
         next = next.join_aligned(keep, remove, tolerance)?;
@@ -509,11 +499,11 @@ impl<E: Clone> Screen<E> {
         factor: f64,
         tolerance: MinSize,
     ) -> Option<Self> {
-        let editor = self.area(source)?.editor.clone();
-        let rect = self.area(target)?.rect;
         if source == target {
             return None;
         }
+        let editor = self.area(source)?.editor.clone();
+        let rect = self.area(target)?.rect;
         let mut next = self.clone();
         let mut slot = target;
         if let DockTarget::Side(side) = place {

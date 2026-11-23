@@ -1,7 +1,7 @@
 use guard::SafeListener as _;
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle,
-    DragMoveEvent, Empty, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement,
+    DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Render, StatefulInteractiveElement as _, Styled as _, StyleRefinement, Window,
     canvas, div, point, prelude::FluentBuilder as _, px, relative,
@@ -11,7 +11,7 @@ use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use theme::{ActiveTheme as _, IconName, popup};
 
 use crate::gestures::{self, Outcome, Pixels as ScreenPixels};
-use crate::{Area, AreaId, Axis, EdgeSelection, MinSize, Part, Screen};
+use crate::{Area, AreaId, Axis, EPSILON, EdgeSelection, MinSize, Part, Screen};
 
 /// The kinds of panel an area can show.
 pub trait Editor: Clone + PartialEq + 'static {
@@ -43,6 +43,11 @@ const EDGE_GRAB: f32 = 4.0;
 pub const HEADER_HEIGHT: f32 = 36.0;
 const CORNER_SIZE: f32 = 12.0;
 
+/// Whether an edge at `position` (a window fraction) lies between areas rather than on the window's border.
+fn is_interior(position: f64) -> bool {
+    position < 1.0 - EPSILON
+}
+
 /// Lays out an area's toolbar across the header row's free width. The slot is a flex box
 /// so the toolbar fills it, and the toolbar is a cached view: one with live readouts then
 /// re-renders on its own rather than re-rendering the whole screen. A cached view is laid
@@ -64,6 +69,13 @@ struct EdgeDrag;
 enum MenuKind {
     Type,
     Area,
+}
+
+/// The popup an area's header or edge opens.
+#[derive(Clone, Copy)]
+enum PopupSlot {
+    AreaMenu,
+    EdgeMenu,
 }
 
 struct OpenMenu {
@@ -159,10 +171,6 @@ impl<E: Editor> ScreenView<E> {
         self.screen = screen;
         cx.emit(ScreenEvent::Changed);
         cx.notify();
-    }
-
-    pub fn maximized(&self) -> Option<AreaId> {
-        self.maximized
     }
 
     pub fn toggle_maximized(&mut self, area: AreaId, cx: &mut Context<Self>) {
@@ -452,9 +460,43 @@ impl<E: Editor> ScreenView<E> {
             .into_any_element()
     }
 
+    /// Opens the popup in `slot` on its first draw (built by `build`), and draws it at its anchor.
+    fn draw_popup(
+        &mut self,
+        slot: PopupSlot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        build: impl FnOnce(&Self, &mut Window, &mut Context<Self>) -> Option<Entity<PopupMenu>>,
+    ) -> Option<AnyElement> {
+        if self.popup_slot(slot)?.0.is_none() {
+            let menu = build(self, window, cx)?;
+            let opened = popup::open(window, cx, menu, move |this: &mut Self, cx| this.clear_popup(slot, cx));
+            if let Some((popup, _)) = self.popup_slot(slot) {
+                *popup = Some(opened);
+            }
+        }
+        let (popup, at) = self.popup_slot(slot)?;
+        Some(popup.as_ref()?.draw(window, at).into_any_element())
+    }
+
+    fn popup_slot(&mut self, slot: PopupSlot) -> Option<(&mut Option<popup::Open>, Point<Pixels>)> {
+        match slot {
+            PopupSlot::AreaMenu => self.menu.as_mut().map(|m| (&mut m.popup, m.at)),
+            PopupSlot::EdgeMenu => self.edge_menu.as_mut().map(|m| (&mut m.popup, m.at)),
+        }
+    }
+
+    fn clear_popup(&mut self, slot: PopupSlot, cx: &mut Context<Self>) {
+        match slot {
+            PopupSlot::AreaMenu => self.menu = None,
+            PopupSlot::EdgeMenu => self.edge_menu = None,
+        }
+        cx.notify();
+    }
+
     fn render_edge_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let open = self.edge_menu.as_ref()?;
-        if open.popup.is_none() {
+        self.draw_popup(PopupSlot::EdgeMenu, window, cx, |this, window, cx| {
+            let open = this.edge_menu.as_ref()?;
             let axis = open.axis;
             let (forward, backward) = (open.forward.is_some(), open.backward.is_some());
             let view = cx.entity();
@@ -505,7 +547,7 @@ impl<E: Editor> ScreenView<E> {
                 Axis::X => (IconName::ArrowLineRight, IconName::ArrowLineLeft, IconName::ArrowsLeftRight, "Join right", "Join left"),
                 Axis::Y => (IconName::ArrowLineDown, IconName::ArrowLineUp, IconName::ArrowsDownUp, "Join down", "Join up"),
             };
-            let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+            Some(PopupMenu::build(window, cx, move |menu, _, _| {
                 menu.min_w(px(208.0))
                     .label("Area edge options")
                     .separator()
@@ -516,32 +558,23 @@ impl<E: Editor> ScreenView<E> {
                     .item(PopupMenuItem::new(backward_label).icon(backward_icon).disabled(!backward).on_click(popup::on_select(join(false))))
                     .separator()
                     .item(PopupMenuItem::new("Swap areas").icon(swap_icon).on_click(popup::on_select(swap)))
-            });
-            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
-                this.edge_menu = None;
-                cx.notify();
-            });
-            if let Some(open) = self.edge_menu.as_mut() {
-                open.popup = Some(opened);
-            }
-        }
-        let open = self.edge_menu.as_ref()?;
-        Some(open.popup.as_ref()?.draw(window, open.at).into_any_element())
+            }))
+        })
     }
 
     fn render_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let open = self.menu.as_ref()?;
-        if open.popup.is_none() {
+        self.draw_popup(PopupSlot::AreaMenu, window, cx, |this, window, cx| {
+            let open = this.menu.as_ref()?;
             let (id, kind) = (open.area, open.kind);
-            let current = self.screen.area(id)?.editor.clone();
-            let maximized = self.maximized == Some(id);
-            let can_close = self.screen.areas().len() >= 2;
+            let current = this.screen.area(id)?.editor.clone();
+            let maximized = this.maximized == Some(id);
+            let can_close = this.screen.areas().len() >= 2;
             let view = cx.entity();
             let act = |f: fn(&mut Self, AreaId, &mut Context<Self>)| {
                 let view = view.clone();
                 move |_: &mut Window, cx: &mut App| view.update(cx, |this, cx| f(this, id, cx))
             };
-            let menu = match kind {
+            Some(match kind {
                 MenuKind::Type => {
                     let items: Vec<PopupMenuItem> = E::all()
                         .iter()
@@ -577,17 +610,8 @@ impl<E: Editor> ScreenView<E> {
                         .separator()
                         .item(PopupMenuItem::new("Close area").disabled(!can_close).on_click(popup::on_select(act(Self::close))))
                 }),
-            };
-            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
-                this.menu = None;
-                cx.notify();
-            });
-            if let Some(open) = self.menu.as_mut() {
-                open.popup = Some(opened);
-            }
-        }
-        let open = self.menu.as_ref()?;
-        Some(open.popup.as_ref()?.draw(window, open.at).into_any_element())
+            })
+        })
     }
 
     /// Handles in an area's corners: drag into the area to split it, out to join or dock, with Ctrl to swap.
@@ -707,7 +731,7 @@ impl<E: Editor> ScreenView<E> {
                 (Axis::X, r.right, r.top, r.bottom),
                 (Axis::Y, r.bottom, r.left, r.right),
             ] {
-                if at < 1.0 - 1e-9 {
+                if is_interior(at) {
                     lines.push((axis, at, start, end));
                 }
             }
@@ -760,8 +784,9 @@ impl<E: Editor> Render for ScreenView<E> {
         let (background, border) = (theme.colors.background, theme.colors.border);
         let view = cx.entity();
         let maximized = self.maximized;
-        let areas: Vec<Area<E>> = self.screen.areas().to_vec();
-        let rendered: Vec<AnyElement> = areas
+        let rendered: Vec<AnyElement> = self
+            .screen
+            .areas()
             .iter()
             .filter(|area| maximized.is_none_or(|id| id == area.id))
             .map(|area| {
@@ -781,7 +806,7 @@ impl<E: Editor> Render for ScreenView<E> {
                     .top(relative(rect.top as f32))
                     .w(relative(rect.width() as f32))
                     .h(relative(rect.height() as f32))
-                    .on_hover(cx.listener(move |this, hovered: &bool, _, _| {
+                    .on_hover(cx.safe_listener(move |this, hovered: &bool, _, _| {
                         if *hovered {
                             this.hovered = Some(id);
                         } else if this.hovered == Some(id) {
@@ -792,10 +817,10 @@ impl<E: Editor> Render for ScreenView<E> {
                     .flex_col()
                     .overflow_hidden()
                     .bg(background)
-                    .when(rect.right < 1.0 - 1e-9, |d| {
+                    .when(is_interior(rect.right), |d| {
                         d.border_r_1().border_color(border)
                     })
-                    .when(rect.bottom < 1.0 - 1e-9, |d| {
+                    .when(is_interior(rect.bottom), |d| {
                         d.border_b_1().border_color(border)
                     })
                     .child(header)
@@ -875,7 +900,7 @@ impl<E: Editor> Render for ScreenView<E> {
                             }
                         });
                     }); },
-                    |_, _, _, _| { guard::guard("view canvas", || {}); },
+                    |_, _, _, _| {},
                 )
                 .absolute()
                 .size_full(),

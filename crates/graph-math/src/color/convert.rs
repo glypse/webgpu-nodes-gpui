@@ -256,6 +256,10 @@ pub fn hex_to_linear(hex: &str, space: ColorSpace) -> Option<Rgba> {
 
 const GREY: f64 = 1e-6;
 
+/// Below this saturation or chroma a colour's hue doesn't show. The ramp shader
+/// tests against the same value, so both sides must agree.
+pub const ACHROMATIC: f64 = 1e-4;
+
 /// HSV (of the sRGB-encoded colour) of a linear one, keeping `previous`'s
 /// hue for a grey and its hue and saturation for black, which have none: so
 /// a hue survives going through them.
@@ -277,7 +281,7 @@ pub fn hsv_keeping_hue(color: Rgb, previous: Hsv) -> Hsv {
 /// OKLch of a linear colour, keeping `previous`'s hue for a grey, which has none.
 pub fn lch_keeping_hue(color: Rgb, previous: Lch) -> Lch {
     let next = linear_to_oklch(color);
-    if next.c < 1e-4 {
+    if next.c < ACHROMATIC {
         Lch {
             c: 0.0,
             h: previous.h,

@@ -9,7 +9,7 @@ Colour, curve and colour-ramp maths shared by the node graph (its WGSL computes 
 - `src/color/modes.rs`: `ColorMode` (Rgb, Hsv, Oklch) with parse/name; `color_to_linear`, `linear_to_color`, `convert_color_mode`.
 - `src/color/display.rs`: sRGB<->Display P3 matrices, `to_gamut`/`from_gamut`/`clip_to_gamut`/`in_gamut`, `wgsl_mat3`.
 - `src/curve.rs`: `CurvePoint` (kind: vector/free/aligned/mirrored), cubic segments, evaluation, point/handle editing, presets.
-- `src/ramp.rs`: `RampStop`, `RampColorStop`, `RampModes`, stop editing, `ramp_to_space`/`ramp_from_space`, `hue_delta`, `evaluate_ramp`; interpolation and hue-mode code constants.
+- `src/ramp.rs`: `RampStop`, `RampColorStop`, `RampModes`, stop editing, `ramp_to_space`/`ramp_from_space`, `hue_delta`, `evaluate_ramp` (or `convert_stops` once + `evaluate_converted` per sample); interpolation and hue-mode code constants.
 
 ## Key items
 - Colour: `Rgb`/`Rgba` (linear sRGB), `encode_in`/`decode_from`, `linear_to_oklch`/`oklch_to_linear`, `hex_to_linear`/`linear_to_hex`.

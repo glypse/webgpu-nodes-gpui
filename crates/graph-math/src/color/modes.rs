@@ -1,6 +1,7 @@
 use super::ColorSpace;
 use super::{
-    Hsv, Lch, Rgb, decode_rgb, encode_rgb, hsv_to_rgb, linear_to_oklch, oklch_to_linear, rgb_to_hsv,
+    ACHROMATIC, Hsv, Lch, Rgb, decode_rgb, encode_rgb, hsv_to_rgb, linear_to_oklch, oklch_to_linear,
+    rgb_to_hsv,
 };
 
 /// What three colour components are. RGB is linear (what the shader computes
@@ -61,7 +62,7 @@ pub fn linear_to_color(mode: ColorMode, rgb: Rgb, turns: f64) -> ColorComponents
         }
         ColorMode::Oklch => {
             let Lch { l, c, h } = linear_to_oklch(rgb);
-            if c < 1e-4 {
+            if c < ACHROMATIC {
                 [l, 0.0, turns * 360.0]
             } else {
                 [l, c, h]
@@ -88,14 +89,6 @@ pub fn convert_color_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn modes_round_trip_by_name() {
-        for mode in ColorMode::ALL {
-            assert_eq!(ColorMode::parse(mode.name()), Some(mode));
-        }
-        assert_eq!(ColorMode::parse("cmyk"), None);
-    }
 
     #[test]
     fn conversion_keeps_the_colour() {

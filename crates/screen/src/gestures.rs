@@ -2,11 +2,12 @@
 //! dock into another area, or swap with one.
 
 use crate::{Area, AreaId, Axis, DockTarget, MinSize, Part, Rect, Screen, Side, neighbour_side};
+use crate::view::HEADER_HEIGHT;
 
 /// How far a corner drag goes before it splits, joins or docks.
 pub const CORNER_DRAG_PX: f64 = 16.0;
 /// Within this distance of the shared edge, dragging into a neighbour joins rather than docks.
-pub const JOIN_ZONE_PX: f64 = 5.0 * 36.0;
+pub const JOIN_ZONE_PX: f64 = 5.0 * HEADER_HEIGHT as f64;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Outcome {
@@ -31,7 +32,9 @@ impl Outcome {
 /// Snaps a fraction near one half to exactly one half, and keeps it within the minimum part size.
 pub fn snap_half(fraction: f64, min_fraction: f64) -> f64 {
     let snapped = if (fraction - 0.5).abs() < 0.02 { 0.5 } else { fraction };
-    snapped.clamp(min_fraction, 1.0 - min_fraction)
+    // Above one half the two bounds would cross, which `clamp` rejects by panicking; a NaN bound panics too.
+    let limit = if min_fraction.is_nan() { 0.0 } else { min_fraction.clamp(0.0, 0.5) };
+    snapped.clamp(limit, 1.0 - limit)
 }
 
 /// The size of the screen in pixels, to turn fractions into distances.
@@ -215,6 +218,17 @@ mod tests {
         assert_eq!(snap_half(0.3, 0.1), 0.3);
         assert_eq!(snap_half(0.01, 0.1), 0.1);
         assert_eq!(snap_half(0.99, 0.1), 0.9);
+    }
+
+    #[test]
+    fn a_split_in_an_area_narrower_than_twice_the_minimum_does_not_panic() {
+        // 150 px wide area in a 1000 px window, with a 96 px minimum: the minimum is over half of it.
+        let screen = Screen::new([(Rect::new(0.0, 0.0, 0.15, 1.0), 1), (Rect::new(0.15, 0.0, 1.0, 1.0), 2)]);
+        let narrow = MinSize { width: 0.096, height: 0.1 };
+        assert_eq!(snap_half(0.1 / 0.15, 0.096 / 0.15), 0.5);
+        let (area, at) = split_at(&screen, Axis::X, (100.0, 100.0), SIZE, narrow).expect("over an area");
+        assert_eq!(area, AreaId(0));
+        assert!((at - 0.075).abs() < 1e-9);
     }
 
     #[test]

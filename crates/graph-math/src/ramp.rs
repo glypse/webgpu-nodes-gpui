@@ -64,7 +64,7 @@ pub const RAMP_HUES: [(i64, &str); 4] = [
 ];
 
 /// Below this saturation (HSV) or chroma (OKLch), a colour's hue doesn't show.
-pub const RAMP_ACHROMATIC: f64 = 1e-4;
+pub const RAMP_ACHROMATIC: f64 = crate::color::ACHROMATIC;
 
 /// Cardinal spline tension.
 pub const RAMP_CARDINAL_TENSION: f64 = 0.71;
@@ -73,7 +73,7 @@ const STOP_PREFIX: &str = "stop-";
 
 pub fn is_ramp_stop_id(id: &str) -> bool {
     id.strip_prefix(STOP_PREFIX)
-        .is_some_and(|n| (1..=9).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit()))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn stop(n: usize, position: f64) -> RampStop {
@@ -113,9 +113,10 @@ fn clamp01(n: f64) -> f64 {
 }
 
 fn free_stop_id(stops: &[RampStop]) -> String {
-    let n = (0..)
-        .find(|n| !stops.iter().any(|s| s.id == format!("{STOP_PREFIX}{n}")))
-        .unwrap_or(0);
+    let mut n = 0;
+    while stops.iter().any(|s| s.id == format!("{STOP_PREFIX}{n}")) {
+        n += 1;
+    }
     format!("{STOP_PREFIX}{n}")
 }
 
@@ -259,16 +260,17 @@ fn weighted(points: [Vec4; 4], weights: [f64; 4]) -> Vec4 {
 fn encoded_to_hsv(Rgb { r, g, b }: Rgb) -> [f64; 3] {
     let max = r.max(g).max(b);
     let delta = max - r.min(g).min(b);
-    let mut h = 0.0;
-    if delta > 0.0 {
-        h = if max == r {
+    let h = if delta > 0.0 {
+        if max == r {
             (g - b) / delta + if g < b { 6.0 } else { 0.0 }
         } else if max == g {
             (b - r) / delta + 2.0
         } else {
             (r - g) / delta + 4.0
-        };
-    }
+        }
+    } else {
+        0.0
+    };
     [h / 6.0, if max > 0.0 { delta / max } else { 0.0 }, max]
 }
 
@@ -507,21 +509,44 @@ fn interpolate(
     }
 }
 
+/// Each stop's colour in `modes`' space, as `evaluate_converted` takes them.
+pub fn convert_stops(stops: &[RampColorStop], modes: RampModes) -> Vec<RampColorStop> {
+    stops
+        .iter()
+        .map(|s| RampColorStop {
+            position: s.position,
+            color: ramp_to_space(s.color, modes.space),
+        })
+        .collect()
+}
+
 /// The colour (linear RGB and alpha) of a ramp at `x`.
 pub fn evaluate_ramp(stops: &[RampColorStop], x: f64, modes: RampModes) -> Vec4 {
+    match stops {
+        [] => [0.0, 0.0, 0.0, 1.0],
+        [only] => only.color,
+        _ => evaluate_converted(&convert_stops(stops, modes), x, modes),
+    }
+}
+
+/// `evaluate_ramp` for stops already given by `convert_stops`, so a ramp
+/// sampled many times converts its stops once.
+pub fn evaluate_converted(stops: &[RampColorStop], x: f64, modes: RampModes) -> Vec4 {
     let count = stops.len();
     let Some(only) = stops.first() else {
         return [0.0, 0.0, 0.0, 1.0];
     };
     if count < 2 {
-        return only.color;
+        return ramp_from_space(only.color, modes.space);
     }
-    let mut i = 0;
-    for (k, stop) in stops.iter().enumerate().take(count - 1).skip(1) {
-        if stop.position <= x {
-            i = k;
-        }
-    }
+    let i = stops
+        .iter()
+        .enumerate()
+        .take(count - 1)
+        .skip(1)
+        .rev()
+        .find(|(_, stop)| stop.position <= x)
+        .map_or(0, |(k, _)| k);
     let at = |k: isize| stops.get(k.clamp(0, count as isize - 1) as usize).copied().unwrap_or(*only);
     let i_signed = i as isize;
     let around = [
@@ -537,7 +562,7 @@ pub fn evaluate_ramp(stops: &[RampColorStop], x: f64, modes: RampModes) -> Vec4 
         space,
         hue,
     } = modes;
-    let mut q = around.map(|s| ramp_to_space(s.color, space));
+    let mut q = around.map(|s| s.color);
     if space == RAMP_HSV || space == RAMP_OKLCH {
         q = unwrap_hues(q, hue);
     }
@@ -788,7 +813,7 @@ mod tests {
     fn recognises_stop_ids() {
         assert!(is_ramp_stop_id("stop-12"));
         assert!(!is_ramp_stop_id("stop-"));
-        assert!(!is_ramp_stop_id("stop-1234567890"));
+        assert!(is_ramp_stop_id("stop-1234567890"));
         assert!(!is_ramp_stop_id("stop-1a"));
         assert!(!is_ramp_stop_id("factor"));
     }

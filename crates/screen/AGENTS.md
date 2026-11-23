@@ -12,7 +12,7 @@ Area layout: a window tiled by rectangles of fractional coordinates, with split/
 - `Screen<E>`: `areas: Vec<Area<E>>`, `next_id: u64`. Serde-derived. Ops return `Option<Screen<E>>` (`None` = refused; input untouched).
 - `Area<E>`: `id`, `rect: Rect`, `editor: E`. Rect edges are window fractions in 0..=1, top-left origin.
 - Ops: `split(id, axis, at, Part, MinSize)`, `join(keep, remove, tol)`, `close(id, tol)`, `dock(src, target, DockTarget, factor, tol)`, `swap(a, b)`, `edge_at(x, y, threshold, extend)`, `edge_limits`, `move_edge`.
-- `ScreenView<E>`: `new(screen, render_area, cx)`, `screen()`, `set_screen()` (emits `ScreenEvent::Changed`), `maximized()`, `toggle_maximized()`. Drag state holds a snapshot of the screen taken at drag start.
+- `ScreenView<E>`: `new(screen, render_area, cx)`, `screen()`, `set_screen()` (emits `ScreenEvent::Changed`), `toggle_maximized()`. Drag state holds a snapshot of the screen taken at drag start.
 - `Editor` trait: `all()`, `label()`, `icon()`; `Clone + PartialEq + 'static`. The host's panel enum implements it.
 
 ## Host integration
@@ -24,7 +24,7 @@ Area layout: a window tiled by rectangles of fractional coordinates, with split/
 - Shared edges are equal `f64`s (`EPSILON` 1e-9 via `same`). Moves rewrite every coordinate equal to the old one (`move_line`), so neighbours stay flush.
 - `validate()` requires: non-empty, each area sized and inside [0,1] (plus epsilon), unique ids, no overlaps, total area 1 within 1e-6.
 - `Screen::new` assigns ids 0..n by position; ids in a saved file are not kept on load, only checked for uniqueness by the host. Graph state is re-attached by zipping areas with saved views in order (`layout.rs`).
-- `fresh_id` takes max(existing id + 1, `next_id`), so ids never collide with deserialized areas.
+- `fresh_id` takes max(existing id + 1, `next_id`), so ids never collide with deserialized areas; when that would overflow `u64`, the split is refused.
 - `split` refuses parts smaller than `min` or cuts at/beyond the edges. `join`/`close` cut overhangs with `MinSize::NONE` internally.
 - `join` lines up ends closer than the tolerance (`align_neighbours`) and refuses if the result isn't tiled. `close` picks the neighbour with the greatest edge-length alignment and never closes the last area.
 - `move_edge` clamps to `edge_limits`, which keep each adjacent area at `min` (returns the input unchanged if limits cross).
