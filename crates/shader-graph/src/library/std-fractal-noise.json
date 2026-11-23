@@ -15,7 +15,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 23
+					"y": 254
 				}
 			},
 			{
@@ -23,8 +23,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 264,
-					"y": 119
+					"x": 224,
+					"y": 354
 				},
 				"group": {
 					"definitionRef": "std-noise-coordinates@e40ba35d8573e4af",
@@ -40,7 +40,7 @@
 				},
 				"position": {
 					"x": 24,
-					"y": 169
+					"y": 440
 				},
 				"frame": "e72fec5e-0121-44cd-ba85-bd037693d36c"
 			},
@@ -49,8 +49,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 504,
-					"y": 144
+					"x": 424,
+					"y": 356
 				},
 				"frame": "e72fec5e-0121-44cd-ba85-bd037693d36c"
 			},
@@ -59,8 +59,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 744,
-					"y": 139
+					"x": 624,
+					"y": 382
 				},
 				"group": {
 					"definitionRef": "std-noise-distortion@adf9353ddf5afc4a",
@@ -76,8 +76,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 984,
-					"y": 215
+					"x": 824,
+					"y": 499
 				},
 				"frame": "e72fec5e-0121-44cd-ba85-bd037693d36c"
 			},
@@ -89,8 +89,8 @@
 					"note": "The octaves, combined as Type does."
 				},
 				"position": {
-					"x": 1155,
-					"y": 67
+					"x": 996,
+					"y": 263
 				}
 			},
 			{
@@ -98,8 +98,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1419,
-					"y": 145
+					"x": 1220,
+					"y": 382
 				},
 				"group": {
 					"definitionRef": "std-fractal-noise-octaves@5086dc4db0dd5e7d",
@@ -114,8 +114,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 1179,
-					"y": 235
+					"x": 1020,
+					"y": 519
 				},
 				"frame": "c796d421-dbdf-4158-a932-ba8c150f1be4"
 			},
@@ -126,8 +126,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 1697,
-					"y": 175
+					"x": 1458,
+					"y": 463
 				},
 				"frame": "c796d421-dbdf-4158-a932-ba8c150f1be4"
 			},
@@ -139,7 +139,7 @@
 					"note": "Fac and two more fractal noises, seeded apart."
 				},
 				"position": {
-					"x": 2041,
+					"x": 1767,
 					"y": 0
 				}
 			},
@@ -158,8 +158,8 @@
 					}
 				},
 				"position": {
-					"x": 2325,
-					"y": 624
+					"x": 2021,
+					"y": 814
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -172,8 +172,8 @@
 					}
 				},
 				"position": {
-					"x": 2565,
-					"y": 534
+					"x": 2221,
+					"y": 730
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -184,8 +184,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 2065,
-					"y": 80
+					"x": 1791,
+					"y": 275
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -194,8 +194,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 2935,
-					"y": 894
+					"x": 2551,
+					"y": 1125
 				},
 				"group": {
 					"definitionRef": "std-fractal-noise-octaves@5086dc4db0dd5e7d",
@@ -218,8 +218,8 @@
 					}
 				},
 				"position": {
-					"x": 2325,
-					"y": 1020
+					"x": 2021,
+					"y": 1314
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -232,8 +232,8 @@
 					}
 				},
 				"position": {
-					"x": 2565,
-					"y": 744
+					"x": 2221,
+					"y": 956
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -242,8 +242,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 2935,
-					"y": 354
+					"x": 2551,
+					"y": 539
 				},
 				"group": {
 					"definitionRef": "std-fractal-noise-octaves@5086dc4db0dd5e7d",
@@ -260,8 +260,8 @@
 					}
 				},
 				"position": {
-					"x": 3185,
-					"y": 834
+					"x": 2761,
+					"y": 1122
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -272,8 +272,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3425,
-					"y": 864
+					"x": 2961,
+					"y": 1150
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -282,8 +282,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1659,
-					"y": 221
+					"x": 1420,
+					"y": 523
 				},
 				"frame": "c796d421-dbdf-4158-a932-ba8c150f1be4"
 			},
@@ -292,8 +292,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2426,
-					"y": 880
+					"x": 2102,
+					"y": 1099
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -302,8 +302,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 458
+					"x": 2302,
+					"y": 654
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -312,8 +312,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 496
+					"x": 2302,
+					"y": 692
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -322,8 +322,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 78
+					"x": 2302,
+					"y": 274
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -332,8 +332,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 116
+					"x": 2302,
+					"y": 312
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -342,8 +342,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 154
+					"x": 2302,
+					"y": 350
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -352,8 +352,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 192
+					"x": 2302,
+					"y": 388
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -362,8 +362,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 230
+					"x": 2302,
+					"y": 426
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -372,8 +372,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 268
+					"x": 2302,
+					"y": 464
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -382,8 +382,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 306
+					"x": 2302,
+					"y": 502
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -392,8 +392,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 344
+					"x": 2302,
+					"y": 540
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -402,8 +402,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 382
+					"x": 2302,
+					"y": 578
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			},
@@ -412,8 +412,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2666,
-					"y": 420
+					"x": 2302,
+					"y": 616
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
 			}

@@ -17,7 +17,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 333
+					"y": 456
 				}
 			},
 			{
@@ -25,8 +25,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 294,
-					"y": 692
+					"x": 254,
+					"y": 781
 				},
 				"group": {
 					"definitionRef": "std-noise-coordinates@e40ba35d8573e4af",
@@ -42,7 +42,7 @@
 				},
 				"position": {
 					"x": 24,
-					"y": 1083
+					"y": 1224
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -51,8 +51,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 534,
-					"y": 717
+					"x": 454,
+					"y": 846
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -61,8 +61,8 @@
 				"type": "floor",
 				"data": {},
 				"position": {
-					"x": 812,
-					"y": 687
+					"x": 692,
+					"y": 818
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -74,8 +74,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 1191,
-					"y": 763
+					"x": 1011,
+					"y": 906
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -84,8 +84,8 @@
 				"type": "sub",
 				"data": {},
 				"position": {
-					"x": 1090,
-					"y": 561
+					"x": 930,
+					"y": 683
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -97,8 +97,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 1330,
-					"y": 637
+					"x": 1130,
+					"y": 770
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -112,8 +112,8 @@
 					}
 				},
 				"position": {
-					"x": 294,
-					"y": 1083
+					"x": 254,
+					"y": 1224
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -125,8 +125,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 635,
-					"y": 1159
+					"x": 535,
+					"y": 1312
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -135,8 +135,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 294,
-					"y": 477
+					"x": 254,
+					"y": 603
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -156,7 +156,7 @@
 				},
 				"position": {
 					"x": 24,
-					"y": 507
+					"y": 631
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -170,8 +170,8 @@
 					}
 				},
 				"position": {
-					"x": 534,
-					"y": 447
+					"x": 454,
+					"y": 575
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -187,8 +187,8 @@
 					}
 				},
 				"position": {
-					"x": 294,
-					"y": 843
+					"x": 254,
+					"y": 982
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -200,8 +200,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 635,
-					"y": 949
+					"x": 535,
+					"y": 1097
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -213,8 +213,8 @@
 					"note": "The closest point (F1) and the one after it (F2)."
 				},
 				"position": {
-					"x": 1532,
-					"y": 668
+					"x": 1344,
+					"y": 801
 				}
 			},
 			{
@@ -222,8 +222,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1806,
-					"y": 1363
+					"x": 1588,
+					"y": 1656
 				},
 				"group": {
 					"definitionRef": "std-voronoi-nearest@5bce3e40c872f924",
@@ -238,8 +238,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 1556,
-					"y": 1663
+					"x": 1368,
+					"y": 1989
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -251,8 +251,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 2086,
-					"y": 2115
+					"x": 1828,
+					"y": 2496
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -264,8 +264,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 2086,
-					"y": 1107
+					"x": 1828,
+					"y": 1374
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -277,8 +277,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 2086,
-					"y": 1855
+					"x": 1828,
+					"y": 2198
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -290,8 +290,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 2086,
-					"y": 2060
+					"x": 1828,
+					"y": 2431
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -300,8 +300,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 2154,
-					"y": 806
+					"x": 1896,
+					"y": 1034
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -310,8 +310,8 @@
 				"type": "to-int",
 				"data": {},
 				"position": {
-					"x": 2394,
-					"y": 746
+					"x": 2096,
+					"y": 978
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -320,8 +320,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 2634,
-					"y": 801
+					"x": 2296,
+					"y": 1011
 				},
 				"group": {
 					"definitionRef": "std-hash@392514c3c7486a42",
@@ -337,8 +337,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 2975,
-					"y": 877
+					"x": 2577,
+					"y": 1129
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -347,8 +347,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 2154,
-					"y": 1973
+					"x": 1896,
+					"y": 2334
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -357,8 +357,8 @@
 				"type": "div",
 				"data": {},
 				"position": {
-					"x": 2394,
-					"y": 1943
+					"x": 2096,
+					"y": 2306
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -370,8 +370,8 @@
 					"hideLinks": true
 				},
 				"position": {
-					"x": 2975,
-					"y": 2019
+					"x": 2577,
+					"y": 2394
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -382,8 +382,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3154,
-					"y": 1613
+					"x": 2736,
+					"y": 1969
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -392,8 +392,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 2874,
-					"y": 1001
+					"x": 2496,
+					"y": 1259
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -402,8 +402,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 2154,
-					"y": 1212
+					"x": 1896,
+					"y": 1485
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -412,8 +412,8 @@
 				"type": "to-int",
 				"data": {},
 				"position": {
-					"x": 2394,
-					"y": 1152
+					"x": 2096,
+					"y": 1429
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -422,8 +422,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 2634,
-					"y": 1207
+					"x": 2296,
+					"y": 1462
 				},
 				"group": {
 					"definitionRef": "std-hash@392514c3c7486a42",
@@ -436,8 +436,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 2154,
-					"y": 1749
+					"x": 1896,
+					"y": 2083
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -446,8 +446,8 @@
 				"type": "div",
 				"data": {},
 				"position": {
-					"x": 2394,
-					"y": 1763
+					"x": 2096,
+					"y": 2109
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -459,7 +459,7 @@
 					"note": "F1 blended with the points around it, or F1 itself at no smoothness."
 				},
 				"position": {
-					"x": 3543,
+					"x": 3095,
 					"y": 0
 				}
 			},
@@ -468,8 +468,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 3857,
-					"y": 414
+					"x": 3369,
+					"y": 531
 				},
 				"group": {
 					"definitionRef": "std-voronoi-smooth@a1188c4f99e363ce",
@@ -484,8 +484,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3567,
-					"y": 624
+					"x": 3119,
+					"y": 757
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -501,8 +501,8 @@
 					}
 				},
 				"position": {
-					"x": 4097,
-					"y": 78
+					"x": 3569,
+					"y": 216
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -511,8 +511,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 4597,
-					"y": 144
+					"x": 3989,
+					"y": 279
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -523,8 +523,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 4847,
-					"y": 770
+					"x": 4199,
+					"y": 934
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -533,8 +533,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 4597,
-					"y": 354
+					"x": 3989,
+					"y": 505
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -543,8 +543,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 4097,
-					"y": 805
+					"x": 3569,
+					"y": 955
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -553,8 +553,8 @@
 				"type": "div",
 				"data": {},
 				"position": {
-					"x": 4337,
-					"y": 775
+					"x": 3769,
+					"y": 927
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -563,8 +563,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 4597,
-					"y": 800
+					"x": 3989,
+					"y": 962
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			},
@@ -576,8 +576,8 @@
 					"note": "How far the cells' edges are."
 				},
 				"position": {
-					"x": 3543,
-					"y": 1046
+					"x": 3095,
+					"y": 1224
 				}
 			},
 			{
@@ -585,8 +585,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 3817,
-					"y": 1124
+					"x": 3339,
+					"y": 1382
 				},
 				"group": {
 					"definitionRef": "std-voronoi-edges@f36b091ddeefc845",
@@ -601,8 +601,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3567,
-					"y": 1334
+					"x": 3119,
+					"y": 1608
 				},
 				"frame": "bc0aa380-f579-45b0-b7d5-685bc92efc65"
 			},
@@ -613,8 +613,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 4057,
-					"y": 1154
+					"x": 3539,
+					"y": 1440
 				},
 				"frame": "bc0aa380-f579-45b0-b7d5-685bc92efc65"
 			},
@@ -626,8 +626,8 @@
 					"note": "The largest ball of the metric inside F1's cell."
 				},
 				"position": {
-					"x": 3543,
-					"y": 1975
+					"x": 3095,
+					"y": 2198
 				}
 			},
 			{
@@ -635,8 +635,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 3817,
-					"y": 2053
+					"x": 3339,
+					"y": 2414
 				},
 				"group": {
 					"definitionRef": "std-voronoi-radius@2148d9fb57176239",
@@ -651,8 +651,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3567,
-					"y": 2203
+					"x": 3119,
+					"y": 2584
 				},
 				"frame": "7a9a994f-6141-436f-ad93-01287561390f"
 			},
@@ -663,8 +663,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 4057,
-					"y": 2083
+					"x": 3539,
+					"y": 2472
 				},
 				"frame": "7a9a994f-6141-436f-ad93-01287561390f"
 			},
@@ -673,8 +673,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 774,
-					"y": 793
+					"x": 654,
+					"y": 934
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -683,8 +683,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1052,
-					"y": 763
+					"x": 892,
+					"y": 906
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -693,8 +693,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2255,
-					"y": 1899
+					"x": 1977,
+					"y": 2252
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -703,8 +703,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2735,
-					"y": 981
+					"x": 2377,
+					"y": 1239
 				},
 				"frame": "7e523890-0c1e-4729-8b3a-8b7664b3cf0b"
 			},
@@ -713,8 +713,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 774,
-					"y": 523
+					"x": 654,
+					"y": 663
 				},
 				"frame": "49d12ffe-8a6f-484a-a1f7-fbd8e2cbf636"
 			},
@@ -723,8 +723,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 4438,
-					"y": 184
+					"x": 3850,
+					"y": 331
 				},
 				"frame": "10762a24-20a1-4730-8efd-c2853be1f195"
 			}

@@ -16,7 +16,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 90
+					"y": 101
 				}
 			},
 			{
@@ -25,7 +25,7 @@
 				"data": {},
 				"position": {
 					"x": 24,
-					"y": 276
+					"y": 285
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -44,8 +44,8 @@
 					}
 				},
 				"position": {
-					"x": 264,
-					"y": 450
+					"x": 224,
+					"y": 496
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -54,8 +54,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 504,
-					"y": 420
+					"x": 424,
+					"y": 468
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -66,8 +66,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 264,
-					"y": 360
+					"x": 224,
+					"y": 382
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -76,8 +76,8 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 504,
-					"y": 186
+					"x": 424,
+					"y": 201
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -86,8 +86,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 744,
-					"y": 390
+					"x": 624,
+					"y": 440
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -96,8 +96,8 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 3481,
-					"y": 549
+					"x": 3018,
+					"y": 597
 				}
 			},
 			{
@@ -109,7 +109,7 @@
 					}
 				},
 				"position": {
-					"x": 1941,
+					"x": 1668,
 					"y": 0
 				}
 			},
@@ -118,8 +118,8 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 3165,
-					"y": 305
+					"x": 2740,
+					"y": 348
 				}
 			},
 			{
@@ -134,8 +134,8 @@
 					}
 				},
 				"position": {
-					"x": 3481,
-					"y": 277
+					"x": 3018,
+					"y": 320
 				}
 			},
 			{
@@ -143,8 +143,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 3793,
-					"y": 307
+					"x": 3291,
+					"y": 347
 				},
 				"group": {
 					"definitionRef": "std-gaussian-blur-1d@b8ee619e87af3e42",
@@ -158,8 +158,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3165,
-					"y": 96
+					"x": 2740,
+					"y": 108
 				}
 			},
 			{
@@ -174,8 +174,8 @@
 					}
 				},
 				"position": {
-					"x": 3793,
-					"y": 529
+					"x": 3291,
+					"y": 615
 				}
 			},
 			{
@@ -183,8 +183,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 4108,
-					"y": 565
+					"x": 3566,
+					"y": 620
 				},
 				"group": {
 					"definitionRef": "std-gaussian-blur-1d@b8ee619e87af3e42",
@@ -196,8 +196,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 3793,
-					"y": 85
+					"x": 3291,
+					"y": 79
 				},
 				"group": {
 					"definitionRef": "std-gaussian-blur-2d@134e31d29e82763f",
@@ -212,8 +212,8 @@
 					"note": "A pixel's step along the angle, in degrees from the x axis,\nand the radius that way: per axis radii make an ellipse."
 				},
 				"position": {
-					"x": 1149,
-					"y": 497
+					"x": 996,
+					"y": 558
 				}
 			},
 			{
@@ -221,8 +221,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1423,
-					"y": 929
+					"x": 1230,
+					"y": 1135
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -233,8 +233,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 1173,
-					"y": 809
+					"x": 1020,
+					"y": 994
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -253,8 +253,8 @@
 					}
 				},
 				"position": {
-					"x": 1173,
-					"y": 959
+					"x": 1020,
+					"y": 1163
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -263,8 +263,8 @@
 				"type": "cos",
 				"data": {},
 				"position": {
-					"x": 1701,
-					"y": 749
+					"x": 1468,
+					"y": 938
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -273,8 +273,8 @@
 				"type": "sin",
 				"data": {},
 				"position": {
-					"x": 1701,
-					"y": 899
+					"x": 1468,
+					"y": 1107
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -287,8 +287,8 @@
 					}
 				},
 				"position": {
-					"x": 1941,
-					"y": 839
+					"x": 1668,
+					"y": 1051
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -297,8 +297,8 @@
 				"type": "div",
 				"data": {},
 				"position": {
-					"x": 2459,
-					"y": 593
+					"x": 2106,
+					"y": 774
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -307,8 +307,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2219,
-					"y": 1014
+					"x": 1906,
+					"y": 1215
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -317,8 +317,8 @@
 				"type": "length",
 				"data": {},
 				"position": {
-					"x": 2459,
-					"y": 984
+					"x": 2106,
+					"y": 1187
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -327,8 +327,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 2709,
-					"y": 924
+					"x": 2316,
+					"y": 1101
 				},
 				"group": {
 					"definitionRef": "std-gaussian-blur-1d@b8ee619e87af3e42",
@@ -341,8 +341,8 @@
 				"type": "match",
 				"data": {},
 				"position": {
-					"x": 4426,
-					"y": 74
+					"x": 3850,
+					"y": 68
 				}
 			},
 			{
@@ -350,8 +350,8 @@
 				"type": "match",
 				"data": {},
 				"position": {
-					"x": 4755,
-					"y": 14
+					"x": 4144,
+					"y": 12
 				}
 			},
 			{
@@ -361,8 +361,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 5055,
-					"y": 44
+					"x": 4404,
+					"y": 40
 				}
 			},
 			{
@@ -370,8 +370,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 365,
-					"y": 322
+					"x": 305,
+					"y": 344
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -380,8 +380,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 984,
-					"y": 466
+					"x": 824,
+					"y": 527
 				},
 				"frame": "df862feb-5ccb-40d4-9ba9-abc7a2988514"
 			},
@@ -390,8 +390,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 3048,
-					"y": 76
+					"x": 2622,
+					"y": 88
 				}
 			},
 			{
@@ -399,8 +399,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 3582,
-					"y": 161
+					"x": 3099,
+					"y": 195
 				}
 			},
 			{
@@ -408,8 +408,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 3582,
-					"y": 499
+					"x": 3099,
+					"y": 547
 				}
 			},
 			{
@@ -417,8 +417,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1663,
-					"y": 1005
+					"x": 1430,
+					"y": 1223
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			},
@@ -427,8 +427,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2181,
-					"y": 915
+					"x": 1868,
+					"y": 1139
 				},
 				"frame": "949eda8b-3d57-40f3-b45e-cca162cb5f87"
 			}

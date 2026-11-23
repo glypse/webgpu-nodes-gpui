@@ -29,8 +29,8 @@
 					}
 				},
 				"position": {
-					"x": 332,
-					"y": 1263
+					"x": 292,
+					"y": 1361
 				},
 				"group": {
 					"definitionRef": "std-lattice-neighbor@d570510851915f32",
@@ -46,7 +46,7 @@
 				},
 				"position": {
 					"x": 24,
-					"y": 1443
+					"y": 1548
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -96,8 +96,8 @@
 					]
 				},
 				"position": {
-					"x": 2649,
-					"y": 1289
+					"x": 2289,
+					"y": 1393
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -116,8 +116,8 @@
 					"pairedOutput": "7f43c271-c19a-408e-8117-d8fbe9f33c96"
 				},
 				"position": {
-					"x": 627,
-					"y": 96
+					"x": 547,
+					"y": 100
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -130,8 +130,8 @@
 					}
 				},
 				"position": {
-					"x": 887,
-					"y": 1023
+					"x": 767,
+					"y": 1053
 				},
 				"group": {
 					"definitionRef": "std-lattice-neighbor@d570510851915f32",
@@ -144,8 +144,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1175,
-					"y": 1324
+					"x": 1015,
+					"y": 1383
 				},
 				"group": {
 					"definitionRef": "std-voronoi-point@ce0f60cf0d55ead4",
@@ -158,8 +158,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1453,
-					"y": 1452
+					"x": 1253,
+					"y": 1530
 				},
 				"group": {
 					"definitionRef": "std-voronoi-distance@9ca4557390644c3e",
@@ -176,8 +176,8 @@
 					}
 				},
 				"position": {
-					"x": 1741,
-					"y": 452
+					"x": 1501,
+					"y": 481
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -190,8 +190,8 @@
 					}
 				},
 				"position": {
-					"x": 1741,
-					"y": 908
+					"x": 1501,
+					"y": 964
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -200,8 +200,8 @@
 				"type": "min",
 				"data": {},
 				"position": {
-					"x": 1741,
-					"y": 302
+					"x": 1501,
+					"y": 311
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -210,8 +210,8 @@
 				"type": "min",
 				"data": {},
 				"position": {
-					"x": 1741,
-					"y": 663
+					"x": 1501,
+					"y": 707
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -220,8 +220,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2089,
-					"y": 603
+					"x": 1809,
+					"y": 651
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -230,8 +230,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2089,
-					"y": 1024
+					"x": 1809,
+					"y": 1103
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -240,8 +240,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2089,
-					"y": 1234
+					"x": 1809,
+					"y": 1329
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -250,8 +250,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2359,
-					"y": 1174
+					"x": 2039,
+					"y": 1273
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -260,8 +260,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2089,
-					"y": 813
+					"x": 1809,
+					"y": 877
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -270,8 +270,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2089,
-					"y": 1444
+					"x": 1809,
+					"y": 1554
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -280,8 +280,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2359,
-					"y": 1384
+					"x": 2039,
+					"y": 1498
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -292,8 +292,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3023,
-					"y": 1289
+					"x": 2623,
+					"y": 1393
 				}
 			},
 			{
@@ -301,8 +301,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 294,
-					"y": 1489
+					"x": 254,
+					"y": 1608
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -311,8 +311,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1127,
-					"y": 1099
+					"x": 967,
+					"y": 1171
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -321,8 +321,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1415,
-					"y": 1400
+					"x": 1215,
+					"y": 1500
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -331,8 +331,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1693,
-					"y": 1528
+					"x": 1453,
+					"y": 1648
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -341,8 +341,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1693,
-					"y": 186
+					"x": 1453,
+					"y": 195
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -351,8 +351,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1693,
-					"y": 224
+					"x": 1453,
+					"y": 233
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -361,8 +361,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1981,
-					"y": 558
+					"x": 1701,
+					"y": 595
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -371,8 +371,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1981,
-					"y": 243
+					"x": 1701,
+					"y": 252
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -381,8 +381,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1981,
-					"y": 1014
+					"x": 1701,
+					"y": 1079
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			},
@@ -391,8 +391,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1981,
-					"y": 282
+					"x": 1701,
+					"y": 291
 				},
 				"frame": "64c0d9d9-deed-4bac-873b-4c240271e99b"
 			}

@@ -17,7 +17,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 0
+					"y": 65
 				}
 			},
 			{
@@ -29,8 +29,8 @@
 					}
 				},
 				"position": {
-					"x": 332,
-					"y": 277
+					"x": 292,
+					"y": 387
 				},
 				"group": {
 					"definitionRef": "std-lattice-neighbor@d570510851915f32",
@@ -46,7 +46,7 @@
 				},
 				"position": {
 					"x": 24,
-					"y": 457
+					"y": 574
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -63,8 +63,8 @@
 					]
 				},
 				"position": {
-					"x": 2385,
-					"y": 78
+					"x": 2025,
+					"y": 145
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -78,8 +78,8 @@
 					"pairedOutput": "eafa60c6-26c0-4b5c-a87c-9151873bfeeb"
 				},
 				"position": {
-					"x": 647,
-					"y": 78
+					"x": 567,
+					"y": 145
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -88,8 +88,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 887,
-					"y": 264
+					"x": 767,
+					"y": 307
 				},
 				"group": {
 					"definitionRef": "std-lattice-neighbor@d570510851915f32",
@@ -102,8 +102,8 @@
 				"type": "length",
 				"data": {},
 				"position": {
-					"x": 1405,
-					"y": 234
+					"x": 1205,
+					"y": 309
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -119,8 +119,8 @@
 					}
 				},
 				"position": {
-					"x": 1895,
-					"y": 174
+					"x": 1615,
+					"y": 253
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -129,8 +129,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 1165,
-					"y": 630
+					"x": 1005,
+					"y": 756
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -139,8 +139,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1405,
-					"y": 384
+					"x": 1205,
+					"y": 478
 				},
 				"group": {
 					"definitionRef": "std-voronoi-point@ce0f60cf0d55ead4",
@@ -153,8 +153,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1655,
-					"y": 595
+					"x": 1415,
+					"y": 705
 				},
 				"group": {
 					"definitionRef": "std-voronoi-distance@9ca4557390644c3e",
@@ -167,8 +167,8 @@
 				"type": "min",
 				"data": {},
 				"position": {
-					"x": 1895,
-					"y": 565
+					"x": 1615,
+					"y": 707
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -177,8 +177,8 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 2145,
-					"y": 174
+					"x": 1825,
+					"y": 253
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -190,8 +190,8 @@
 					"note": "The largest ball of the metric around F1 inside its cell."
 				},
 				"position": {
-					"x": 2764,
-					"y": 36
+					"x": 2364,
+					"y": 0
 				}
 			},
 			{
@@ -199,8 +199,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 3028,
-					"y": 114
+					"x": 2588,
+					"y": 197
 				},
 				"frame": "bb352eb1-7e3c-4135-9268-faa066a795a9"
 			},
@@ -219,8 +219,8 @@
 					}
 				},
 				"position": {
-					"x": 2788,
-					"y": 144
+					"x": 2388,
+					"y": 225
 				},
 				"frame": "bb352eb1-7e3c-4135-9268-faa066a795a9"
 			},
@@ -231,8 +231,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 3268,
-					"y": 144
+					"x": 2788,
+					"y": 225
 				},
 				"frame": "bb352eb1-7e3c-4135-9268-faa066a795a9"
 			},
@@ -241,8 +241,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 294,
-					"y": 503
+					"x": 254,
+					"y": 634
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -251,8 +251,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1127,
-					"y": 340
+					"x": 967,
+					"y": 424
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			},
@@ -261,8 +261,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1756,
-					"y": 154
+					"x": 1496,
+					"y": 233
 				},
 				"frame": "3d0cc9cd-3e95-4a41-8027-1ecf97d2b351"
 			}

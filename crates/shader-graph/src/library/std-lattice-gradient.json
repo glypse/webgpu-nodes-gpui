@@ -13,7 +13,7 @@
 				"type": "to-int",
 				"data": {},
 				"position": {
-					"x": 406,
+					"x": 367,
 					"y": 0
 				}
 			},
@@ -25,7 +25,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 85
+					"y": 91
 				}
 			},
 			{
@@ -33,8 +33,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 707,
-					"y": 25
+					"x": 628,
+					"y": 5
 				},
 				"group": {
 					"definitionRef": "std-hash@392514c3c7486a42",
@@ -46,8 +46,8 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 1072,
-					"y": 1215
+					"x": 1036,
+					"y": 2881
 				}
 			},
 			{
@@ -58,7 +58,7 @@
 					"note": "A slope in [-1, 1]."
 				},
 				"position": {
-					"x": 3445,
+					"x": 3166,
 					"y": 0
 				}
 			},
@@ -67,8 +67,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 3709,
-					"y": 133
+					"x": 3390,
+					"y": 249
 				},
 				"frame": "085fd6f4-60d5-4f0f-813a-e5660821cb59"
 			},
@@ -87,8 +87,8 @@
 					}
 				},
 				"position": {
-					"x": 3469,
-					"y": 78
+					"x": 3190,
+					"y": 197
 				},
 				"frame": "085fd6f4-60d5-4f0f-813a-e5660821cb59"
 			},
@@ -101,8 +101,8 @@
 					}
 				},
 				"position": {
-					"x": 3949,
-					"y": 103
+					"x": 3590,
+					"y": 221
 				},
 				"frame": "085fd6f4-60d5-4f0f-813a-e5660821cb59"
 			},
@@ -114,8 +114,8 @@
 					"note": "A direction at a random angle."
 				},
 				"position": {
-					"x": 2764,
-					"y": 349
+					"x": 2597,
+					"y": 471
 				}
 			},
 			{
@@ -123,8 +123,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 3028,
-					"y": 482
+					"x": 2821,
+					"y": 817
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -143,8 +143,8 @@
 					}
 				},
 				"position": {
-					"x": 2788,
-					"y": 427
+					"x": 2621,
+					"y": 765
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -153,8 +153,8 @@
 				"type": "cos",
 				"data": {},
 				"position": {
-					"x": 3268,
-					"y": 452
+					"x": 3021,
+					"y": 789
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -163,8 +163,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 3028,
-					"y": 663
+					"x": 2821,
+					"y": 1004
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -183,8 +183,8 @@
 					}
 				},
 				"position": {
-					"x": 2788,
-					"y": 608
+					"x": 2621,
+					"y": 952
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -193,8 +193,8 @@
 				"type": "sin",
 				"data": {},
 				"position": {
-					"x": 3268,
-					"y": 633
+					"x": 3021,
+					"y": 976
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -207,8 +207,8 @@
 					}
 				},
 				"position": {
-					"x": 3508,
-					"y": 573
+					"x": 3221,
+					"y": 920
 				},
 				"frame": "6b1f24d7-c378-4221-9daa-9ff600fb671a"
 			},
@@ -220,8 +220,8 @@
 					"note": "One of OpenSimplex2's 48 directions, an expanded rhombic dodecahedron's:\na cube corner, one of its 3 edges (zeroing an axis), and one of 2 points\non that face, all made the same length."
 				},
 				"position": {
-					"x": 1640,
-					"y": 849
+					"x": 1661,
+					"y": 1210
 				}
 			},
 			{
@@ -229,8 +229,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1904,
-					"y": 1185
+					"x": 1885,
+					"y": 2854
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -249,8 +249,8 @@
 					}
 				},
 				"position": {
-					"x": 1664,
-					"y": 1130
+					"x": 1685,
+					"y": 2802
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -259,8 +259,8 @@
 				"type": "floor",
 				"data": {},
 				"position": {
-					"x": 2144,
-					"y": 1155
+					"x": 2085,
+					"y": 2826
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -269,8 +269,8 @@
 				"type": "min",
 				"data": {},
 				"position": {
-					"x": 2384,
-					"y": 1275
+					"x": 2285,
+					"y": 2967
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -289,8 +289,8 @@
 					}
 				},
 				"position": {
-					"x": 2144,
-					"y": 1305
+					"x": 2085,
+					"y": 2995
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -308,8 +308,8 @@
 					}
 				},
 				"position": {
-					"x": 2624,
-					"y": 1389
+					"x": 2485,
+					"y": 3093
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -318,8 +318,8 @@
 				"type": "div",
 				"data": {},
 				"position": {
-					"x": 2864,
-					"y": 1329
+					"x": 2685,
+					"y": 3037
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -328,8 +328,8 @@
 				"type": "floor",
 				"data": {},
 				"position": {
-					"x": 3104,
-					"y": 1299
+					"x": 2885,
+					"y": 3009
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -342,8 +342,8 @@
 					}
 				},
 				"position": {
-					"x": 3344,
-					"y": 1269
+					"x": 3085,
+					"y": 2981
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -352,8 +352,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 3584,
-					"y": 1473
+					"x": 3285,
+					"y": 3208
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -372,8 +372,8 @@
 					}
 				},
 				"position": {
-					"x": 3344,
-					"y": 1503
+					"x": 3085,
+					"y": 3236
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -386,8 +386,8 @@
 					}
 				},
 				"position": {
-					"x": 3824,
-					"y": 1443
+					"x": 3485,
+					"y": 3180
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -400,8 +400,8 @@
 					}
 				},
 				"position": {
-					"x": 2864,
-					"y": 1779
+					"x": 2685,
+					"y": 3548
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -410,8 +410,8 @@
 				"type": "floor",
 				"data": {},
 				"position": {
-					"x": 3104,
-					"y": 1749
+					"x": 2885,
+					"y": 3520
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -429,8 +429,8 @@
 					}
 				},
 				"position": {
-					"x": 3104,
-					"y": 1449
+					"x": 2885,
+					"y": 3244
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -439,8 +439,8 @@
 				"type": "sub",
 				"data": {},
 				"position": {
-					"x": 3344,
-					"y": 1689
+					"x": 3085,
+					"y": 3464
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -449,8 +449,8 @@
 				"type": "abs",
 				"data": {},
 				"position": {
-					"x": 3824,
-					"y": 1659
+					"x": 3485,
+					"y": 3436
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -463,8 +463,8 @@
 					}
 				},
 				"position": {
-					"x": 4064,
-					"y": 1569
+					"x": 3685,
+					"y": 3322
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -473,8 +473,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 4304,
-					"y": 1539
+					"x": 3885,
+					"y": 3294
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -487,8 +487,8 @@
 					}
 				},
 				"position": {
-					"x": 3584,
-					"y": 1143
+					"x": 3285,
+					"y": 2845
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -497,8 +497,8 @@
 				"type": "floor",
 				"data": {},
 				"position": {
-					"x": 4544,
-					"y": 1113
+					"x": 4085,
+					"y": 2817
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -511,8 +511,8 @@
 					}
 				},
 				"position": {
-					"x": 4784,
-					"y": 1083
+					"x": 4285,
+					"y": 2789
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -521,8 +521,8 @@
 				"type": "cross",
 				"data": {},
 				"position": {
-					"x": 4784,
-					"y": 1443
+					"x": 4285,
+					"y": 3180
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -531,8 +531,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 5024,
-					"y": 1509
+					"x": 4485,
+					"y": 3266
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -541,8 +541,8 @@
 				"type": "mix",
 				"data": {},
 				"position": {
-					"x": 5274,
-					"y": 1449
+					"x": 4695,
+					"y": 3210
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -551,8 +551,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 4784,
-					"y": 1635
+					"x": 4285,
+					"y": 3401
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -571,8 +571,8 @@
 					}
 				},
 				"position": {
-					"x": 4544,
-					"y": 1665
+					"x": 4085,
+					"y": 3429
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -581,8 +581,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 5514,
-					"y": 1605
+					"x": 4895,
+					"y": 3373
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -591,8 +591,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 5274,
-					"y": 1053
+					"x": 4695,
+					"y": 2761
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -611,8 +611,8 @@
 					}
 				},
 				"position": {
-					"x": 5024,
-					"y": 979
+					"x": 4485,
+					"y": 2690
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -625,8 +625,8 @@
 					}
 				},
 				"position": {
-					"x": 5514,
-					"y": 963
+					"x": 4895,
+					"y": 2688
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -635,8 +635,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 5754,
-					"y": 1575
+					"x": 5095,
+					"y": 3345
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -648,8 +648,8 @@
 					"note": "A direction spread evenly over the 4D sphere: two circles\nwhose radii share the length (r₁² + r₂² = 1) at random."
 				},
 				"position": {
-					"x": 2086,
-					"y": 2025
+					"x": 2032,
+					"y": 3798
 				}
 			},
 			{
@@ -657,8 +657,8 @@
 				"type": "sqrt",
 				"data": {},
 				"position": {
-					"x": 2350,
-					"y": 2301
+					"x": 2256,
+					"y": 4911
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -671,8 +671,8 @@
 					}
 				},
 				"position": {
-					"x": 2110,
-					"y": 2926
+					"x": 2056,
+					"y": 5572
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -681,8 +681,8 @@
 				"type": "sqrt",
 				"data": {},
 				"position": {
-					"x": 2350,
-					"y": 2896
+					"x": 2256,
+					"y": 5544
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -691,8 +691,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2350,
-					"y": 2151
+					"x": 2256,
+					"y": 4741
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -711,8 +711,8 @@
 					}
 				},
 				"position": {
-					"x": 2110,
-					"y": 2181
+					"x": 2056,
+					"y": 4769
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -721,8 +721,8 @@
 				"type": "cos",
 				"data": {},
 				"position": {
-					"x": 2590,
-					"y": 2121
+					"x": 2456,
+					"y": 4713
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -731,8 +731,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2830,
-					"y": 2271
+					"x": 2656,
+					"y": 4883
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -741,8 +741,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2350,
-					"y": 2481
+					"x": 2256,
+					"y": 5108
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -761,8 +761,8 @@
 					}
 				},
 				"position": {
-					"x": 2110,
-					"y": 2511
+					"x": 2056,
+					"y": 5136
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -771,8 +771,8 @@
 				"type": "sin",
 				"data": {},
 				"position": {
-					"x": 2590,
-					"y": 2451
+					"x": 2456,
+					"y": 5080
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -781,8 +781,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2830,
-					"y": 2421
+					"x": 2656,
+					"y": 5052
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -791,8 +791,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2350,
-					"y": 2746
+					"x": 2256,
+					"y": 5375
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -811,8 +811,8 @@
 					}
 				},
 				"position": {
-					"x": 2110,
-					"y": 2691
+					"x": 2056,
+					"y": 5323
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -821,8 +821,8 @@
 				"type": "cos",
 				"data": {},
 				"position": {
-					"x": 2590,
-					"y": 2716
+					"x": 2456,
+					"y": 5347
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -831,8 +831,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2830,
-					"y": 2866
+					"x": 2656,
+					"y": 5516
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -841,8 +841,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2350,
-					"y": 3107
+					"x": 2256,
+					"y": 5760
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -861,8 +861,8 @@
 					}
 				},
 				"position": {
-					"x": 2110,
-					"y": 3137
+					"x": 2056,
+					"y": 5788
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -871,8 +871,8 @@
 				"type": "sin",
 				"data": {},
 				"position": {
-					"x": 2590,
-					"y": 3077
+					"x": 2456,
+					"y": 5732
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -881,8 +881,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2830,
-					"y": 3047
+					"x": 2656,
+					"y": 5704
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -895,8 +895,8 @@
 					}
 				},
 				"position": {
-					"x": 3080,
-					"y": 2776
+					"x": 2866,
+					"y": 5432
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -905,8 +905,8 @@
 				"type": "width-switch",
 				"data": {},
 				"position": {
-					"x": 6191,
-					"y": 483
+					"x": 5606,
+					"y": 836
 				}
 			},
 			{
@@ -916,8 +916,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 6491,
-					"y": 513
+					"x": 5866,
+					"y": 864
 				}
 			},
 			{
@@ -925,8 +925,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 300,
-					"y": 131
+					"x": 260,
+					"y": 144
 				}
 			},
 			{
@@ -934,8 +934,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1447,
-					"y": 1291
+					"x": 1419,
+					"y": 2969
 				}
 			},
 			{
@@ -943,8 +943,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2725,
-					"y": 1351
+					"x": 2566,
+					"y": 3055
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -953,8 +953,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 4165,
-					"y": 1519
+					"x": 3766,
+					"y": 3268
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -963,8 +963,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 4645,
-					"y": 1615
+					"x": 4166,
+					"y": 3381
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -973,8 +973,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 5125,
-					"y": 1159
+					"x": 4566,
+					"y": 2877
 				},
 				"frame": "1a9381c2-ddb3-409d-9cc0-6ad71da501bd"
 			},
@@ -983,8 +983,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1447,
-					"y": 2161
+					"x": 1419,
+					"y": 4749
 				}
 			},
 			{
@@ -992,8 +992,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2691,
-					"y": 2377
+					"x": 2537,
+					"y": 4998
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			},
@@ -1002,8 +1002,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1447,
-					"y": 2852
+					"x": 1419,
+					"y": 5490
 				}
 			},
 			{
@@ -1011,8 +1011,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 2691,
-					"y": 2972
+					"x": 2537,
+					"y": 5632
 				},
 				"frame": "4b1f1de3-fa1b-4bc5-ad16-166787b1f126"
 			}

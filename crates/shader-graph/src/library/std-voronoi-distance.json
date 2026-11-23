@@ -13,8 +13,8 @@
 				"type": "sub",
 				"data": {},
 				"position": {
-					"x": 314,
-					"y": 145
+					"x": 274,
+					"y": 147
 				}
 			},
 			{
@@ -25,7 +25,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 205
+					"y": 203
 				}
 			},
 			{
@@ -33,8 +33,8 @@
 				"type": "abs",
 				"data": {},
 				"position": {
-					"x": 614,
-					"y": 115
+					"x": 534,
+					"y": 119
 				}
 			},
 			{
@@ -42,8 +42,8 @@
 				"type": "length",
 				"data": {},
 				"position": {
-					"x": 1333,
-					"y": 60
+					"x": 1182,
+					"y": 56
 				}
 			},
 			{
@@ -51,8 +51,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1637,
-					"y": 156
+					"x": 1448,
+					"y": 164
 				},
 				"group": {
 					"definitionRef": "std-component-sum@dc76d62bf9ed6507",
@@ -64,8 +64,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1333,
-					"y": 211
+					"x": 1182,
+					"y": 227
 				},
 				"group": {
 					"definitionRef": "std-max-component@69173756ea1280c6",
@@ -77,8 +77,8 @@
 				"type": "pow",
 				"data": {},
 				"position": {
-					"x": 1024,
-					"y": 222
+					"x": 909,
+					"y": 238
 				}
 			},
 			{
@@ -86,8 +86,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 1333,
-					"y": 373
+					"x": 1182,
+					"y": 439
 				},
 				"group": {
 					"definitionRef": "std-component-sum@dc76d62bf9ed6507",
@@ -103,8 +103,8 @@
 					}
 				},
 				"position": {
-					"x": 1024,
-					"y": 428
+					"x": 909,
+					"y": 532
 				}
 			},
 			{
@@ -112,8 +112,8 @@
 				"type": "pow",
 				"data": {},
 				"position": {
-					"x": 1637,
-					"y": 343
+					"x": 1448,
+					"y": 441
 				}
 			},
 			{
@@ -121,7 +121,7 @@
 				"type": "match",
 				"data": {},
 				"position": {
-					"x": 1946,
+					"x": 1723,
 					"y": 0
 				}
 			},
@@ -132,8 +132,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 2246,
-					"y": 30
+					"x": 1983,
+					"y": 28
 				}
 			},
 			{
@@ -141,8 +141,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 914,
-					"y": 191
+					"x": 794,
+					"y": 207
 				}
 			},
 			{
@@ -150,8 +150,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 914,
-					"y": 341
+					"x": 794,
+					"y": 347
 				}
 			}
 		],

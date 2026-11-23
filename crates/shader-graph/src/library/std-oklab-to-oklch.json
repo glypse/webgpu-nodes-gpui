@@ -11,7 +11,7 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 300,
+					"x": 260,
 					"y": 0
 				}
 			},
@@ -23,7 +23,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 120
+					"y": 112
 				}
 			},
 			{
@@ -34,8 +34,8 @@
 					"note": "How far from grey: the length of (a, b)."
 				},
 				"position": {
-					"x": 902,
-					"y": 96
+					"x": 797,
+					"y": 108
 				}
 			},
 			{
@@ -47,8 +47,8 @@
 					}
 				},
 				"position": {
-					"x": 926,
-					"y": 204
+					"x": 821,
+					"y": 216
 				},
 				"frame": "eeca6d1f-8c89-450b-99cc-cc8b24831a1f"
 			},
@@ -57,8 +57,8 @@
 				"type": "length",
 				"data": {},
 				"position": {
-					"x": 1166,
-					"y": 174
+					"x": 1021,
+					"y": 188
 				},
 				"frame": "eeca6d1f-8c89-450b-99cc-cc8b24831a1f"
 			},
@@ -70,8 +70,8 @@
 					"note": "The angle of (a, b), in degrees from 0 to 360."
 				},
 				"position": {
-					"x": 742,
-					"y": 420
+					"x": 664,
+					"y": 450
 				}
 			},
 			{
@@ -79,8 +79,8 @@
 				"type": "atan2",
 				"data": {},
 				"position": {
-					"x": 766,
-					"y": 738
+					"x": 688,
+					"y": 773
 				},
 				"frame": "91d7db5a-b4ad-41b7-a82f-8d70d956db3b"
 			},
@@ -89,8 +89,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1006,
-					"y": 708
+					"x": 888,
+					"y": 745
 				},
 				"frame": "91d7db5a-b4ad-41b7-a82f-8d70d956db3b"
 			},
@@ -109,8 +109,8 @@
 					}
 				},
 				"position": {
-					"x": 766,
-					"y": 558
+					"x": 688,
+					"y": 586
 				},
 				"frame": "91d7db5a-b4ad-41b7-a82f-8d70d956db3b"
 			},
@@ -119,8 +119,8 @@
 				"type": "fract",
 				"data": {},
 				"position": {
-					"x": 1246,
-					"y": 678
+					"x": 1088,
+					"y": 717
 				},
 				"frame": "91d7db5a-b4ad-41b7-a82f-8d70d956db3b"
 			},
@@ -129,8 +129,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1486,
-					"y": 648
+					"x": 1288,
+					"y": 689
 				},
 				"frame": "91d7db5a-b4ad-41b7-a82f-8d70d956db3b"
 			},
@@ -149,8 +149,8 @@
 					}
 				},
 				"position": {
-					"x": 1246,
-					"y": 498
+					"x": 1088,
+					"y": 530
 				},
 				"frame": "91d7db5a-b4ad-41b7-a82f-8d70d956db3b"
 			},
@@ -163,8 +163,8 @@
 					}
 				},
 				"position": {
-					"x": 1838,
-					"y": 114
+					"x": 1601,
+					"y": 132
 				}
 			},
 			{
@@ -174,8 +174,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 2138,
-					"y": 144
+					"x": 1861,
+					"y": 160
 				}
 			},
 			{
@@ -183,8 +183,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 611,
-					"y": 310
+					"x": 532,
+					"y": 332
 				}
 			},
 			{
@@ -192,8 +192,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 611,
-					"y": 360
+					"x": 532,
+					"y": 382
 				}
 			}
 		],

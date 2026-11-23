@@ -11,7 +11,7 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 300,
+					"x": 260,
 					"y": 0
 				}
 			},
@@ -23,7 +23,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 120
+					"y": 112
 				}
 			},
 			{
@@ -34,8 +34,8 @@
 					"note": "Chroma along the hue's direction (hue in degrees)."
 				},
 				"position": {
-					"x": 718,
-					"y": 59
+					"x": 639,
+					"y": 67
 				}
 			},
 			{
@@ -43,8 +43,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 982,
-					"y": 317
+					"x": 863,
+					"y": 345
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -63,8 +63,8 @@
 					}
 				},
 				"position": {
-					"x": 742,
-					"y": 262
+					"x": 663,
+					"y": 293
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -73,8 +73,8 @@
 				"type": "cos",
 				"data": {},
 				"position": {
-					"x": 1260,
-					"y": 287
+					"x": 1101,
+					"y": 317
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -83,8 +83,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1510,
-					"y": 257
+					"x": 1311,
+					"y": 289
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -93,8 +93,8 @@
 				"type": "sin",
 				"data": {},
 				"position": {
-					"x": 1260,
-					"y": 137
+					"x": 1101,
+					"y": 147
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -103,8 +103,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1510,
-					"y": 407
+					"x": 1311,
+					"y": 458
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -117,8 +117,8 @@
 					}
 				},
 				"position": {
-					"x": 1853,
-					"y": 197
+					"x": 1617,
+					"y": 232
 				}
 			},
 			{
@@ -128,8 +128,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 2153,
-					"y": 227
+					"x": 1877,
+					"y": 260
 				}
 			},
 			{
@@ -137,8 +137,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1222,
-					"y": 393
+					"x": 1063,
+					"y": 432
 				},
 				"frame": "1d38f162-d6c3-46b3-840e-dddd9f5f9223"
 			},
@@ -147,8 +147,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 614,
-					"y": 106
+					"x": 536,
+					"y": 116
 				}
 			}
 		],

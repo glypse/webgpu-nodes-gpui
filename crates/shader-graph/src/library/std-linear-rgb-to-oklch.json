@@ -11,8 +11,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 300,
-					"y": 30
+					"x": 260,
+					"y": 5
 				},
 				"group": {
 					"definitionRef": "std-linear-rgb-to-oklab@636cf4f0750f30a2",
@@ -27,7 +27,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 60
+					"y": 86
 				}
 			},
 			{
@@ -35,7 +35,7 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 600,
+					"x": 520,
 					"y": 0
 				},
 				"group": {
@@ -50,8 +50,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 900,
-					"y": 0
+					"x": 780,
+					"y": 30
 				}
 			}
 		],
