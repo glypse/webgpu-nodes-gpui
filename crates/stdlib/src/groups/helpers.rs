@@ -56,3 +56,13 @@ pub fn vec3_out(g: &GroupBuilder<'_>, key: &str, source: impl Into<Operand>, lab
 pub fn unit(input: Input) -> Input {
     input.min(0.0).max(1.0)
 }
+
+/// The canvas' size in pixels, as a vec2f.
+pub fn resolution(g: &GroupBuilder<'_>) -> Ref {
+    g.node("resolution").add().first()
+}
+
+/// The texture coordinates of the fragment, as a vec2f.
+pub fn uv(g: &GroupBuilder<'_>) -> Ref {
+    g.node("uv").add().first()
+}
