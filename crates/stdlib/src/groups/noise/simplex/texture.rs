@@ -329,7 +329,10 @@ fn fractal_octave(
         || {
             g.op(
                 "mul",
-                (value, g.op("add", (g.op("mul", (n, octave.amplitude)), 1.0))),
+                (
+                    value,
+                    g.op("add", (g.op("mul", (n, octave.amplitude)), 1.0)),
+                ),
             )
             .first()
         },
@@ -476,12 +479,15 @@ fn fractal_noise_octaves_body(g: &GroupBuilder<'_>) {
         },
     );
     g.frame(
-        Frame::new("Normalize").note("fBm's sum into [0, 1] by the weights' total, when normalized."),
+        Frame::new("Normalize")
+            .note("fBm's sum into [0, 1] by the weights' total, when normalized."),
         || {
             let value = sum.get("Value");
             let scaled = g.op("div", (value, sum.get("Total Amplitude")));
             let normalized = g.op("add", (g.op("mul", (scaled, 0.5)), 0.5)).first();
-            let fbm = g.op("switch", (octaves.normalize, value, normalized)).first();
+            let fbm = g
+                .op("switch", (octaves.normalize, value, normalized))
+                .first();
             let result = pick(
                 g,
                 selector,
@@ -500,7 +506,10 @@ fn fractal_noise_octaves_body(g: &GroupBuilder<'_>) {
 
 fn fractal_noise_body(g: &GroupBuilder<'_>) {
     let (t, vector) = coordinates_input(g);
-    let scale = g.input("scale", Input::new(WgslType::F32).label("Scale").default(5.0));
+    let scale = g.input(
+        "scale",
+        Input::new(WgslType::F32).label("Scale").default(5.0),
+    );
     let octaves = octave_inputs(g);
     let distortion = g.input(
         "distortion",
@@ -536,7 +545,10 @@ fn fractal_noise_body(g: &GroupBuilder<'_>) {
             .input("coordinates", distorted)
             .input("variant", options.variant.value())
             .input("orientation", options.orientation.value());
-        feed_octaves(call, &octaves).input("seed", seed).add().out("value")
+        feed_octaves(call, &octaves)
+            .input("seed", seed)
+            .add()
+            .out("value")
     };
     let fac = g.frame(
         Frame::new("Fac").note("The octaves, combined as Type does."),
@@ -574,7 +586,13 @@ pub fn all() -> Vec<GroupSpec> {
             &["value"],
             opensimplex_noise_body,
         )
-        .aliases(&["Simplex Noise", "OpenSimplex2", "SuperSimplex", "Gradient Noise", "Perlin"])
+        .aliases(&[
+            "Simplex Noise",
+            "OpenSimplex2",
+            "SuperSimplex",
+            "Gradient Noise",
+            "Perlin",
+        ])
         .helper(&["OpenSimplex"]),
         GroupSpec::new(
             NOISE_DISTORTION,

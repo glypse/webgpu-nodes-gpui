@@ -2,7 +2,9 @@
 
 use shader_graph::types::WgslType;
 
-use crate::builder::{Frame, GroupBuilder, GroupSpec, Input, Output, Ref, RepeatBody, RepeatItem, Repeated};
+use crate::builder::{
+    Frame, GroupBuilder, GroupSpec, Input, Output, Ref, RepeatBody, RepeatItem, Repeated,
+};
 use crate::groups::helpers::{clamp_range, compare};
 
 pub const FRACTAL_OCTAVE: &str = "std-fractal-octave";
@@ -22,15 +24,26 @@ pub fn fractal_inputs(g: &GroupBuilder<'_>) -> FractalInputs {
     FractalInputs {
         detail: g.input(
             "detail",
-            Input::new(WgslType::F32).label("Detail").default(0.0).min(0.0).max(15.0),
+            Input::new(WgslType::F32)
+                .label("Detail")
+                .default(0.0)
+                .min(0.0)
+                .max(15.0),
         ),
         roughness: g.input(
             "roughness",
-            Input::new(WgslType::F32).label("Roughness").default(0.5).min(0.0).max(1.0),
+            Input::new(WgslType::F32)
+                .label("Roughness")
+                .default(0.5)
+                .min(0.0)
+                .max(1.0),
         ),
         lacunarity: g.input(
             "lacunarity",
-            Input::new(WgslType::F32).label("Lacunarity").default(2.0).min(0.0),
+            Input::new(WgslType::F32)
+                .label("Lacunarity")
+                .default(2.0)
+                .min(0.0),
         ),
     }
 }
@@ -53,18 +66,29 @@ fn octave_body(g: &GroupBuilder<'_>) {
         g,
         g.input(
             "detail",
-            Input::new(WgslType::F32).label("Detail").default(0.0).min(0.0).max(15.0),
+            Input::new(WgslType::F32)
+                .label("Detail")
+                .default(0.0)
+                .min(0.0)
+                .max(15.0),
         ),
         0.0,
         15.0,
     );
     let roughness = g.input(
         "roughness",
-        Input::new(WgslType::F32).label("Roughness").default(0.5).min(0.0).max(1.0),
+        Input::new(WgslType::F32)
+            .label("Roughness")
+            .default(0.5)
+            .min(0.0)
+            .max(1.0),
     );
     let lacunarity = g.input(
         "lacunarity",
-        Input::new(WgslType::F32).label("Lacunarity").default(2.0).min(0.0),
+        Input::new(WgslType::F32)
+            .label("Lacunarity")
+            .default(2.0)
+            .min(0.0),
     );
     let octave = g.op("to-float", iteration).first();
     g.frame(
@@ -149,14 +173,16 @@ pub fn fractal<'a>(
 }
 
 pub fn all() -> Vec<GroupSpec> {
-    vec![GroupSpec::new(
-        FRACTAL_OCTAVE,
-        "Fractal Octave",
-        "texture",
-        &["iteration", "detail", "roughness", "lacunarity"],
-        &["scale", "amplitude", "power", "octaves"],
-        octave_body,
-    )
-    .aliases(&["fBm Octave", "Octave", "Fractal Brownian Motion"])
-    .helper(&[])]
+    vec![
+        GroupSpec::new(
+            FRACTAL_OCTAVE,
+            "Fractal Octave",
+            "texture",
+            &["iteration", "detail", "roughness", "lacunarity"],
+            &["scale", "amplitude", "power", "octaves"],
+            octave_body,
+        )
+        .aliases(&["fBm Octave", "Octave", "Fractal Brownian Motion"])
+        .helper(&[]),
+    ]
 }

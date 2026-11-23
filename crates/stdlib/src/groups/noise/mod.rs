@@ -4,6 +4,7 @@ mod coordinates;
 mod fractal;
 mod lattice;
 mod simplex;
+mod voronoi;
 
 use crate::builder::GroupSpec;
 
@@ -12,5 +13,6 @@ pub fn all() -> Vec<GroupSpec> {
     groups.extend(lattice::all());
     groups.extend(fractal::all());
     groups.extend(simplex::all());
+    groups.extend(voronoi::all());
     groups
 }
