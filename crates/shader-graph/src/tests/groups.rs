@@ -271,3 +271,29 @@ fn unsaved_changes_follow_edits_undo_and_saving() {
         assert!(m.has_unsaved_changes(), "edits inside a batch count");
     });
 }
+
+#[test]
+fn a_group_document_is_reached_through_the_group_node_leading_to_it() {
+    use super::builders::{model_for, node};
+    use crate::graph::ROOT_ID;
+
+    let mut model = model_for(
+        vec![node("a", "sin"), node("b", "sin")],
+        &[("a", "result", "b", "e")],
+    );
+    model.group_selection(&["a".to_owned()]).expect("grouped");
+    let group = model
+        .root()
+        .nodes
+        .iter()
+        .find(|n| n.is("node-group"))
+        .expect("a group node");
+    let (id, reference) = (
+        group.id.clone(),
+        group.definition_ref().expect("a definition").to_owned(),
+    );
+
+    assert_eq!(model.path_to_definition(&reference), Some(vec![id]));
+    assert_eq!(model.path_to_definition(ROOT_ID), Some(Vec::new()));
+    assert_eq!(model.path_to_definition("no-such-document"), None);
+}

@@ -1,7 +1,7 @@
 //! `GraphModel`: a project plus the editing state around it (the group being
 //! viewed, the selection, undo history) and every rule edits keep.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::history::History;
@@ -334,6 +334,32 @@ impl GraphModel {
             }
         }
         key
+    }
+
+    /// The shortest group path from the root to the document `definition_ref`, or `None`
+    /// when no group node reaches it.
+    pub fn path_to_definition(&self, definition_ref: &str) -> Option<Vec<String>> {
+        let mut queue = VecDeque::from([(ROOT_ID.to_owned(), Vec::new())]);
+        let mut visited = HashSet::new();
+        while let Some((key, path)) = queue.pop_front() {
+            if key == definition_ref {
+                return Some(path);
+            }
+            if !visited.insert(key.clone()) {
+                continue;
+            }
+            let Some(doc) = self.project.document(&key) else {
+                continue;
+            };
+            for node in &doc.nodes {
+                if let Some(next) = node.definition_ref() {
+                    let mut next_path = path.clone();
+                    next_path.push(node.id.clone());
+                    queue.push_back((next.to_owned(), next_path));
+                }
+            }
+        }
+        None
     }
 
     pub fn document_at(&self, path: &[String]) -> &GraphDocument {
@@ -1244,18 +1270,21 @@ impl GraphModel {
 
     /// Lay out every document of the project (the standard library excluded).
     pub fn layout_project(&mut self, options: &LayoutOptions<'_>) -> Result<bool, LayoutError> {
-        let refs: Vec<String> = self
-            .project
+        let mut moved = false;
+        for key in self.layout_definitions() {
+            moved |= self.layout_document(&key, None, options)?;
+        }
+        Ok(moved)
+    }
+
+    /// The keys of the documents a layout arranges: every project document but the standard library's.
+    pub fn layout_definitions(&self) -> Vec<String> {
+        self.project
             .definitions
             .keys()
             .filter(|r| !is_library_ref(r))
             .cloned()
-            .collect();
-        let mut moved = false;
-        for key in refs {
-            moved |= self.layout_document(&key, None, options)?;
-        }
-        Ok(moved)
+            .collect()
     }
 
     /// Split each output linked to several inputs at a reroute, among `only`
