@@ -1,0 +1,19 @@
+[package]
+name = "stdlib"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Describes the standard library's groups in Rust and generates the library's JSON files"
+
+[dependencies]
+shader-graph = { path = "../shader-graph" }
+serde.workspace = true
+# Parsed floats must round-trip, or library versions differ from the shipped files'.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror.workspace = true
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.11"
+uuid = "1"
+naga = { version = "30", features = ["wgsl-in"] }
+tempfile = "3"

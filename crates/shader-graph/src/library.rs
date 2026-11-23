@@ -430,9 +430,14 @@ pub fn resolve_with<'a>(library: &'a Library, reference: &str) -> Option<&'a Lib
     find_in(library, reference)
 }
 
+/// The ref of the library entry `id` at `version`.
+pub fn make_ref(id: &str, version: &str) -> String {
+    format!("{id}{VERSION_SEPARATOR}{version}")
+}
+
 /// A version id derived from what a definition computes and exposes: node
 /// positions and the camera don't count.
-fn version_of(definition: &Value) -> String {
+pub fn version_of(definition: &Value) -> String {
     let mut hashed = Map::new();
     if let Some(Value::Array(nodes)) = definition.get("nodes") {
         let nodes = nodes
