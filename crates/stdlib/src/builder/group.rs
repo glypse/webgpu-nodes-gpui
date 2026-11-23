@@ -533,6 +533,7 @@ pub struct Switch<'g> {
     kind: SwitchKind,
     cases: Vec<(i64, Operand)>,
     ty: Option<WgslType>,
+    partial: bool,
 }
 
 enum SwitchKind {
@@ -544,6 +545,13 @@ impl<'g> Switch<'g> {
     /// What the case of the enum's variant `value` is. On an Index Switch, `value` is ignored: cases are in order.
     pub fn case(mut self, value: i64, operand: impl Into<Operand>) -> Self {
         self.cases.push((value, operand.into()));
+        self
+    }
+
+    /// A Match whose cases are only some of its enum's variants: the others
+    /// are left unlinked, for variants the group's inputs rule out.
+    pub fn partial(mut self) -> Self {
+        self.partial = true;
         self
     }
 
@@ -918,6 +926,7 @@ impl<'r> GroupBuilder<'r> {
             kind: SwitchKind::Match(selector.clone()),
             cases: Vec::new(),
             ty: None,
+            partial: false,
         }
     }
 
@@ -928,6 +937,7 @@ impl<'r> GroupBuilder<'r> {
             kind: SwitchKind::Index(index.into(), ty),
             cases: Vec::new(),
             ty: None,
+            partial: false,
         }
     }
 
@@ -1340,7 +1350,7 @@ impl<'r> GroupBuilder<'r> {
                     .filter(|v| !switch.cases.iter().any(|(value, _)| *value == v.value))
                     .map(|v| v.label.clone())
                     .collect();
-                if !missing.is_empty() {
+                if !missing.is_empty() && !switch.partial {
                     return Err(ErrorKind::Invalid(format!(
                         "Match has no case for {}",
                         missing.join(", ")

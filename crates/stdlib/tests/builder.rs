@@ -384,6 +384,16 @@ fn a_match_needs_a_case_for_every_variant() {
 }
 
 #[test]
+fn a_partial_match_may_leave_variants_out() {
+    let errors = errors_of(&[single(&["mode"], &["out"], |g| {
+        let mode = g.enum_input("mode", Input::enumeration([(0, "A"), (1, "B")], 0));
+        let picked = g.match_on(&mode).case(0, 1.0).partial().add();
+        g.output("out", picked, WgslType::F32);
+    })]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn the_error_kinds_name_what_was_wrong() {
     let errors = build_groups(&[single(&[], &["out"], |g| {
         g.output("out", g.op("nope", 1), WgslType::F32);
