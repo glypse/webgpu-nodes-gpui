@@ -1,13 +1,14 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::{Mutex, PoisonError};
 
 use gpui::{
-    AnyElement, App, Entity, IntoElement as _, Modifiers, MouseButton, ParentElement as _,
-    ScrollDelta, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
+    AnyElement, App, Entity, IntoElement as _, Modifiers, MouseButton, ParentElement as _, Pixels,
+    Point, ScrollDelta, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 use gpui_flow::{
-    Edge, Flow, FlowEvent, HandleType, Node, NodeProps, Position, Xy, apply_edge_changes,
-    apply_node_changes,
+    Connection, Edge, Flow, FlowEvent, HandleType, Node, NodeProps, Position, Xy,
+    apply_edge_changes, apply_node_changes,
 };
 
 fn card(props: &NodeProps, _: &mut Window, _: &mut App) -> AnyElement {
@@ -407,4 +408,142 @@ fn arrow_keys_nudge_the_selection(cx: &mut TestAppContext) {
     assert_eq!(guard::recovered(), before);
     let end = position_of(&flow, cx, "a");
     assert_eq!((end.x - start.x, end.y - start.y), (5.0, 20.0));
+}
+
+/// The source handle `swapping_card` shows, or none.
+static SOURCE_HANDLE: Mutex<Option<&'static str>> = Mutex::new(Some("out"));
+
+fn swapping_card(props: &NodeProps, _: &mut Window, _: &mut App) -> AnyElement {
+    let source = *SOURCE_HANDLE.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut body = div()
+        .relative()
+        .w(props.scaled(160.0))
+        .h(props.scaled(80.0))
+        .bg(props.theme.node_background)
+        .child(props.handle(Some("in".into()), HandleType::Target, Position::Left));
+    if let Some(id) = source {
+        body = body.child(div().absolute().left_0().top_0().child(props.handle(
+            Some(id.into()),
+            HandleType::Source,
+            Position::Right,
+        )));
+    }
+    body.into_any_element()
+}
+
+fn handle_screen(
+    flow: &Entity<Flow>,
+    cx: &mut VisualTestContext,
+    node: &'static str,
+    handle: &'static str,
+) -> Option<Point<Pixels>> {
+    let node: gpui_flow::Id = node.into();
+    let rect = cx.read(|cx| flow.read(cx).node_rect(&node))?;
+    let centre = cx.read(|cx| {
+        flow.read(cx)
+            .handle_centres(&node)
+            .into_iter()
+            .find(|(id, _, _)| *id == Some(handle.into()))
+            .map(|(_, _, c)| c)
+    })?;
+    Some(cx.read(|cx| {
+        flow.read(cx)
+            .flow_to_screen(Xy::new(rect.x + centre.x, rect.y + centre.y))
+    }))
+}
+
+/// Swapping a node's handles in the paint that changes them must reach the
+/// geometry, so hit-testing follows the handles that are drawn.
+#[gpui::test]
+fn handles_changed_in_one_paint_are_the_ones_hit(cx: &mut TestAppContext) {
+    let (flow, cx) = cx.add_window_view(|_, cx| {
+        let mut flow = Flow::new(cx);
+        flow.options.fit_view_on_init = true;
+        flow
+    });
+    cx.update(|_, cx| {
+        flow.update(cx, |f, cx| {
+            f.set_nodes(
+                vec![
+                    Node::new("a", Xy::new(0.0, 0.0)).render(swapping_card),
+                    Node::new("b", Xy::new(400.0, 100.0)).render(card),
+                ],
+                cx,
+            );
+            f.set_edges(
+                vec![Edge::new(
+                    "e",
+                    "a",
+                    Some("out".into()),
+                    "b",
+                    Some("in".into()),
+                )],
+                cx,
+            );
+        });
+    });
+    cx.subscribe_events(&flow);
+    let connects: Rc<RefCell<Vec<Connection>>> = Rc::default();
+    let sink = connects.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&flow, move |_, event: &FlowEvent, _| {
+            if let FlowEvent::Connect(c) = event {
+                sink.borrow_mut().push(c.clone());
+            }
+        })
+        .detach();
+    });
+    settle(cx);
+    let before = guard::recovered();
+    assert!(handle_screen(&flow, cx, "a", "out").is_some());
+
+    // One paint swaps the handle and the owner's edge to it.
+    *SOURCE_HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some("out2");
+    cx.update(|_, cx| {
+        flow.update(cx, |f, cx| {
+            f.set_edges(
+                vec![Edge::new(
+                    "e",
+                    "a",
+                    Some("out2".into()),
+                    "b",
+                    Some("in".into()),
+                )],
+                cx,
+            );
+        });
+    });
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    settle(cx);
+    assert!(handle_screen(&flow, cx, "a", "out").is_none());
+    let swapped = handle_screen(&flow, cx, "a", "out2").expect("out2 is measured");
+    let target = handle_screen(&flow, cx, "b", "in").expect("in is measured");
+    cx.simulate_click(swapped, Modifiers::default());
+    cx.simulate_mouse_move(target, None, Modifiers::default());
+    cx.simulate_click(target, Modifiers::default());
+    settle(cx);
+    let made = connects.borrow().clone();
+    assert_eq!(made.len(), 1, "connecting the swapped handle failed");
+    assert_eq!(made[0].source_handle, Some("out2".into()));
+
+    // Removing the handle with nothing added must also reach hit-testing.
+    *SOURCE_HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    cx.update(|_, cx| flow.update(cx, |_, cx| cx.notify()));
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    settle(cx);
+    assert!(handle_screen(&flow, cx, "a", "out2").is_none());
+    cx.simulate_click(swapped, Modifiers::default());
+    cx.simulate_mouse_move(target, None, Modifiers::default());
+    cx.simulate_click(target, Modifiers::default());
+    settle(cx);
+    assert_eq!(
+        connects.borrow().len(),
+        1,
+        "a removed handle still connects"
+    );
+    assert_eq!(guard::recovered(), before);
 }

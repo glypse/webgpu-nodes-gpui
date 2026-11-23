@@ -1,4 +1,6 @@
-use std::time::Duration;
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
@@ -86,7 +88,7 @@ fn close(a: Viewport, b: Viewport) -> bool {
 }
 
 #[gpui::test]
-fn fit_animation_advances_without_input(cx: &mut TestAppContext) {
+fn fit_animation_follows_the_clock(cx: &mut TestAppContext) {
     let flow = cx.update(|cx| {
         cx.new(|cx| {
             let mut flow = Flow::new(cx);
@@ -106,32 +108,21 @@ fn fit_animation_advances_without_input(cx: &mut TestAppContext) {
     let flow = host.read_with(cx, |host, _| host.flow.clone());
     settle(cx);
 
+    let elapsed = Rc::new(Cell::new(Duration::ZERO));
+    let base = Instant::now();
+    let clock = elapsed.clone();
+    flow.update(cx, |f, _| f.set_clock(move || base + clock.get()));
+
     flow.update(cx, |f, cx| f.fit_view(FitViewOptions::default(), cx));
     settle(cx);
     let target = flow.read_with(cx, |f, _| f.viewport());
-    assert!(
-        !close(
-            target,
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                zoom: 1.0
-            }
-        ),
-        "the fit must move the viewport"
-    );
-
-    flow.update(cx, |f, cx| {
-        f.set_viewport(
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                zoom: 1.0,
-            },
-            None,
-            cx,
-        )
-    });
+    let from = Viewport {
+        x: 0.0,
+        y: 0.0,
+        zoom: 1.0,
+    };
+    assert!(!close(target, from), "the fit must move the viewport");
+    flow.update(cx, |f, cx| f.set_viewport(from, None, cx));
     settle(cx);
 
     flow.update(cx, |f, cx| {
@@ -143,33 +134,43 @@ fn fit_animation_advances_without_input(cx: &mut TestAppContext) {
             cx,
         )
     });
-    cx.run_until_parked();
     draw(cx);
+    let viewport_at = |cx: &mut VisualTestContext, at: Duration| {
+        elapsed.set(at);
+        frame(cx);
+        flow.read_with(cx, |f, _| f.viewport())
+    };
 
-    let mid = flow.read_with(cx, |f, _| f.viewport());
+    // The ease-in-out curve at t = 0, 0.5, 0.75 and 1 of the 200ms duration.
+    let start = viewport_at(cx, Duration::ZERO);
     assert!(
-        !close(mid, target),
-        "the animation should still be running after its first frame"
+        close(start, from),
+        "at t=0 expected {from:?}, got {start:?}"
     );
 
-    // The animation runs on wall-clock time, so poll until it lands.
-    for _ in 0..400 {
-        if close(flow.read_with(cx, |f, _| f.viewport()), target) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-        frame(cx);
-    }
+    let mid = viewport_at(cx, Duration::from_millis(100));
+    assert!(
+        close(mid, from.lerp(&target, 0.5)),
+        "at t=0.5 expected {:?}, got {mid:?}",
+        from.lerp(&target, 0.5)
+    );
 
-    let end = flow.read_with(cx, |f, _| f.viewport());
+    let late = viewport_at(cx, Duration::from_millis(150));
+    assert!(
+        close(late, from.lerp(&target, 0.9375)),
+        "at t=0.75 expected {:?}, got {late:?}",
+        from.lerp(&target, 0.9375)
+    );
+
+    let end = viewport_at(cx, Duration::from_millis(200));
+    assert!(
+        close(end, target),
+        "at t=1 expected {target:?}, got {end:?}"
+    );
     let painted = cx.debug_bounds("node-a").expect("node a painted");
     assert!(
         (f32::from(painted.origin.x) - end.x).abs() < 0.5,
         "node a is painted at {:?} but the viewport is at {end:?}",
         painted.origin.x
-    );
-    assert!(
-        close(end, target),
-        "animation stalled at {end:?}, expected {target:?}"
     );
 }

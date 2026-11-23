@@ -29,7 +29,7 @@ use crate::model::{
     Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeKind, EdgeStyle, EdgeTag,
     HandleBounds, HandleType, Id, Node, NodeChange,
 };
-use crate::node::{Measure, NodeConnections, NodeMeasure, NodeProps};
+use crate::node::{Measure, NodeConnections, NodeMeasure, NodeProps, handles_changed};
 use crate::panels::{ControlsOptions, MiniMapOptions, Panel};
 use crate::theme::FlowTheme;
 
@@ -359,6 +359,9 @@ struct ConnectionDrag {
     click: bool,
 }
 
+/// Source of animation time. Replaceable so tests can step animations exactly.
+type Clock = Rc<dyn Fn() -> Instant>;
+
 struct Anim {
     from: Viewport,
     to: Viewport,
@@ -413,6 +416,7 @@ pub struct Flow {
     hovered_edge: Option<Id>,
     pointer: Option<Xy>,
     anim: Option<Anim>,
+    clock: Clock,
     fit_request: Option<FitViewOptions>,
     init_fit_pending: bool,
     initialized: bool,
@@ -457,6 +461,7 @@ impl Flow {
             hovered_edge: None,
             pointer: None,
             anim: None,
+            clock: Rc::new(Instant::now),
             fit_request: None,
             init_fit_pending: true,
             initialized: false,
@@ -531,6 +536,10 @@ impl Flow {
         self.viewport
     }
 
+    pub fn set_clock(&mut self, clock: impl Fn() -> Instant + 'static) {
+        self.clock = Rc::new(clock);
+    }
+
     /// The canvas size in pixels, once painted.
     pub fn size(&self) -> (f32, f32) {
         let b = self.bounds.get();
@@ -558,7 +567,7 @@ impl Flow {
                 self.anim = Some(Anim {
                     from: self.viewport,
                     to: viewport,
-                    start: Instant::now(),
+                    start: (self.clock)(),
                     duration: d,
                 });
             }
@@ -888,8 +897,8 @@ impl Flow {
                                 id: id.clone(),
                                 kind: *kind,
                                 position: h.position,
-                                x: f32::from(h.bounds.origin.x - m.bounds.origin.x) / z,
-                                y: f32::from(h.bounds.origin.y - m.bounds.origin.y) / z,
+                                x: f32::from(h.bounds.origin.x) / z,
+                                y: f32::from(h.bounds.origin.y) / z,
                                 width: f32::from(h.bounds.size.width) / z,
                                 height: f32::from(h.bounds.size.height) / z,
                                 connectable: h.connectable,
@@ -949,19 +958,8 @@ impl Flow {
             elevate_nodes: self.options.elevate_nodes_on_select,
             elevate_edges: self.options.elevate_edges_on_select,
         };
-        let (generation, handles_removed) = {
-            let m = self.measure.borrow();
-            (
-                m.generation,
-                m.nodes.values().any(|n| n.previous.len() > n.handles.len()),
-            )
-        };
-        // A handle that stopped being painted leaves no measurement that bumps
-        // the generation, so a shrinking handle set is checked for directly.
-        if !self.geometry_dirty
-            && !handles_removed
-            && self.geometry_snapshot == Some((options, generation))
-        {
+        let generation = self.measure.borrow().generation;
+        if !self.geometry_dirty && self.geometry_snapshot == Some((options, generation)) {
             return;
         }
         self.geometry_dirty = false;
@@ -1056,7 +1054,8 @@ impl Flow {
     pub(crate) fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut animating = false;
         if let Some(anim) = &self.anim {
-            let t = (anim.start.elapsed().as_secs_f32() / anim.duration.as_secs_f32()).min(1.0);
+            let elapsed = (self.clock)().saturating_duration_since(anim.start);
+            let t = (elapsed.as_secs_f32() / anim.duration.as_secs_f32()).min(1.0);
             let eased = if t < 0.5 {
                 4.0 * t * t * t
             } else {
@@ -2448,35 +2447,21 @@ impl Flow {
                 move |bounds, _, cx| {
                     guard::guard("flow measure", || {
                         let mut m = measure.borrow_mut();
-                        let changed = match m.nodes.get_mut(&measure_id) {
-                            Some(entry) => {
-                                let moved = (f32::from(entry.bounds.size.width)
-                                    - f32::from(bounds.size.width))
+                        let entry = m
+                            .nodes
+                            .entry(measure_id.clone())
+                            .or_insert_with(NodeMeasure::unmeasured);
+                        let changed = entry.zoom <= 0.0
+                            || (f32::from(entry.bounds.size.width) - f32::from(bounds.size.width))
                                 .abs()
-                                    > 0.5
-                                    || (f32::from(entry.bounds.size.height)
-                                        - f32::from(bounds.size.height))
-                                    .abs()
-                                        > 0.5
-                                    || entry.zoom != zoom;
-                                entry.bounds = bounds;
-                                entry.zoom = zoom;
-                                entry.previous = std::mem::take(&mut entry.handles);
-                                moved
-                            }
-                            None => {
-                                m.nodes.insert(
-                                    measure_id.clone(),
-                                    NodeMeasure {
-                                        bounds,
-                                        zoom,
-                                        handles: HashMap::new(),
-                                        previous: HashMap::new(),
-                                    },
-                                );
-                                true
-                            }
-                        };
+                                > 0.5
+                            || (f32::from(entry.bounds.size.height)
+                                - f32::from(bounds.size.height))
+                            .abs()
+                                > 0.5
+                            || entry.zoom != zoom;
+                        entry.bounds = bounds;
+                        entry.zoom = zoom;
                         if changed {
                             m.generation += 1;
                         }
@@ -2490,6 +2475,32 @@ impl Flow {
             )
             .absolute()
             .size_full();
+            // Painted after the body, so the handles it holds were measured this paint.
+            let commit_measure = self.measure.clone();
+            let commit_entity = entity.clone();
+            let commit_id = node.id.clone();
+            let commit = canvas(
+                move |_, _, cx| {
+                    guard::guard("flow measure", || {
+                        let mut m = commit_measure.borrow_mut();
+                        let Some(entry) = m.nodes.get_mut(&commit_id) else {
+                            return;
+                        };
+                        let changed = handles_changed(&entry.handles, &entry.painting);
+                        entry.handles = std::mem::take(&mut entry.painting);
+                        if changed {
+                            m.generation += 1;
+                        }
+                        drop(m);
+                        if changed {
+                            commit_entity.update(cx, |_, cx| cx.notify()).ok();
+                        }
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_0();
             let id = node.id.clone();
             let down = |id: Id| {
                 cx.safe_listener(move |this: &mut Flow, e: &MouseDownEvent, w, cx| {
@@ -2521,7 +2532,13 @@ impl Flow {
             if let Some(h) = node.height {
                 wrapper = wrapper.h(px(h * vp.zoom));
             }
-            out.push(wrapper.child(measurer).child(body).into_any_element());
+            out.push(
+                wrapper
+                    .child(measurer)
+                    .child(body)
+                    .child(commit)
+                    .into_any_element(),
+            );
         }
         out
     }

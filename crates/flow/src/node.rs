@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use gpui::{
     Bounds, Div, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels,
-    RenderOnce, StyleRefinement, Styled, WeakEntity, canvas, div, px, relative,
+    RenderOnce, StyleRefinement, Styled, WeakEntity, canvas, div, point, px, relative,
 };
 
 use crate::edge_path::Position;
@@ -22,20 +22,61 @@ pub(crate) struct Measure {
     pub generation: u64,
 }
 
+pub(crate) type HandleKey = (Option<Id>, HandleType);
+
 pub(crate) struct NodeMeasure {
     pub bounds: Bounds<Pixels>,
+    /// Zero until the node's measurer has run, which is how the lookup tells a node is unmeasured.
     pub zoom: f32,
-    pub handles: HashMap<(Option<Id>, HandleType), HandleMeasure>,
-    pub previous: HashMap<(Option<Id>, HandleType), HandleMeasure>,
+    /// The handles painted in the last completed paint of the node.
+    pub handles: HashMap<HandleKey, HandleMeasure>,
+    /// The handles painted so far in the current paint. The node's commit canvas, painted
+    /// after the body, moves them into `handles`.
+    pub painting: HashMap<HandleKey, HandleMeasure>,
+}
+
+impl NodeMeasure {
+    pub fn unmeasured() -> Self {
+        Self {
+            bounds: Bounds::default(),
+            zoom: 0.0,
+            handles: HashMap::new(),
+            painting: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub(crate) struct HandleMeasure {
+    /// Relative to the node's top-left corner, in pixels.
     pub bounds: Bounds<Pixels>,
     pub position: Position,
     pub connectable: bool,
     pub connectable_start: bool,
     pub connectable_end: bool,
+}
+
+/// Whether a paint measured the node's handles differently from the last one.
+pub(crate) fn handles_changed(
+    before: &HashMap<HandleKey, HandleMeasure>,
+    now: &HashMap<HandleKey, HandleMeasure>,
+) -> bool {
+    if before.len() != now.len() {
+        return true;
+    }
+    now.iter().any(|(key, h)| {
+        before.get(key).is_none_or(|p| {
+            let (a, b) = (&p.bounds, &h.bounds);
+            (f32::from(a.origin.x) - f32::from(b.origin.x)).abs() > 0.5
+                || (f32::from(a.origin.y) - f32::from(b.origin.y)).abs() > 0.5
+                || (f32::from(a.size.width) - f32::from(b.size.width)).abs() > 0.5
+                || (f32::from(a.size.height) - f32::from(b.size.height)).abs() > 0.5
+                || p.position != h.position
+                || p.connectable != h.connectable
+                || p.connectable_start != h.connectable_start
+                || p.connectable_end != h.connectable_end
+        })
+    })
 }
 
 /// The links touching a node, by handle.
@@ -256,53 +297,31 @@ impl RenderOnce for Handle {
                 self.connectable_end,
             );
             let measure = self.measure.clone();
-            let flow = self.flow.clone();
             let (measure_key, measure_node) = (key.clone(), node.clone());
             let measurer = canvas(
-                move |bounds, _, cx| {
+                move |bounds, _, _| {
                     guard::guard("node measure", || {
                         let mut m = measure.borrow_mut();
-                        let Measure { nodes, generation } = &mut *m;
-                        let Some(entry) = nodes.get_mut(&measure_node) else {
+                        let Some(entry) = m.nodes.get_mut(&measure_node) else {
                             return;
                         };
-                        let moved = entry.previous.get(&measure_key).is_none_or(|p| {
-                            let rel = |b: &Bounds<Pixels>, n: &Bounds<Pixels>| {
-                                (
-                                    f32::from(b.origin.x - n.origin.x),
-                                    f32::from(b.origin.y - n.origin.y),
-                                    f32::from(b.size.width),
-                                    f32::from(b.size.height),
-                                )
-                            };
-                            let (a, b) =
-                                (rel(&p.bounds, &entry.bounds), rel(&bounds, &entry.bounds));
-                            (a.0 - b.0).abs() > 0.5
-                                || (a.1 - b.1).abs() > 0.5
-                                || (a.2 - b.2).abs() > 0.5
-                                || (a.3 - b.3).abs() > 0.5
-                                || p.position != position
-                                || p.connectable != connectable
-                                || p.connectable_start != start
-                                || p.connectable_end != end
-                        });
-                        entry.handles.insert(
+                        let origin = entry.bounds.origin;
+                        entry.painting.insert(
                             measure_key.clone(),
                             HandleMeasure {
-                                bounds,
+                                bounds: Bounds {
+                                    origin: point(
+                                        bounds.origin.x - origin.x,
+                                        bounds.origin.y - origin.y,
+                                    ),
+                                    size: bounds.size,
+                                },
                                 position,
                                 connectable,
                                 connectable_start: start,
                                 connectable_end: end,
                             },
                         );
-                        if moved {
-                            *generation += 1;
-                        }
-                        drop(m);
-                        if moved {
-                            flow.update(cx, |_, cx| cx.notify()).ok();
-                        }
                     });
                 },
                 |_, _, _, _| {},
