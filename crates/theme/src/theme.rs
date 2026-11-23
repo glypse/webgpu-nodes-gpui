@@ -1,4 +1,4 @@
-use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
+use gpui::{App, Global, Hsla, Pixels, SharedString, WindowAppearance, px};
 
 use crate::color::{oklch, oklch_a};
 
@@ -154,15 +154,6 @@ impl Theme {
 
     pub fn global(cx: &App) -> &Self {
         cx.global::<Self>()
-    }
-
-    /// Switches to the window's appearance, redrawing it when that changes.
-    pub fn sync(window: &mut Window, cx: &mut App) {
-        let appearance = Appearance::from(window.appearance());
-        if cx.try_global::<Self>().map(|t| t.appearance) != Some(appearance) {
-            cx.set_global(Self::new(appearance));
-            window.refresh();
-        }
     }
 }
 

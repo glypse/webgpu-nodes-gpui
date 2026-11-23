@@ -43,7 +43,7 @@ pub fn plane_image(key: PlaneKey, generate: impl FnOnce() -> Frame) -> Arc<Rende
 }
 
 /// Rendered images by key, least recently used evicted beyond `capacity`.
-pub struct ImageCache<K: Hash + Eq> {
+struct ImageCache<K: Hash + Eq> {
     entries: LruCache<K, Arc<RenderImage>>,
 }
 
@@ -84,7 +84,7 @@ const MAPPED_GRID: u32 = 6;
 const OUTLINE_OPACITY: f64 = 0.85;
 
 /// A pixel in gpui's image order (blue, green, red, alpha), whose colours are sRGB-encoded.
-fn bgra(r: f64, g: f64, b: f64) -> [u8; 4] {
+pub(crate) fn bgra(r: f64, g: f64, b: f64) -> [u8; 4] {
     let byte = |n: f64| (n.clamp(0.0, 1.0) * 255.0).round() as u8;
     [byte(b), byte(g), byte(r), 255]
 }

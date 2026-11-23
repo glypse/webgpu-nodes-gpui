@@ -13,12 +13,13 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, anchored, deferred,
     div, prelude::FluentBuilder as _, px,
 };
+use guard::SafeListener as _;
 use gpui_component::{
     ThemeStyled as _,
     menu::{PopupMenu, PopupMenuItem},
 };
 
-use crate::{ActiveTheme as _, Icon, IconName};
+use crate::{ActiveTheme as _, Icon, IconName, Theme};
 
 /// The layer gpui-component draws its popups on, so the submenus a menu nests stay above it.
 const LAYER: usize = 100;
@@ -34,7 +35,7 @@ const SUBMENU_LAYER: usize = LAYER + 2;
 pub fn row(label: impl Into<SharedString>, detail: Option<SharedString>, destructive: bool) -> PopupMenuItem {
     let label = label.into();
     PopupMenuItem::element(move |_, cx| {
-        let colors = cx.theme().colors.clone();
+        let colors = &cx.theme().colors;
         let text = if destructive { colors.destructive } else { colors.popover_foreground };
         let detail = detail.clone().map(|d| div().flex_none().text_color(colors.muted_foreground).child(d));
         div()
@@ -51,7 +52,9 @@ pub fn row(label: impl Into<SharedString>, detail: Option<SharedString>, destruc
 
 /// Adapts an action that doesn't use the click to a menu item's `on_click`.
 pub fn on_select(f: impl Fn(&mut Window, &mut App) + 'static) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-    move |_, window, cx| f(window, cx)
+    move |_, window, cx| {
+        guard::guard("menu item", || f(window, cx));
+    }
 }
 
 /// An open popup menu. Dropping it drops its dismissal subscription, so the owner keeps it while
@@ -72,7 +75,7 @@ pub fn open<T: 'static>(
     let handle = menu.read(cx).focus_handle(cx);
     window.defer(cx, move |window, cx| window.focus(&handle, cx));
     let dismissed = cx.subscribe_in(&menu, window, move |this, _, _: &DismissEvent, _, cx| {
-        on_dismiss(this, cx);
+        guard::guard("popup dismiss", || on_dismiss(this, cx));
     });
     Open { menu, _dismissed: dismissed }
 }
@@ -231,7 +234,7 @@ fn step(rows: &[Row], from: Option<usize>, forward: bool) -> Option<usize> {
     }
     let start = from.unwrap_or(if forward { n - 1 } else { 0 });
     (1..=n)
-        .map(|k| if forward { (start + k) % n } else { (start + n - k % n) % n })
+        .map(|k| if forward { (start + k) % n } else { (start + n - k) % n })
         .find(|&i| rows.get(i).is_some_and(|r| !r.disabled))
 }
 
@@ -330,9 +333,11 @@ impl Cascade {
         let apply = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HOVER_INTENT).await;
             this.update(cx, |this, cx| {
-                this.intent = None;
-                this.select(level, row);
-                cx.notify();
+                guard::guard("cascade hover", || {
+                    this.intent = None;
+                    this.select(level, row);
+                    cx.notify();
+                });
             })
             .ok();
         });
@@ -404,11 +409,12 @@ impl Cascade {
 
     fn rows_column(&self, level: usize, rows: &[Row], cx: &mut Context<Self>) -> AnyElement {
         let checks = rows.iter().any(|r| r.checked.is_some());
+        let theme = cx.theme().clone();
         div()
             .flex()
             .flex_col()
             .w(self.width)
-            .children(rows.iter().enumerate().map(|(index, row)| self.row(level, index, row, checks, cx)))
+            .children(rows.iter().enumerate().map(|(index, row)| self.row(level, index, row, checks, &theme, cx)))
             .into_any_element()
     }
 
@@ -426,8 +432,7 @@ impl Cascade {
         .into_any_element()
     }
 
-    fn row(&self, level: usize, index: usize, row: &Row, checks: bool, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+    fn row(&self, level: usize, index: usize, row: &Row, checks: bool, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let c = &theme.colors;
         let open = self.path.get(level) == Some(&index);
         let selected = open || self.highlighted(level) == Some(index);
@@ -456,7 +461,7 @@ impl Cascade {
                 .text_size(theme.text.xs)
                 .text_color(destructive)
                 .hover(move |s| s.bg(destructive.opacity(0.15)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                .on_click(cx.safe_listener(move |this, _: &ClickEvent, window, cx| {
                     cx.stop_propagation();
                     this.intent = None;
                     run(window, cx);
@@ -488,12 +493,12 @@ impl Cascade {
             .when(row.separated, |d| d.mt_1().border_t_1().border_color(c.border))
             .when(disabled, |d| d.opacity(0.5))
             .when(!disabled, |d| d.cursor_pointer())
-            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            .on_hover(cx.safe_listener(move |this, hovered: &bool, _, cx| {
                 if *hovered {
                     this.hover(level, index, cx);
                 }
             }))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.click(level, index, window, cx)))
+            .on_click(cx.safe_listener(move |this, _: &ClickEvent, window, cx| this.click(level, index, window, cx)))
             .child(
                 div()
                     .flex()
@@ -516,7 +521,7 @@ impl Render for Cascade {
         guard::render("cascading menu", || {
             div()
                 .track_focus(&self.focus)
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                .on_key_down(cx.safe_listener(|this, event: &KeyDownEvent, window, cx| {
                     this.key(&event.keystroke.key, window, cx);
                 }))
                 .child(self.rows_column(0, &self.rows, cx))

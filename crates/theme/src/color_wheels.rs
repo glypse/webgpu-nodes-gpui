@@ -14,7 +14,7 @@ use graph_math::color::{
 use guard::SafeListener as _;
 use image::Frame;
 
-use crate::gamut_image::{PlaneKey, paint_gamut, plane_image};
+use crate::gamut_image::{PlaneKey, bgra, paint_gamut, plane_image};
 
 /// Red at the bottom, hues going clockwise.
 const HUE_OFFSET: f64 = PI;
@@ -76,8 +76,7 @@ fn hsv_wheel() -> Arc<RenderImage> {
                 let dy = (f64::from(y) + 0.5) / f64::from(n) * 2.0 - 1.0;
                 let (h, s) = wheel_polar(dx, dy);
                 let Rgb { r, g, b } = hsv_to_rgb(Hsv { h, s, v: 1.0 });
-                let byte = |n: f64| (n.clamp(0.0, 1.0) * 255.0).round() as u8;
-                *pixel = image::Rgba([byte(b), byte(g), byte(r), 255]);
+                *pixel = image::Rgba(bgra(r, g, b));
             }
             Arc::new(RenderImage::new(vec![Frame::new(image)]))
         })
@@ -469,21 +468,23 @@ impl Render for ColorWheels {
                     },
                     move |bounds, _, window, cx| {
                         guard::guard("color wheels paint", || {
-                            window
-                                .paint_image(
-                                    bounds,
-                                    bounds,
-                                    Corners::all(bounds.size.width / 2.0),
-                                    image,
-                                    0,
-                                    false,
-                                )
-                                .ok();
+                            if let Err(err) = window.paint_image(
+                                bounds,
+                                bounds,
+                                Corners::all(bounds.size.width / 2.0),
+                                image,
+                                0,
+                                false,
+                            ) {
+                                log::warn!("color wheel image not painted: {err}");
+                            }
                             // Images the wheel moved on from are no longer drawn.
                             let retired =
                                 this.update(cx, |wheels, _| std::mem::take(&mut wheels.retired));
                             for old in retired {
-                                window.drop_image(old).ok();
+                                if let Err(err) = window.drop_image(old) {
+                                    log::warn!("retired colour wheel image not dropped: {err}");
+                                }
                             }
                         });
                     },
@@ -494,6 +495,7 @@ impl Render for ColorWheels {
 
             let wheel = div()
                 .id("color-wheel")
+                .debug_selector(|| "color-wheel".into())
                 .relative()
                 .flex_none()
                 .size(size)
@@ -535,17 +537,17 @@ impl Render for ColorWheels {
                     },
                     move |bounds, _, window, _| {
                         guard::guard("color wheels paint", || {
-                            if let Some(image) = image {
-                                window
-                                    .paint_image(
-                                        bounds,
-                                        bounds,
-                                        Corners::all(px(2.0 * z)),
-                                        image,
-                                        0,
-                                        false,
-                                    )
-                                    .ok();
+                            if let Some(image) = image
+                                && let Err(err) = window.paint_image(
+                                    bounds,
+                                    bounds,
+                                    Corners::all(px(2.0 * z)),
+                                    image,
+                                    0,
+                                    false,
+                                )
+                            {
+                                log::warn!("colour bar image not painted: {err}");
                             }
                         });
                     },
@@ -556,6 +558,7 @@ impl Render for ColorWheels {
             let top = px(0.0) + size * (1.0 - bar_level.clamp(0.0, 1.0) as f32);
             let bar = div()
                 .id("color-bar")
+                .debug_selector(|| "color-bar".into())
                 .relative()
                 .flex_none()
                 .w(bar_width)
@@ -599,12 +602,6 @@ impl Render for ColorWheels {
                         }
                     },
                 ));
-            #[cfg(test)]
-            let (wheel, bar) = (
-                wheel.debug_selector(|| "color-wheel".into()),
-                bar.debug_selector(|| "color-bar".into()),
-            );
-
             div().flex().gap(px(8.0 * z)).child(wheel).child(bar)
         })
     }

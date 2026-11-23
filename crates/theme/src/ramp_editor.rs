@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gpui::{
-    AppContext as _, Bounds, Context, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
+    AppContext as _, Bounds, ClickEvent, Context, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
     Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers, MouseButton,
     MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, canvas, div, fill, point,
@@ -9,14 +9,17 @@ use gpui::{
 };
 use graph_math::color::{ColorSpace, Rgba as LinearRgba};
 use graph_math::ramp::{
-    RampColorStop, RampModes, RampStop, add_ramp_stop, distribute_ramp, evaluate_ramp, flip_ramp,
-    move_ramp_stop, new_stop_position, remove_ramp_stop,
+    RampColorStop, RampModes, RampStop, add_ramp_stop, convert_stops, distribute_ramp,
+    evaluate_converted, evaluate_ramp, flip_ramp, move_ramp_stop, new_stop_position,
+    remove_ramp_stop,
 };
 use guard::SafeListener as _;
 
 use gpui_component::{Disableable as _, Size, Sizable as _, button::{Button, ButtonVariants as _}};
 
-use crate::{ActiveTheme as _, IconName, NumberEvent, NumberField, linear_to_hsla};
+use crate::{
+    ActiveTheme as _, IconName, NumberEvent, NumberField, linear_to_hsla, tagged_button,
+};
 
 /// How close the pointer must be to grab a stop on a double click, at zoom 1.
 const GRAB: f32 = 6.0;
@@ -92,8 +95,10 @@ impl RampEditor {
                 .step(0.01)
         });
         let subscription = cx.subscribe(&position, |this, _, event, cx| {
-            let NumberEvent::Change(number) = event;
-            this.set_position(*number, cx);
+            guard::guard("RampEditor position", || {
+                let NumberEvent::Change(number) = event;
+                this.set_position(*number, cx);
+            });
         });
         let mut editor = Self {
             stops,
@@ -126,18 +131,9 @@ impl RampEditor {
         self
     }
 
-    pub fn linked(mut self, linked: BTreeSet<String>) -> Self {
-        self.linked = linked;
-        self
-    }
-
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
-    }
-
-    pub fn stops(&self) -> &[RampStop] {
-        &self.stops
     }
 
     /// The id of the stop the position field edits: the picked one, or the first.
@@ -429,18 +425,15 @@ impl Render for RampEditor {
             let modes = self.modes;
             let gamut = self.gamut;
             let bar = {
-                let (this, colored, checker) = (this.clone(), colored.clone(), checker);
                 canvas(
-                    {
-                        let this = this.clone();
-                        move |bounds, _, cx| {
-                            guard::guard("ramp editor layout", || {
-                                this.update(cx, |editor, _| editor.lane = bounds)
-                            });
-                        }
+                    move |bounds, _, cx| {
+                        guard::guard("ramp editor layout", || {
+                            this.update(cx, |editor, _| editor.lane = bounds)
+                        });
                     },
                     move |bounds, _, window, _| {
                         guard::guard("ramp editor paint", || {
+                            let converted = convert_stops(&colored, modes);
                             let width = f64::from(bounds.size.width);
                             let columns = width.ceil().max(1.0) as usize;
                             if alpha {
@@ -466,7 +459,7 @@ impl Render for RampEditor {
                             }
                             for i in 0..columns {
                                 let x = (i as f64 + 0.5) / columns as f64;
-                                let [r, g, b, a] = evaluate_ramp(&colored, x, modes);
+                                let [r, g, b, a] = evaluate_converted(&converted, x, modes);
                                 let color =
                                     linear_to_hsla(graph_math::color::Rgb::new(r, g, b), gamut);
                                 let color = if alpha {
@@ -542,6 +535,7 @@ impl Render for RampEditor {
 
             let lane = div()
                 .id("ramp-lane")
+                .debug_selector(|| "ramp-lane".into())
                 .relative()
                 .mx(px(4.0 * z))
                 .h(bar_height + marker_height)
@@ -579,8 +573,6 @@ impl Render for RampEditor {
                     MouseButton::Left,
                     cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
                 );
-            #[cfg(test)]
-            let lane = lane.debug_selector(|| "ramp-lane".into());
 
             let tool = |id: &'static str, icon: IconName, label: &'static str, off: bool| {
                 Button::new(id)
@@ -590,51 +582,50 @@ impl Render for RampEditor {
                     .tooltip(label)
                     .disabled(disabled || off)
             };
-            #[cfg(test)]
-            let wrap = |id: &'static str, button: Button| {
-                div().debug_selector(move || id.to_owned()).child(button)
-            };
-            #[cfg(not(test))]
-            let wrap = |_: &'static str, button: Button| button;
             let toolbar = div()
                 .flex()
                 .items_center()
                 .gap(px(2.0 * z))
-                .child(wrap(
-                    "ramp-add",
-                    tool("ramp-add", IconName::Plus, "Add a stop", false)
-                        .on_click(cx.listener(|this, _, _, cx| this.add_after_selected(cx))),
+                .child(tagged_button(
+                    tool("ramp-add", IconName::Plus, "Add a stop", false).on_click(
+                        cx.safe_listener(|this, _: &ClickEvent, _, cx| {
+                            this.add_after_selected(cx);
+                        }),
+                    ),
+                    || "ramp-add".into(),
                 ))
-                .child(wrap(
-                    "ramp-remove",
+                .child(tagged_button(
                     tool(
                         "ramp-remove",
                         IconName::Minus,
                         "Remove the selected stop",
                         self.stops.len() <= 1,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.remove_selected(cx))),
+                    .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| {
+                        this.remove_selected(cx);
+                    })),
+                    || "ramp-remove".into(),
                 ))
                 .child(div().flex_1())
-                .child(wrap(
-                    "ramp-flip",
+                .child(tagged_button(
                     tool(
                         "ramp-flip",
                         IconName::FlipHorizontal,
                         "Flip left to right",
                         false,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.flip(cx))),
+                    .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| this.flip(cx))),
+                    || "ramp-flip".into(),
                 ))
-                .child(wrap(
-                    "ramp-distribute",
+                .child(tagged_button(
                     tool(
                         "ramp-distribute",
                         IconName::ArrowsOutLineHorizontal,
                         "Space the stops evenly",
                         self.stops.len() < 2,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.distribute(cx))),
+                    .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| this.distribute(cx))),
+                    || "ramp-distribute".into(),
                 ));
 
             let selected_index = self.selected_index();

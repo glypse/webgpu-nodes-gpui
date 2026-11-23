@@ -16,7 +16,8 @@ mod theme;
 
 use std::borrow::Cow;
 
-use gpui::App;
+use gpui::{AnyElement, App, IntoElement as _};
+use gpui_component::button::Button;
 
 pub use color::{oklch, oklch_a};
 pub use color_picker::{ColorPicker, ColorPickerEvent, linear_to_hsla};
@@ -28,6 +29,21 @@ pub use icon::{Assets, Icon, IconName};
 pub use number_field::{NumberEvent, NumberField};
 pub use ramp_editor::{RampEditor, RampEditorEvent};
 pub use theme::{ActiveTheme, Appearance, Colors, INTERFACE_FONT, Radii, TextSizes, Theme};
+
+/// A button under a test id, so tests can find it. Outside tests it is the
+/// button itself, keeping the layout free of an extra element.
+pub(crate) fn tagged_button(button: Button, id: impl FnOnce() -> String) -> AnyElement {
+    #[cfg(test)]
+    {
+        use gpui::{InteractiveElement as _, ParentElement as _, div};
+        div().debug_selector(id).child(button).into_any_element()
+    }
+    #[cfg(not(test))]
+    {
+        let _ = id;
+        button.into_any_element()
+    }
+}
 
 const INTERFACE_FONT_DATA: &[u8] = include_bytes!("../assets/fonts/AtkinsonHyperlegibleNext.ttf");
 

@@ -1,5 +1,5 @@
 use gpui::{
-    AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Empty, Entity, EventEmitter,
+    AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Div, Empty, Entity, EventEmitter,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TextAlign, Window,
     div, prelude::FluentBuilder as _, px,
@@ -7,7 +7,7 @@ use gpui::{
 use gpui_component::input::{Escape, Input, InputEvent, InputState, MaskPattern};
 use guard::SafeListener as _;
 
-use crate::ActiveTheme as _;
+use crate::{ActiveTheme as _, Colors};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NumberEvent {
@@ -32,8 +32,6 @@ pub struct NumberField {
     read_only: bool,
     min: Option<f64>,
     max: Option<f64>,
-    soft_min: Option<f64>,
-    soft_max: Option<f64>,
     /// Made on the first edit, which is when a window is at hand to build it.
     input: Option<Entity<InputState>>,
     _input_subscription: Option<Subscription>,
@@ -56,8 +54,6 @@ impl NumberField {
             read_only: false,
             min: None,
             max: None,
-            soft_min: None,
-            soft_max: None,
             input: None,
             _input_subscription: None,
             editing: false,
@@ -101,24 +97,11 @@ impl NumberField {
         self
     }
 
-    /// The range scrubbing stays within, widened to include the value it started
-    /// from. Typing isn't held by it.
-    pub fn soft_range(mut self, min: Option<f64>, max: Option<f64>) -> Self {
-        self.soft_min = min;
-        self.soft_max = max;
-        self
-    }
-
     pub fn value(&self) -> f64 {
         self.value
     }
 
     /// Shown dimmed and neither scrubbed nor typed into.
-    pub fn read_only(mut self, read_only: bool) -> Self {
-        self.read_only = read_only;
-        self
-    }
-
     pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
         if self.read_only != read_only {
             self.read_only = read_only;
@@ -157,6 +140,19 @@ impl NumberField {
         self.max.map_or(value, |max| value.min(max))
     }
 
+    fn label_and_value(&self, colors: &Colors) -> (Option<Div>, Div) {
+        let label = self
+            .label
+            .clone()
+            .map(|label| div().text_color(colors.muted_foreground).child(label));
+        let value = div()
+            .flex_1()
+            .text_right()
+            .text_color(colors.foreground)
+            .child(self.format());
+        (label, value)
+    }
+
     fn format(&self) -> String {
         if self.integer {
             format!("{}", self.value.round() as i64)
@@ -188,9 +184,11 @@ impl NumberField {
                 });
                 self._input_subscription =
                     Some(cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
-                                        if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                            this.commit(cx);
-                        }
+                        guard::guard("NumberField input", || {
+                            if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                                this.commit(cx);
+                            }
+                        });
                     }));
                 self.input = Some(input.clone());
                 input
@@ -219,7 +217,8 @@ impl NumberField {
         let typed = self
             .input
             .as_ref()
-            .and_then(|input| input.read(cx).value().trim().parse::<f64>().ok());
+            .and_then(|input| input.read(cx).value().trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite());
         if let Some(parsed) = typed {
             self.change(parsed, cx);
         }
@@ -241,18 +240,8 @@ impl NumberField {
             self.step
         };
         let target = start_value + dx / PIXELS_PER_STEP * step;
-        self.change(
-            soft_clamp(target, start_value, self.soft_min, self.soft_max),
-            cx,
-        );
+        self.change(target, cx);
     }
-}
-
-/// `value` kept within the soft range, widened to include `from`.
-fn soft_clamp(value: f64, from: f64, soft_min: Option<f64>, soft_max: Option<f64>) -> f64 {
-    let low = soft_min.map_or(value, |min| min.min(from));
-    let high = soft_max.map_or(value, |max| max.max(from));
-    value.max(low).min(high)
 }
 
 impl Render for NumberField {
@@ -294,11 +283,11 @@ impl Render for NumberField {
                             .line_height(text * 1.25)
                             .text_align(TextAlign::Center),
                     );
-                #[cfg(test)]
                 let entry = entry.debug_selector(|| "number-field-entry".into());
                 return base.child(entry).into_any_element();
             }
             if self.read_only {
+                let (label, value) = self.label_and_value(c);
                 return base
                     .px(px(10.0 * z))
                     .gap(px(8.0 * z))
@@ -306,20 +295,11 @@ impl Render for NumberField {
                     .border(px(z))
                     .border_color(c.input)
                     .opacity(0.5)
-                    .children(
-                        self.label
-                            .clone()
-                            .map(|label| div().text_color(c.muted_foreground).child(label)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_right()
-                            .text_color(c.foreground)
-                            .child(self.format()),
-                    )
+                    .children(label)
+                    .child(value)
                     .into_any_element();
             }
+            let (label, value) = self.label_and_value(c);
             let field = base
                 .id("number-field")
                 .px(px(10.0 * z))
@@ -354,19 +334,8 @@ impl Render for NumberField {
                         this.start_editing(window, cx);
                     }
                 }))
-                .children(
-                    self.label
-                        .clone()
-                        .map(|label| div().text_color(c.muted_foreground).child(label)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .text_right()
-                        .text_color(c.foreground)
-                        .child(self.format()),
-                );
-            #[cfg(test)]
+                .children(label)
+                .child(value);
             let field = field.debug_selector(|| "number-field".into());
             field.into_any_element()
         })
@@ -381,26 +350,6 @@ mod tests {
     use gpui::{Render, TestAppContext, VisualTestContext};
 
     use super::*;
-
-    #[test]
-    fn scrubbing_stays_within_the_soft_range() {
-        assert_eq!(soft_clamp(1.7, 0.5, Some(0.0), Some(1.0)), 1.0);
-        assert_eq!(soft_clamp(-0.4, 0.5, Some(0.0), Some(1.0)), 0.0);
-        assert_eq!(soft_clamp(0.3, 0.5, Some(0.0), Some(1.0)), 0.3);
-    }
-
-    #[test]
-    fn a_value_past_the_soft_range_can_still_be_scrubbed_back_and_forth() {
-        // Typed as 3: scrubbing may go anywhere between the range's ends and 3.
-        assert_eq!(soft_clamp(2.0, 3.0, Some(0.0), Some(1.0)), 2.0);
-        assert_eq!(soft_clamp(5.0, 3.0, Some(0.0), Some(1.0)), 3.0);
-        assert_eq!(soft_clamp(-1.0, 3.0, Some(0.0), Some(1.0)), 0.0);
-    }
-
-    #[test]
-    fn without_a_soft_range_nothing_is_held() {
-        assert_eq!(soft_clamp(9.0, 0.0, None, None), 9.0);
-    }
 
     struct Host(Entity<NumberField>);
 

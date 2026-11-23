@@ -37,9 +37,9 @@ Builds on `gpui-component` (0.10, `gpui-fast` feature) for its widgets (`Button`
 - `gamut_image::PLANES` is a process-wide `LruCache` (64 entries). Keys are quantised (`PlaneKey` lightness in 1/400ths, chroma 1/1000ths, hue 1/10ths) and the image is generated from the quantised values, so equal keys paint identically. Keep quantisation in the key, or equal keys diverge.
 - `ImageCache::new(0)` clamps to capacity 1 rather than panicking.
 - `ColorPicker` remembers its last mode in a static `LAST_MODE` (AtomicU8), so new pickers open in the mode last used anywhere.
-- `Theme::sync` swaps the global but does not update gpui-component's palette; nothing calls it, and `preferences::apply` is the path that does both.
+- Buttons that tests find by id go through `tagged_button` (`lib.rs`); `debug_selector` itself is a no-op outside debug + test-support builds.
 - `lib.rs::init` `expect`s the bundled font; that's compiled-in data, so it can't fail at runtime without a build error.
-- `ColorPicker`/`ColorWheels` use `gamut`/`space` from `graph-math`; colour maths lives there, not here. `color.rs` is only the sRGB conversion for the theme's own colours.
+- `ColorPicker`/`ColorWheels` use `gamut`/`space` from `graph-math`; colour maths lives there, not here. `color.rs` only wraps `graph-math`'s OKLch conversion for the theme's own colours.
 - Icons: a new `IconName` needs both the Phosphor weight/const and the file stem. `Assets::list` merges in `gpui_kit_assets`.
 
 ## Adding a component
@@ -56,5 +56,5 @@ Builds on `gpui-component` (0.10, `gpui-fast` feature) for its widgets (`Button`
 - Icon assets: `icon.rs` test checks every `IconName` resolves to SVG through `Assets`.
 
 ## Dependencies
-- Workspace deps: `gpui`, `gpui-component`, `gpui-kit-assets`, `graph-math`, `guard`, `phosphor-svgs`, `image`, `lru`, `unicode-segmentation`.
+- Workspace deps: `gpui`, `gpui-component`, `gpui-kit-assets`, `graph-math`, `guard`, `log`, `phosphor-svgs`, `image`, `lru`.
 - Dependents: `crates/app` and `crates/screen`.

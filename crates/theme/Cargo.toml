@@ -12,8 +12,8 @@ gpui-kit-assets.workspace = true
 graph-math = { path = "../graph-math" }
 phosphor-svgs = { version = "=0.6.0-pre.3", default-features = false, features = ["str"] }
 image = { version = "0.25", default-features = false }
+log.workspace = true
 lru = "0.19"
-unicode-segmentation = "1"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

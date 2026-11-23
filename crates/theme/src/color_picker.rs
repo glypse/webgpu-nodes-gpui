@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement,
+    App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _,
     Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
@@ -97,13 +97,17 @@ impl ColorPicker {
         let wheels = cx.new(|_| ColorWheels::new(mode, [0.0; 3]));
         let fields = [(); 4].map(|()| cx.new(|cx| NumberField::new(0.0, cx).step(0.01)));
         let mut subscriptions = vec![cx.subscribe(&wheels, |this, _, event, cx| {
-            let ColorWheelsEvent::Change(components) = event;
-            this.set_components(*components, cx);
+            guard::guard("ColorPicker wheels", || {
+                let ColorWheelsEvent::Change(components) = event;
+                this.set_components(*components, cx);
+            });
         })];
         for (index, field) in fields.iter().enumerate() {
             subscriptions.push(cx.subscribe(field, move |this, _, event, cx| {
-                let NumberEvent::Change(number) = event;
-                this.set_field(index, *number, cx);
+                guard::guard("ColorPicker field", || {
+                    let NumberEvent::Change(number) = event;
+                    this.set_field(index, *number, cx);
+                });
             }));
         }
         let mut picker = Self {
@@ -158,13 +162,6 @@ impl ColorPicker {
         self.refresh(cx);
     }
 
-    pub fn set_alpha_shown(&mut self, alpha: bool, cx: &mut Context<Self>) {
-        if self.alpha != alpha {
-            self.alpha = alpha;
-            cx.notify();
-        }
-    }
-
     pub fn set_gamut(&mut self, gamut: ColorSpace, cx: &mut Context<Self>) {
         if self.gamut != gamut {
             self.gamut = gamut;
@@ -190,9 +187,10 @@ impl ColorPicker {
         }
     }
 
-    /// The labels and ranges of the fields in the mode shown.
-    fn configure_fields(&mut self, cx: &mut Context<Self>) {
-        let specs: [(&str, Option<f64>, Option<f64>); 4] = match self.mode {
+    /// The configured fields' label and range, for the components of `mode`
+    /// then alpha.
+    fn field_specs(mode: ColorMode) -> [(&'static str, Option<f64>, Option<f64>); 4] {
+        match mode {
             ColorMode::Rgb => [
                 ("R", Some(0.0), None),
                 ("G", Some(0.0), None),
@@ -211,7 +209,12 @@ impl ColorPicker {
                 ("H", Some(0.0), Some(360.0)),
                 ("A", Some(0.0), Some(1.0)),
             ],
-        };
+        }
+    }
+
+    /// The labels and ranges of the fields in the mode shown.
+    fn configure_fields(&mut self, cx: &mut Context<Self>) {
+        let specs = Self::field_specs(self.mode);
         for (field, (label, min, max)) in self.fields.iter().zip(specs) {
             field.update(cx, |field, cx| field.configure(label, min, max, cx));
         }
@@ -289,11 +292,9 @@ impl ColorPicker {
             return;
         }
         let mut components = self.components();
-        components[index] = match self.mode {
-            ColorMode::Rgb => number.max(0.0),
-            ColorMode::Hsv => number.clamp(0.0, 1.0),
-            ColorMode::Oklch => number.clamp(0.0, [1.0, 0.5, 360.0][index]),
-        };
+        let (_, min, max) = Self::field_specs(self.mode)[index];
+        let number = min.map_or(number, |min| number.max(min));
+        components[index] = max.map_or(number, |max| number.min(max));
         self.set_components(components, cx);
     }
 
@@ -323,24 +324,27 @@ impl ColorPicker {
 
 impl Render for ColorPicker {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let hex = match self.hex.clone() {
-            Some(hex) => hex,
-            None => {
-                let hex = cx.new(|cx| InputState::new(window, cx));
-                self._hex_subscription = Some(cx.subscribe_in(&hex, window, |this, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                        this.commit_hex(cx);
-                    }
-                }));
-                self.hex = Some(hex.clone());
-                hex
-            }
-        };
-        if std::mem::take(&mut self.hex_dirty) {
-            let text = self.hex_text.clone();
-            hex.update(cx, |input, cx| input.set_value(text, window, cx));
-        }
         guard::render("ColorPicker", || {
+            let hex = match self.hex.clone() {
+                Some(hex) => hex,
+                None => {
+                    let hex = cx.new(|cx| InputState::new(window, cx));
+                    self._hex_subscription =
+                        Some(cx.subscribe_in(&hex, window, |this, _, event: &InputEvent, _, cx| {
+                            guard::guard("ColorPicker hex", || {
+                                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                                    this.commit_hex(cx);
+                                }
+                            });
+                        }));
+                    self.hex = Some(hex.clone());
+                    hex
+                }
+            };
+            if std::mem::take(&mut self.hex_dirty) {
+                let text = self.hex_text.clone();
+                hex.update(cx, |input, cx| input.set_value(text, window, cx));
+            }
             let theme = cx.theme();
             let c = &theme.colors;
             let mode = self.mode;
@@ -357,7 +361,7 @@ impl Render for ColorPicker {
                 .bg(c.muted)
                 .children(MODE_LABELS.map(|(option, label)| {
                     let selected = option == mode;
-                    let tab = div()
+                    div()
                         .id(SharedString::from(format!("picker-tab-{label}")))
                         .flex_1()
                         .flex()
@@ -372,12 +376,10 @@ impl Render for ColorPicker {
                                 .hover(move |s| s.text_color(foreground))
                         })
                         .child(label)
-                        .on_click(cx.listener(move |this, _, _, cx| this.set_mode(option, cx)));
-                    #[cfg(test)]
-                    let tab = gpui::InteractiveElement::debug_selector(tab, || {
-                        format!("picker-tab-{label}")
-                    });
-                    tab
+                        .debug_selector(move || format!("picker-tab-{label}"))
+                        .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| {
+                            this.set_mode(option, cx);
+                        }))
                 }));
             let shown = if self.alpha { 4 } else { 3 };
             let fields = div()
@@ -399,9 +401,8 @@ impl Render for ColorPicker {
                     cx.stop_propagation();
                     this.refresh(cx);
                 }))
-                .child(Input::new(&hex));
-            #[cfg(test)]
-            let hex = gpui::InteractiveElement::debug_selector(hex, || "picker-hex".into());
+                .child(Input::new(&hex))
+                .debug_selector(|| "picker-hex".into());
             div()
                 .flex()
                 .flex_col()

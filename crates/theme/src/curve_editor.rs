@@ -1,5 +1,5 @@
 use gpui::{
-    AppContext as _, Bounds, Context, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
+    AppContext as _, Bounds, ClickEvent, Context, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
     Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers, MouseButton,
     MouseDownEvent, MouseUpEvent, ParentElement as _, PathBuilder, Pixels, Point, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, canvas, div,
@@ -8,15 +8,13 @@ use gpui::{
 use graph_math::curve::{
     CurvePoint, CurvePointKind, HandleSide, Vec2, add_curve_point, curve_presets, curve_segments,
     flip_curve_x, flip_curve_y, insert_curve_point, move_curve_handle, move_curve_point,
-    point_handles, remove_curve_point, segment_point, set_curve_point_kind,
+    remove_curve_point, segment_point, set_curve_point_kind,
 };
 use guard::SafeListener as _;
 
 use gpui_component::{Disableable as _, Selectable as _, Size, Sizable as _, button::{Button, ButtonVariants as _}};
 
-use crate::{
-    ActiveTheme as _, IconName, NumberEvent, NumberField,
-};
+use crate::{ActiveTheme as _, IconName, NumberEvent, NumberField, tagged_button};
 
 /// The graph's side at zoom 1. Everything in the editor is in these units times the zoom.
 const SIDE: f64 = 150.0;
@@ -103,6 +101,14 @@ fn sides(points: &[CurvePoint], index: usize) -> Vec<HandleSide> {
     sides
 }
 
+fn side_part(side: HandleSide) -> Part {
+    if side == HandleSide::Left {
+        Part::Left
+    } else {
+        Part::Right
+    }
+}
+
 fn part_side(part: Part) -> Option<HandleSide> {
     match part {
         Part::Point => None,
@@ -113,7 +119,7 @@ fn part_side(part: Part) -> Option<HandleSide> {
 
 /// Where a part of a point is in the square.
 fn part_at(point: &CurvePoint, part: Part) -> Vec2 {
-    let (left, right) = point_handles(point);
+    let (left, right) = point.handles();
     match part {
         Part::Point => Vec2::new(point.x, point.y),
         Part::Left => Vec2::new(point.x + left.x, point.y + left.y),
@@ -244,8 +250,10 @@ impl CurveEditor {
             [0, 1].map(|axis| {
                 let field = cx.new(|cx| NumberField::new(0.0, cx).step(0.01));
                 subscriptions.push(cx.subscribe(&field, move |this, _, event, cx| {
-                    let NumberEvent::Change(number) = event;
-                    this.set_coordinate(PARTS[part].0, axis, *number, cx);
+                    guard::guard("CurveEditor field", || {
+                        let NumberEvent::Change(number) = event;
+                        this.set_coordinate(PARTS[part].0, axis, *number, cx);
+                    });
                 }));
                 field
             })
@@ -279,10 +287,6 @@ impl CurveEditor {
             }
             cx.notify();
         }
-    }
-
-    pub fn points(&self) -> &[CurvePoint] {
-        &self.points
     }
 
     pub fn selected(&self) -> Option<usize> {
@@ -351,9 +355,9 @@ impl CurveEditor {
         if let Some(drag) = &mut self.drag {
             drag.points = next.clone();
         }
-        self.points = next.clone();
+        self.points = next;
         self.refresh_fields(cx);
-        cx.emit(CurveEditorEvent::Change(next));
+        cx.emit(CurveEditorEvent::Change(self.points.clone()));
         cx.notify();
     }
 
@@ -368,12 +372,7 @@ impl CurveEditor {
         let (index, point) = (self.selected?, self.active()?);
         let plane = self.plane();
         sides(&self.points, index).into_iter().find(|side| {
-            let part = if *side == HandleSide::Left {
-                Part::Left
-            } else {
-                Part::Right
-            };
-            distance(plane.project(part_at(point, part)), m) < plane.grab()
+            distance(plane.project(part_at(point, side_part(*side))), m) < plane.grab()
         })
     }
 
@@ -393,11 +392,7 @@ impl CurveEditor {
         let mut next = None;
         let mut part = Part::Point;
         let index = if let (Some(side), Some(selected)) = (self.grabbed_handle(m), self.selected) {
-            part = if side == HandleSide::Left {
-                Part::Left
-            } else {
-                Part::Right
-            };
+            part = side_part(side);
             Some(selected)
         } else {
             let grabbed = grabbed_point(&self.points, plane, m);
@@ -457,7 +452,9 @@ impl CurveEditor {
             drag.origin.x + drag.moved.x / span,
             drag.origin.y - drag.moved.y / span,
         );
-        let (part, index, base) = (drag.part, drag.index, drag.points.clone());
+        let (part, index) = (drag.part, drag.index);
+        // `send` stores the result back into the drag, so the base is taken rather than copied.
+        let base = std::mem::take(&mut drag.points);
         let next = match part_side(part) {
             None => {
                 let snap = |n: f64| {
@@ -592,14 +589,7 @@ fn paint_dot(
 }
 
 /// Strokes a path of steps, each point offset by `origin`.
-fn stroke_path(
-    window: &mut Window,
-    origin: Point<Pixels>,
-    steps: &[PathStep],
-    width: f32,
-    color: Hsla,
-) {
-    let mut builder = PathBuilder::stroke(px(width));
+fn push_steps(builder: &mut PathBuilder, origin: Point<Pixels>, steps: &[PathStep]) {
     for step in steps {
         match *step {
             PathStep::Move(p) => builder.move_to(pt(origin, p)),
@@ -609,8 +599,20 @@ fn stroke_path(
             }
         }
     }
-    if let Ok(path) = builder.build() {
-        window.paint_path(path, color);
+}
+
+fn stroke_path(
+    window: &mut Window,
+    origin: Point<Pixels>,
+    steps: &[PathStep],
+    width: f32,
+    color: Hsla,
+) {
+    let mut builder = PathBuilder::stroke(px(width));
+    push_steps(&mut builder, origin, steps);
+    match builder.build() {
+        Ok(path) => window.paint_path(path, color),
+        Err(err) => log::warn!("curve path not built: {err}"),
     }
 }
 
@@ -649,19 +651,17 @@ impl Render for CurveEditor {
             let disabled = self.disabled;
             let selected = self.selected;
             let points = self.points.clone();
+            let deletable = points.len() > 2;
             let active = self.active().copied();
             let this = cx.entity();
+            let (muted, ink) = (c.muted_foreground, c.foreground);
 
             let graph = {
-                let (points, c, this, z) = (points.clone(), c.clone(), this.clone(), z);
                 canvas(
-                    {
-                        let this = this.clone();
-                        move |bounds, _, cx| {
-                            guard::guard("curve editor layout", || {
-                                this.update(cx, |editor, _| editor.origin = bounds.origin)
-                            });
-                        }
+                    move |bounds, _, cx| {
+                        guard::guard("curve editor layout", || {
+                            this.update(cx, |editor, _| editor.origin = bounds.origin)
+                        });
                     },
                     move |bounds, _, window, _| {
                         guard::guard("curve editor paint", || {
@@ -708,42 +708,23 @@ impl Render for CurveEditor {
 
                             let steps = curve_path(&points, |p| plane.project(p));
                             // The area under the curve.
-                            if let (Some(first), Some(last)) = (points.first(), points.last()) {
+                            if !points.is_empty() {
                                 let mut area = PathBuilder::fill();
-                                for step in &steps {
-                                    match *step {
-                                        PathStep::Move(p) => area.move_to(pt(origin, p)),
-                                        PathStep::Line(p) => area.line_to(pt(origin, p)),
-                                        PathStep::Cubic { first, second, end } => {
-                                            area.cubic_bezier_to(
-                                                pt(origin, end),
-                                                pt(origin, first),
-                                                pt(origin, second),
-                                            );
-                                        }
-                                    }
-                                }
-                                let _ = (first, last);
+                                push_steps(&mut area, origin, &steps);
                                 area.line_to(pt(origin, plane.project(Vec2::new(1.0, 0.0))));
                                 area.line_to(pt(origin, plane.project(Vec2::new(0.0, 0.0))));
                                 area.close();
-                                if let Ok(path) = area.build() {
-                                    window.paint_path(path, c.foreground.opacity(0.05));
+                                match area.build() {
+                                    Ok(path) => window.paint_path(path, c.foreground.opacity(0.05)),
+                                    Err(err) => log::warn!("curve area not built: {err}"),
                                 }
                             }
                             stroke_path(window, origin, &steps, 1.5 * z, c.foreground);
 
-                            if let (Some(point), Some(index)) =
-                                (points.get(selected.unwrap_or(usize::MAX)), selected)
-                            {
+                            if let (Some(point), Some(index)) = (&active, selected) {
                                 let at = plane.project(Vec2::new(point.x, point.y));
                                 for handle_side in sides(&points, index) {
-                                    let part = if handle_side == HandleSide::Left {
-                                        Part::Left
-                                    } else {
-                                        Part::Right
-                                    };
-                                    let handle = plane.project(part_at(point, part));
+                                    let handle = plane.project(part_at(point, side_part(handle_side)));
                                     stroke_path(
                                         window,
                                         origin,
@@ -803,11 +784,9 @@ impl Render for CurveEditor {
                 .on_mouse_up_out(
                     MouseButton::Left,
                     cx.safe_listener(|this, _: &MouseUpEvent, _, _| this.release()),
-                );
-            #[cfg(test)]
-            let graph = graph.debug_selector(|| "curve-graph".into());
+                )
+                .debug_selector(|| "curve-graph".into());
 
-            let muted = c.muted_foreground;
             let presets = div().flex().flex_col().justify_between().children(
                 curve_presets().into_iter().map(|preset| {
                     let label = SharedString::from(format!("{} preset", preset.label));
@@ -836,14 +815,10 @@ impl Render for CurveEditor {
                             )
                             .size(px(20.0 * z)),
                         )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.apply_preset(applied.clone(), cx)
+                        .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| {
+                            this.apply_preset(applied.clone(), cx);
                         }));
-                    #[cfg(test)]
-                    let button = div()
-                        .debug_selector(move || format!("curve-preset-{id}"))
-                        .child(button);
-                    button
+                    tagged_button(button, move || format!("curve-preset-{id}"))
                 }),
             );
 
@@ -869,7 +844,6 @@ impl Render for CurveEditor {
                 .children(kinds.into_iter().map(|(kind, label)| {
                     let pressed = active.is_some_and(|p| p.kind == kind);
                     let (lines, dot, handles) = kind_glyph(kind);
-                    let ink = c.foreground;
                     let button = Button::new(SharedString::from(format!("curve-kind-{kind:?}")))
                         .ghost()
                         .tooltip(label)
@@ -922,50 +896,48 @@ impl Render for CurveEditor {
                             )
                             .size(px(16.0 * z)),
                         )
-                        .on_click(cx.listener(move |this, _, _, cx| this.set_kind(kind, cx)));
-                    #[cfg(test)]
-                    let button = div()
-                        .debug_selector(move || format!("curve-kind-{kind:?}"))
-                        .child(button);
-                    button
+                        .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| {
+                            this.set_kind(kind, cx);
+                        }));
+                    tagged_button(button, move || format!("curve-kind-{kind:?}"))
                 }))
                 .child(div().flex_1())
-                .child({
-                    let b = Button::new("curve-flip-x")
+                .child(tagged_button(
+                    Button::new("curve-flip-x")
                         .ghost()
                         .with_size(Size::Size(px(24.0 * z)))
                         .icon(IconName::FlipHorizontal)
                         .tooltip("Flip left to right")
                         .disabled(disabled)
-                        .on_click(cx.listener(|this, _, _, cx| this.flip(true, cx)));
-                    #[cfg(test)]
-                    let b = div().debug_selector(|| "curve-flip-x".into()).child(b);
-                    b
-                })
-                .child({
-                    let b = Button::new("curve-flip-y")
+                        .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| {
+                            this.flip(true, cx);
+                        })),
+                    || "curve-flip-x".into(),
+                ))
+                .child(tagged_button(
+                    Button::new("curve-flip-y")
                         .ghost()
                         .with_size(Size::Size(px(24.0 * z)))
                         .icon(IconName::FlipVertical)
                         .tooltip("Flip upside down")
                         .disabled(disabled)
-                        .on_click(cx.listener(|this, _, _, cx| this.flip(false, cx)));
-                    #[cfg(test)]
-                    let b = div().debug_selector(|| "curve-flip-y".into()).child(b);
-                    b
-                })
-                .child({
-                    let b = Button::new("curve-delete")
+                        .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| {
+                            this.flip(false, cx);
+                        })),
+                    || "curve-flip-y".into(),
+                ))
+                .child(tagged_button(
+                    Button::new("curve-delete")
                         .danger()
                         .with_size(Size::Size(px(24.0 * z)))
                         .icon(IconName::X)
                         .tooltip("Delete point")
-                        .disabled(disabled || active.is_none() || points.len() <= 2)
-                        .on_click(cx.listener(|this, _, _, cx| this.remove_selected(cx)));
-                    #[cfg(test)]
-                    let b = div().debug_selector(|| "curve-delete".into()).child(b);
-                    b
-                });
+                        .disabled(disabled || active.is_none() || !deletable)
+                        .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| {
+                            this.remove_selected(cx);
+                        })),
+                    || "curve-delete".into(),
+                ));
 
             let coordinates =
                 div()

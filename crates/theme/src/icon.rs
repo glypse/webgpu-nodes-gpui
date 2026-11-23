@@ -59,7 +59,6 @@ icons! {
     Minus => regular::MINUS, "minus",
     Moon => regular::MOON, "moon",
     MonitorPlay => regular::MONITOR_PLAY, "monitor-play",
-    PaintBrush => regular::PAINT_BRUSH, "paint-brush",
     Palette => regular::PALETTE, "palette",
     PauseFill => fill::PAUSE, "pause-fill",
     PlayFill => fill::PLAY, "play-fill",

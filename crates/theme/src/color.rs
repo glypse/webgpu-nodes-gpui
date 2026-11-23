@@ -1,4 +1,5 @@
 use gpui::{Hsla, Rgba};
+use graph_math::color::{Lch, oklch_to_linear_unmapped, srgb_encode};
 
 /// An OKLCH colour (hue in degrees), clipped to sRGB.
 pub fn oklch(l: f32, c: f32, h: f32) -> Hsla {
@@ -6,34 +7,19 @@ pub fn oklch(l: f32, c: f32, h: f32) -> Hsla {
 }
 
 pub fn oklch_a(l: f32, c: f32, h: f32, alpha: f32) -> Hsla {
-    let (a, b) = {
-        let h = h.to_radians();
-        (c * h.cos(), c * h.sin())
-    };
-    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
-    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
-    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
-    let (l3, m3, s3) = (l_.powi(3), m_.powi(3), s_.powi(3));
-    let r = 4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3;
-    let g = -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3;
-    let b = -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3;
+    let linear = oklch_to_linear_unmapped(Lch {
+        l: l as f64,
+        c: c as f64,
+        h: h as f64,
+    });
+    let encode = |v: f64| srgb_encode(v).clamp(0.0, 1.0) as f32;
     Rgba {
-        r: encode(r),
-        g: encode(g),
-        b: encode(b),
+        r: encode(linear.r),
+        g: encode(linear.g),
+        b: encode(linear.b),
         a: alpha,
     }
     .into()
-}
-
-/// Linear to sRGB transfer.
-fn encode(linear: f32) -> f32 {
-    let c = linear.clamp(0.0, 1.0);
-    if c <= 0.003_130_8 {
-        12.92 * c
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    }
 }
 
 #[cfg(test)]
