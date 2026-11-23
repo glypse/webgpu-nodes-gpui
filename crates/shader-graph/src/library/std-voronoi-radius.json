@@ -8,7 +8,7 @@
 	"dependencies": [
 		"std-lattice-neighbor@3788b541dbe1aa83",
 		"std-voronoi-point@46472c253e5c3d20",
-		"std-voronoi-distance@4f6c70c0c6ccdc95"
+		"std-voronoi-distance@4bc38b78e5db6e66"
 	],
 	"definition": {
 		"nodes": [
@@ -161,7 +161,7 @@
 					"y": 657
 				},
 				"group": {
-					"definitionRef": "std-voronoi-distance@4f6c70c0c6ccdc95",
+					"definitionRef": "std-voronoi-distance@4bc38b78e5db6e66",
 					"locked": true
 				},
 				"frame": "bcdd951c-0612-4f85-ab91-c51fe7fdfa7d"

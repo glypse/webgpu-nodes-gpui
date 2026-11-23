@@ -10,7 +10,7 @@
 	"category": "texture",
 	"section": ["Helpers", "Voronoi"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-component-sum@e8add6496bf06ef6", "std-max-component@dc315029db227dde"],
+	"dependencies": ["std-component-sum@dc76d62bf9ed6507", "std-max-component@69173756ea1280c6"],
 	"definition": {
 		"nodes": [
 			{
@@ -60,7 +60,7 @@
 					"y": 172
 				},
 				"group": {
-					"definitionRef": "std-component-sum@e8add6496bf06ef6",
+					"definitionRef": "std-component-sum@dc76d62bf9ed6507",
 					"locked": true
 				}
 			},
@@ -73,7 +73,7 @@
 					"y": 234
 				},
 				"group": {
-					"definitionRef": "std-max-component@dc315029db227dde",
+					"definitionRef": "std-max-component@69173756ea1280c6",
 					"locked": true
 				}
 			},
@@ -95,7 +95,7 @@
 					"y": 459
 				},
 				"group": {
-					"definitionRef": "std-component-sum@e8add6496bf06ef6",
+					"definitionRef": "std-component-sum@dc76d62bf9ed6507",
 					"locked": true
 				}
 			},

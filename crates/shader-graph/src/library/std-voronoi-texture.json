@@ -7,11 +7,11 @@
 	"searchSection": "Helpers",
 	"dependencies": [
 		"std-noise-coordinates@a7dd53fbc4c18faa",
-		"std-voronoi-nearest@e70d0c7a7873415f",
+		"std-voronoi-nearest@cc461aa095d5abf1",
 		"std-hash@7388918a3bd7190a",
-		"std-voronoi-smooth@387470c0b9841aa3",
-		"std-voronoi-edges@5c1b18d0f9363295",
-		"std-voronoi-radius@9b410ada97a50976"
+		"std-voronoi-smooth@e8a6d8486160736c",
+		"std-voronoi-edges@d5256fed78f3a127",
+		"std-voronoi-radius@c4612706b9a72ab2"
 	],
 	"definition": {
 		"nodes": [
@@ -233,7 +233,7 @@
 					"y": 1479
 				},
 				"group": {
-					"definitionRef": "std-voronoi-nearest@e70d0c7a7873415f",
+					"definitionRef": "std-voronoi-nearest@cc461aa095d5abf1",
 					"locked": true
 				},
 				"frame": "7ab1f4de-8b95-4fb0-9ea6-32574bd57011"
@@ -479,7 +479,7 @@
 					"y": 406
 				},
 				"group": {
-					"definitionRef": "std-voronoi-smooth@387470c0b9841aa3",
+					"definitionRef": "std-voronoi-smooth@e8a6d8486160736c",
 					"locked": true
 				},
 				"frame": "61670854-a246-4f4f-b7ac-94d2ae6bd943"
@@ -596,7 +596,7 @@
 					"y": 1193
 				},
 				"group": {
-					"definitionRef": "std-voronoi-edges@5c1b18d0f9363295",
+					"definitionRef": "std-voronoi-edges@d5256fed78f3a127",
 					"locked": true
 				},
 				"frame": "19e41e74-664b-4c13-a392-8b8a2b6e425f"
@@ -646,7 +646,7 @@
 					"y": 2223
 				},
 				"group": {
-					"definitionRef": "std-voronoi-radius@9b410ada97a50976",
+					"definitionRef": "std-voronoi-radius@c4612706b9a72ab2",
 					"locked": true
 				},
 				"frame": "eff7025e-eb2e-4df5-a69c-7e9241344111"

@@ -8,7 +8,7 @@
 	"dependencies": [
 		"std-lattice-neighbor@3788b541dbe1aa83",
 		"std-voronoi-point@46472c253e5c3d20",
-		"std-voronoi-bisector@dc5a10f29c97cc56"
+		"std-voronoi-bisector@05a6e6217eba3a26"
 	],
 	"definition": {
 		"nodes": [
@@ -195,7 +195,7 @@
 					"y": 877
 				},
 				"group": {
-					"definitionRef": "std-voronoi-bisector@dc5a10f29c97cc56",
+					"definitionRef": "std-voronoi-bisector@05a6e6217eba3a26",
 					"locked": true
 				},
 				"frame": "96d8d03d-1845-4a1e-b1e0-8238affb21ae"
@@ -415,7 +415,7 @@
 					"y": 2257
 				},
 				"group": {
-					"definitionRef": "std-voronoi-bisector@dc5a10f29c97cc56",
+					"definitionRef": "std-voronoi-bisector@05a6e6217eba3a26",
 					"locked": true
 				},
 				"frame": "e5ea1d89-f651-46fb-b4ea-0189cb1d8214"

@@ -9,7 +9,7 @@
 	"definition": {
 		"nodes": [
 			{
-				"id": "68d15d63-c0ef-47b2-b880-b70a87e8420e",
+				"id": "df34b9e1-dc23-4d7d-b646-7675c6254650",
 				"type": "layout-frame",
 				"data": {
 					"label": "Padding",
@@ -21,38 +21,38 @@
 				}
 			},
 			{
-				"id": "db434407-32bd-48d3-88a6-ac20ce764f8f",
+				"id": "f587a2bd-c11d-4c0f-a362-cf0936d789c0",
 				"type": "declare",
 				"data": {
+					"values": {
+						"w": 0,
+						"y": 0,
+						"z": 0
+					},
 					"types": {
 						"declare": "vec4f"
-					},
-					"values": {
-						"y": 0,
-						"z": 0,
-						"w": 0
 					}
 				},
 				"position": {
-					"x": 262,
-					"y": 274
+					"x": 302,
+					"y": 96
 				},
-				"frame": "68d15d63-c0ef-47b2-b880-b70a87e8420e"
+				"frame": "df34b9e1-dc23-4d7d-b646-7675c6254650"
 			},
 			{
-				"id": "8700fe5d-acf9-4833-86bc-6bdbbd56f538",
+				"id": "7e5cda09-13c6-4ee5-b275-bd29cdf2e65e",
 				"type": "group-input",
 				"data": {
 					"hideUnlinked": true
 				},
 				"position": {
 					"x": 24,
-					"y": 194
+					"y": 361
 				},
-				"frame": "68d15d63-c0ef-47b2-b880-b70a87e8420e"
+				"frame": "df34b9e1-dc23-4d7d-b646-7675c6254650"
 			},
 			{
-				"id": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"id": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"type": "width-switch",
 				"data": {
 					"types": {
@@ -63,111 +63,111 @@
 					}
 				},
 				"position": {
-					"x": 472,
-					"y": 90
+					"x": 552,
+					"y": 181
 				},
-				"frame": "68d15d63-c0ef-47b2-b880-b70a87e8420e"
+				"frame": "df34b9e1-dc23-4d7d-b646-7675c6254650"
 			},
 			{
-				"id": "b0e4c370-8bcd-4a0a-af3e-844b5147f728",
+				"id": "f049874c-5bc2-4fe1-a687-4833f07fd721",
 				"type": "group-output",
 				"data": {
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 672,
-					"y": 226
+					"x": 792,
+					"y": 211
 				},
-				"frame": "68d15d63-c0ef-47b2-b880-b70a87e8420e"
+				"frame": "df34b9e1-dc23-4d7d-b646-7675c6254650"
 			},
 			{
-				"id": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 224,
-					"y": 254
+					"x": 264,
+					"y": 407
 				},
-				"frame": "68d15d63-c0ef-47b2-b880-b70a87e8420e"
+				"frame": "df34b9e1-dc23-4d7d-b646-7675c6254650"
 			}
 		],
 		"edges": [
 			{
-				"id": "33cae062-7b34-4cd8-8495-8e35dbfd5038",
-				"source": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "f90efebd-a938-44d2-af1c-9ee7bd31f583",
+				"source": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"sourceHandle": "out",
-				"target": "db434407-32bd-48d3-88a6-ac20ce764f8f",
+				"target": "f587a2bd-c11d-4c0f-a362-cf0936d789c0",
 				"targetHandle": "x"
 			},
 			{
-				"id": "f073acd2-adae-4f6b-a792-8253d0709fd7",
-				"source": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "edb3a578-bbf7-413f-915b-f2cc1e93cedf",
+				"source": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"sourceHandle": "out",
-				"target": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"target": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"targetHandle": "value"
 			},
 			{
-				"id": "c7f9513b-415c-44df-b2fa-0311114d06eb",
-				"source": "db434407-32bd-48d3-88a6-ac20ce764f8f",
+				"id": "97a5286d-ab76-4819-8540-d2268565a979",
+				"source": "f587a2bd-c11d-4c0f-a362-cf0936d789c0",
 				"sourceHandle": "value",
-				"target": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"target": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"targetHandle": "case-1"
 			},
 			{
-				"id": "b51d71ce-2485-4c6e-8f82-5f371ad7fd6a",
-				"source": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "f32e1004-3608-4e84-82e4-fdb6debf3008",
+				"source": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"sourceHandle": "out",
-				"target": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"target": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"targetHandle": "case-2"
 			},
 			{
-				"id": "e15a55e0-22a0-4092-aa3c-c4565abce39e",
-				"source": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "5f39c0c1-c1de-42f5-992d-75be606b1165",
+				"source": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"sourceHandle": "out",
-				"target": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"target": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"targetHandle": "case-3"
 			},
 			{
-				"id": "d2dccdad-f38e-462c-9546-434530567084",
-				"source": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "7fa0d65d-ef01-4532-9fdc-fa8b371e8ba6",
+				"source": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"sourceHandle": "out",
-				"target": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"target": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"targetHandle": "case-4"
 			},
 			{
-				"id": "6761b4a6-0bd2-4578-9d17-5014e0e37336",
-				"source": "f8984df5-49f2-4bc6-904e-34b5c93ad158",
+				"id": "ecb6a656-ed14-4597-9c53-61e1f1521b28",
+				"source": "a72bc26f-5147-49b5-986f-0c66686a1d15",
 				"sourceHandle": "result",
-				"target": "b0e4c370-8bcd-4a0a-af3e-844b5147f728",
-				"targetHandle": "4c11698f-1e2e-4be6-9d52-cf2c24e3a9c3"
+				"target": "f049874c-5bc2-4fe1-a687-4833f07fd721",
+				"targetHandle": "8332022e-3566-442c-a578-67b56327eda2"
 			},
 			{
-				"id": "53fd7602-fa54-4792-9054-bedf260d5b5f",
-				"source": "8700fe5d-acf9-4833-86bc-6bdbbd56f538",
-				"sourceHandle": "1af46f25-7476-4563-8d60-9d54f5bf33b4",
-				"target": "3fe52e0e-41f9-472f-8b7f-99f88b135d67",
+				"id": "48d2aec2-8dc8-4aba-b363-45b768255181",
+				"source": "7e5cda09-13c6-4ee5-b275-bd29cdf2e65e",
+				"sourceHandle": "be204a80-2405-4dd6-a080-8903323c9012",
+				"target": "7c914ba2-bf8d-4be5-ab56-d4ec85bc1566",
 				"targetHandle": "in"
 			}
 		],
 		"inputs": [
 			{
-				"id": "1af46f25-7476-4563-8d60-9d54f5bf33b4",
+				"id": "be204a80-2405-4dd6-a080-8903323c9012",
 				"label": "Vector",
 				"type": {
-					"variable": "974c279c-3942-449b-8b98-87ab301c1786"
+					"variable": "a06508b4-b209-4e15-b8f9-36e1590f6ace"
 				}
 			}
 		],
 		"outputs": [
 			{
-				"id": "4c11698f-1e2e-4be6-9d52-cf2c24e3a9c3",
+				"id": "8332022e-3566-442c-a578-67b56327eda2",
 				"label": "Padded",
 				"type": "vec4f"
 			}
 		],
 		"typeVariables": [
 			{
-				"id": "974c279c-3942-449b-8b98-87ab301c1786",
+				"id": "a06508b4-b209-4e15-b8f9-36e1590f6ace",
 				"name": "T",
 				"types": ["vec3f", "vec2f", "vec4f", "f32"]
 			}

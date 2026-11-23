@@ -14,7 +14,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - `src/enums.rs`: enums on group inputs; Match and Width Switch branch on them at compile time.
 - `src/evaluate.rs`: CPU evaluation of a graph (`evaluate`, `evaluate_with`) for nodes with a `cpu` fn.
 - `src/library.rs`: standard library groups, embedded from `src/library/*.json` via `include_str!` (`SOURCES`, id and text per file), loaded lazily (`LIBRARY`); a broken file is logged and leaves the library empty.
-- `src/library/*.json`: group definitions, one file per group.
+- `src/library/*.json`: group definitions, one file per group, generated from the descriptions in the `stdlib` crate. `library::version_of`/`make_ref` give versions and refs.
 - Library versions: only the latest version of each library entry is stored until Beta; from Beta on, changed library entries keep their previous versions (`OLDER_SOURCES`) so saved projects load them. A ref resolves only to its exact stored id and version.
 - `src/catalog.rs`: add-menu entries (nodes, groups, zones, links) and search.
 - `src/assets/`: project asset metadata (`asset.rs`), bundles beside project JSON (`bundle.rs`), import description (`import.rs`).
@@ -48,7 +48,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 ## Adding a common thing
 - New node type with fixed sockets: a builder/descriptor in `src/nodes/standard.rs` (or a new file), register it in `REGISTRY` in `src/nodes/mod.rs`; add a CPU fn in `src/nodes/cpu.rs` if it has a CPU meaning; the WGSL emitter is the descriptor's `wgsl` field. The catalog picks it up from the registry.
 - Node whose sockets depend on the document: add a builder in `src/nodes/dynamic.rs`, a match arm in `resolve_descriptor`, and its type in `DYNAMIC_NODE_TYPES`.
-- New library group: add `src/library/<id>.json` and an `(id, include_str!)` entry in `SOURCES` in `src/library.rs`. Version ids hash the definition, and definitions embed their dependencies' refs, so changing one group changes the refs of every group that nests it: rewrite those refs (and the saved projects' refs) with the new versions.
+- New library group: describe it in the `stdlib` crate (`crates/stdlib/src/groups/`, see its `AGENTS.md`) and run `cargo run -p stdlib`, which generates `src/library/<id>.json`, lists it in `SOURCES` in `src/library.rs` and rewrites the refs of groups nesting a rebuilt one. The files of described groups are generated: don't edit them. Version ids hash the definition, and definitions embed their dependencies' refs, so changing one group changes the refs of every group that nests it.
 - New edit operation: a method on `GraphModel` in the matching `src/graph/model_*.rs`, with history recorded like its neighbours.
 
 ## Tests

@@ -2,7 +2,9 @@
 
 use crate::builder::GroupSpec;
 
+mod vector;
+
 /// Every described group.
 pub fn all() -> Vec<GroupSpec> {
-    Vec::new()
+    vector::all()
 }

@@ -8,7 +8,7 @@
 	"dependencies": [
 		"std-fractal-octave@6b06a6387701d7bd",
 		"std-octave-shift@3262adada6f10e05",
-		"std-opensimplex-noise@fdcfc213491e0d95"
+		"std-opensimplex-noise@3f4e748aaa082dc4"
 	],
 	"definition": {
 		"nodes": [
@@ -159,7 +159,7 @@
 					"y": 3188
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-noise@fdcfc213491e0d95",
+					"definitionRef": "std-opensimplex-noise@3f4e748aaa082dc4",
 					"locked": true
 				},
 				"frame": "6935b937-4fc5-4b6f-9336-6fa5f90e06cc"
