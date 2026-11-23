@@ -6,6 +6,7 @@ license.workspace = true
 description = "Describes the standard library's groups in Rust and generates the library's JSON files"
 
 [dependencies]
+graph-math = { path = "../graph-math" }
 shader-graph = { path = "../shader-graph" }
 serde.workspace = true
 # Parsed floats must round-trip, or library versions differ from the shipped files'.

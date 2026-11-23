@@ -7242,6 +7242,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "graph-math",
  "naga",
  "serde",
  "serde_json",

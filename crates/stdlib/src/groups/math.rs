@@ -18,7 +18,12 @@ pub fn all() -> Vec<GroupSpec> {
                 let t = g.type_variable(
                     "t",
                     "T",
-                    &[WgslType::F32, WgslType::Vec2f, WgslType::Vec3f, WgslType::Vec4f],
+                    &[
+                        WgslType::F32,
+                        WgslType::Vec2f,
+                        WgslType::Vec3f,
+                        WgslType::Vec4f,
+                    ],
                 );
                 let value = g.input("value", Input::new(&t).label("Value").default(0.0));
                 let from_min = g.input("from_min", Input::new(&t).label("From Min").default(0.0));

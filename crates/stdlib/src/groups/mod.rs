@@ -2,6 +2,8 @@
 
 use crate::builder::GroupSpec;
 
+mod color;
+mod helpers;
 mod math;
 mod vector;
 
@@ -9,5 +11,6 @@ mod vector;
 pub fn all() -> Vec<GroupSpec> {
     let mut groups = vector::all();
     groups.extend(math::all());
+    groups.extend(color::all());
     groups
 }

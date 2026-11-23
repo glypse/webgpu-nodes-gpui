@@ -1,137 +1,131 @@
 {
 	"id": "std-in-display-gamut",
 	"name": "In Display Gamut",
-	"aliases": [
-		"Gamut Check",
-		"Out of Gamut",
-		"In sRGB Gamut",
-		"In Display P3 Gamut",
-		"Color Space Conversion"
-	],
+	"aliases": ["Gamut Check", "Out of Gamut", "In sRGB Gamut", "In Display P3 Gamut", "Color Space Conversion"],
 	"category": "color",
 	"dependencies": [],
 	"definition": {
 		"nodes": [
 			{
-				"id": "8ea3a806-982e-451f-a573-5371d5e26c99",
+				"id": "92350442-7cc7-488d-a515-588eff9ecbf1",
 				"type": "display-gamut-clip",
 				"data": {},
 				"position": {
-					"x": 363,
-					"y": 208
+					"x": 403,
+					"y": 186
 				}
 			},
 			{
-				"id": "7118bd86-df4a-4d2f-bc81-ab55d5ff5d5a",
+				"id": "81002b24-ad2e-46b4-b858-3a1617b94654",
 				"type": "group-input",
 				"data": {
 					"hideUnlinked": true
 				},
 				"position": {
 					"x": 0,
-					"y": 128
+					"y": 120
 				}
 			},
 			{
-				"id": "e60c311c-46fe-434c-860a-fb4a13fa7c1d",
+				"id": "bebe1566-a725-4540-8330-01edde4d2b22",
 				"type": "distance",
 				"data": {},
 				"position": {
-					"x": 626,
-					"y": 64
+					"x": 705,
+					"y": 60
 				}
 			},
 			{
-				"id": "f94b3db0-6973-4f1f-9335-6851ca88ce1a",
+				"id": "97bb1e63-e78f-40c1-a908-0dfdf4cfd0a2",
 				"type": "compare",
 				"data": {
-					"settings": {
-						"op": "<="
-					},
 					"values": {
 						"b": 0.00001
+					},
+					"settings": {
+						"op": "<="
 					}
 				},
 				"position": {
-					"x": 886,
+					"x": 1005,
 					"y": 0
 				}
 			},
 			{
-				"id": "0e6d6bae-106c-4f6a-afe9-f42dd2a0164f",
+				"id": "4f88b525-4096-4b16-8062-b8dc65ec23b1",
 				"type": "group-output",
 				"data": {
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 1146,
-					"y": 68
+					"x": 1305,
+					"y": 60
 				}
 			},
 			{
-				"id": "889ffd19-d6eb-4bd9-b47f-c18746b6dc7a",
+				"id": "43c90bde-6660-43c9-a9a4-8e787a81396a",
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 260,
-					"y": 188
+					"x": 300,
+					"y": 166
 				}
 			}
 		],
 		"edges": [
 			{
-				"id": "80144c6a-2ad2-4036-8960-0dbf1d55cf9f",
-				"source": "889ffd19-d6eb-4bd9-b47f-c18746b6dc7a",
+				"id": "a717c2a7-3628-4311-9095-391fc12f2abe",
+				"source": "43c90bde-6660-43c9-a9a4-8e787a81396a",
 				"sourceHandle": "out",
-				"target": "8ea3a806-982e-451f-a573-5371d5e26c99",
+				"target": "92350442-7cc7-488d-a515-588eff9ecbf1",
 				"targetHandle": "color"
 			},
 			{
-				"id": "17291621-7458-4e79-8d01-347ecdc22428",
-				"source": "889ffd19-d6eb-4bd9-b47f-c18746b6dc7a",
+				"id": "bdd70792-459a-4988-b36b-6a520fc8f7d7",
+				"source": "43c90bde-6660-43c9-a9a4-8e787a81396a",
 				"sourceHandle": "out",
-				"target": "e60c311c-46fe-434c-860a-fb4a13fa7c1d",
+				"target": "bebe1566-a725-4540-8330-01edde4d2b22",
 				"targetHandle": "e1"
 			},
 			{
-				"id": "accc8975-6cb1-434f-b45d-1708c569127b",
-				"source": "8ea3a806-982e-451f-a573-5371d5e26c99",
+				"id": "3a4fc90e-b571-4622-b503-8f9b17133127",
+				"source": "92350442-7cc7-488d-a515-588eff9ecbf1",
 				"sourceHandle": "color",
-				"target": "e60c311c-46fe-434c-860a-fb4a13fa7c1d",
+				"target": "bebe1566-a725-4540-8330-01edde4d2b22",
 				"targetHandle": "e2"
 			},
 			{
-				"id": "89086630-b4e8-4408-8b3b-b4782453daba",
-				"source": "e60c311c-46fe-434c-860a-fb4a13fa7c1d",
+				"id": "45e83768-e827-425c-9a87-5f786f991314",
+				"source": "bebe1566-a725-4540-8330-01edde4d2b22",
 				"sourceHandle": "result",
-				"target": "f94b3db0-6973-4f1f-9335-6851ca88ce1a",
+				"target": "97bb1e63-e78f-40c1-a908-0dfdf4cfd0a2",
 				"targetHandle": "a"
 			},
 			{
-				"id": "490f009c-8341-4479-976f-64b9bfadeca1",
-				"source": "f94b3db0-6973-4f1f-9335-6851ca88ce1a",
+				"id": "f0a90789-44ae-45f1-ad21-ae49339baa8b",
+				"source": "97bb1e63-e78f-40c1-a908-0dfdf4cfd0a2",
 				"sourceHandle": "result",
-				"target": "0e6d6bae-106c-4f6a-afe9-f42dd2a0164f",
-				"targetHandle": "a4c59d73-9ba4-4de3-afb3-1cf80f4bae51"
+				"target": "4f88b525-4096-4b16-8062-b8dc65ec23b1",
+				"targetHandle": "32dc69cc-7d5b-4b7e-8927-2304582f5f58"
 			},
 			{
-				"id": "3ff3148f-6909-4889-82bd-75aebae55291",
-				"source": "7118bd86-df4a-4d2f-bc81-ab55d5ff5d5a",
-				"sourceHandle": "b3bc5fc8-c197-4122-bb80-cfd00ca71072",
-				"target": "889ffd19-d6eb-4bd9-b47f-c18746b6dc7a",
+				"id": "a13de2c8-a68b-4d78-b2d2-db01ed75aa6a",
+				"source": "81002b24-ad2e-46b4-b858-3a1617b94654",
+				"sourceHandle": "5fdcb2a2-de07-4cdf-ad70-d34d9b7e83e2",
+				"target": "43c90bde-6660-43c9-a9a4-8e787a81396a",
 				"targetHandle": "in"
 			}
 		],
 		"inputs": [
 			{
-				"id": "b3bc5fc8-c197-4122-bb80-cfd00ca71072",
+				"id": "5fdcb2a2-de07-4cdf-ad70-d34d9b7e83e2",
 				"label": "Linear RGB",
 				"type": "vec3f"
 			}
 		],
 		"outputs": [
 			{
-				"id": "a4c59d73-9ba4-4de3-afb3-1cf80f4bae51",
+				"id": "32dc69cc-7d5b-4b7e-8927-2304582f5f58",
 				"label": "In Gamut",
 				"type": "bool"
 			}

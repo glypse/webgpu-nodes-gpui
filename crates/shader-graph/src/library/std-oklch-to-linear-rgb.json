@@ -3,91 +3,91 @@
 	"name": "OKLch to Linear RGB",
 	"aliases": ["OKLch to sRGB", "OKLch to RGB", "Color Space Conversion", "Perceptual Color"],
 	"category": "color",
-	"dependencies": ["std-oklch-to-oklab@484eaf50ce66492a", "std-oklab-to-linear-rgb@d2ebff3aab738e0b"],
+	"dependencies": ["std-oklch-to-oklab@6a88012c2c11c0b0", "std-oklab-to-linear-rgb@2590e2a821b6310f"],
 	"definition": {
 		"nodes": [
 			{
-				"id": "29adf9df-5d19-4c14-92b1-62b0ba5070bb",
+				"id": "a2d45450-2cc6-4a5c-969e-d3071f73b2a4",
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 260,
-					"y": 28
+					"x": 300,
+					"y": 30
 				},
 				"group": {
-					"definitionRef": "std-oklch-to-oklab@484eaf50ce66492a",
+					"definitionRef": "std-oklch-to-oklab@6a88012c2c11c0b0",
 					"locked": true
 				}
 			},
 			{
-				"id": "a981de0f-18fd-4901-b9fb-b7cb64fea470",
+				"id": "a078b997-6665-4df8-9eee-ff7cce7de0e7",
 				"type": "group-input",
 				"data": {
 					"hideUnlinked": true
 				},
 				"position": {
 					"x": 0,
-					"y": 92
+					"y": 60
 				}
 			},
 			{
-				"id": "f16415c9-dd73-4545-9626-8cbe000b465e",
+				"id": "fc2c0fdd-613e-4e74-8411-0dfa5ea7f265",
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 520,
+					"x": 600,
 					"y": 0
 				},
 				"group": {
-					"definitionRef": "std-oklab-to-linear-rgb@d2ebff3aab738e0b",
+					"definitionRef": "std-oklab-to-linear-rgb@2590e2a821b6310f",
 					"locked": true
 				}
 			},
 			{
-				"id": "5f31ac12-a4fb-4cca-aa9c-039d454a959b",
+				"id": "8f258134-1080-4999-83a6-c23090025c1e",
 				"type": "group-output",
 				"data": {
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 780,
-					"y": 32
+					"x": 900,
+					"y": 0
 				}
 			}
 		],
 		"edges": [
 			{
-				"id": "2e33d2a9-fb4a-40e6-8dd0-a16806cd85e1",
-				"source": "a981de0f-18fd-4901-b9fb-b7cb64fea470",
-				"sourceHandle": "134df7c8-ec35-4fcd-939f-dc54e299b9ae",
-				"target": "29adf9df-5d19-4c14-92b1-62b0ba5070bb",
-				"targetHandle": "fbd00cb9-72e7-4097-a8dd-b7fb44620b1d"
+				"id": "9c8c1405-339b-48c3-86ed-e44caeb25741",
+				"source": "a078b997-6665-4df8-9eee-ff7cce7de0e7",
+				"sourceHandle": "1f14a566-878b-432e-9471-5eb8fb650e5c",
+				"target": "a2d45450-2cc6-4a5c-969e-d3071f73b2a4",
+				"targetHandle": "be42158f-d88e-4b43-b9e2-d71f4bafd53a"
 			},
 			{
-				"id": "04911242-5564-40ab-84c5-d4d9ecaba636",
-				"source": "29adf9df-5d19-4c14-92b1-62b0ba5070bb",
-				"sourceHandle": "9baa836b-c1bf-4732-ba08-5239a2ddbcb5",
-				"target": "f16415c9-dd73-4545-9626-8cbe000b465e",
-				"targetHandle": "2ce931f2-1f8d-41f6-92dd-6f8b3fe91ff4"
+				"id": "293c0ebc-275f-4c2f-a904-a2a9566ead9c",
+				"source": "a2d45450-2cc6-4a5c-969e-d3071f73b2a4",
+				"sourceHandle": "eac5f016-c58c-4839-9ba7-d2fa9b00f0f4",
+				"target": "fc2c0fdd-613e-4e74-8411-0dfa5ea7f265",
+				"targetHandle": "bcb8375d-9c5d-4b6e-8880-17c23db965d2"
 			},
 			{
-				"id": "c452269e-49da-4270-9e7d-10909d9416bc",
-				"source": "f16415c9-dd73-4545-9626-8cbe000b465e",
-				"sourceHandle": "ec7a9a8b-bf8f-4e6e-8c8e-e9bd54492952",
-				"target": "5f31ac12-a4fb-4cca-aa9c-039d454a959b",
-				"targetHandle": "52ee7867-f145-4aa5-b726-98d8178e29ec"
+				"id": "0a0a94ef-c298-477c-9b6b-b810427e9d4a",
+				"source": "fc2c0fdd-613e-4e74-8411-0dfa5ea7f265",
+				"sourceHandle": "14e05349-2d70-4c80-9153-b219ddbfba31",
+				"target": "8f258134-1080-4999-83a6-c23090025c1e",
+				"targetHandle": "1ce92aeb-6bbb-4844-837c-cabec727fc09"
 			}
 		],
 		"inputs": [
 			{
-				"id": "134df7c8-ec35-4fcd-939f-dc54e299b9ae",
+				"id": "1f14a566-878b-432e-9471-5eb8fb650e5c",
 				"label": "OKLch",
 				"type": "vec3f"
 			}
 		],
 		"outputs": [
 			{
-				"id": "52ee7867-f145-4aa5-b726-98d8178e29ec",
+				"id": "1ce92aeb-6bbb-4844-837c-cabec727fc09",
 				"label": "Linear RGB",
 				"type": "vec3f"
 			}
