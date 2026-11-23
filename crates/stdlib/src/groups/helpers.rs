@@ -4,6 +4,7 @@
 use shader_graph::types::WgslType;
 
 use crate::builder::{GroupBuilder, Input, Operand, Output, Ref};
+use crate::groups::vector::COMPONENT_SUM;
 
 /// `a` compared to `b` by `op` (a compare node's setting), as a bool.
 pub fn compare(
@@ -65,4 +66,12 @@ pub fn resolution(g: &GroupBuilder<'_>) -> Ref {
 /// The texture coordinates of the fragment, as a vec2f.
 pub fn uv(g: &GroupBuilder<'_>) -> Ref {
     g.node("uv").add().first()
+}
+
+/// The sum of a vector's components, as a float.
+pub fn component_sum(g: &GroupBuilder<'_>, vector: impl Into<Operand>) -> Ref {
+    g.call(COMPONENT_SUM)
+        .input("vector", vector)
+        .add()
+        .out("sum")
 }
