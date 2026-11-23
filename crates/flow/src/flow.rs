@@ -2196,6 +2196,7 @@ fn paint_edge(
                 gpui::linear_color_stop(from.opacity(opacity), 0.0),
                 gpui::linear_color_stop(to.opacity(opacity), 1.0),
             )
+            .color_space(gpui::ColorSpace::Oklab)
         }
     };
     if let Some(path) = build(e.style.width, e.style.dash) {
