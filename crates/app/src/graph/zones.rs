@@ -128,31 +128,33 @@ fn color(kind: ZoneKind) -> Hsla {
 /// A back layer painting the bubbles, outermost first.
 pub fn layer(flow: WeakEntity<Flow>, bubbles: Vec<Bubble>) -> Layer {
     Rc::new(move |ctx: &LayerContext, window, cx| {
-        let Some(flow) = flow.upgrade() else { return };
-        let flow = flow.read(cx);
-        for b in &bubbles {
-            let (Some(input), Some(output)) = (flow.node_rect(&b.input), flow.node_rect(&b.output)) else {
-                continue;
-            };
-            let rects: Vec<Rect> = b.members.iter().filter_map(|m| flow.node_rect(m)).collect();
-            let points = boundary_points(input, output, b.padding);
-            let outline = bubble(&rects, &points, b.padding, CORNER_RADIUS);
-            if outline.len() < 3 {
-                continue;
+        guard::guard("zones layer", || {
+            let Some(flow) = flow.upgrade() else { return };
+            let flow = flow.read(cx);
+            for b in &bubbles {
+                let (Some(input), Some(output)) = (flow.node_rect(&b.input), flow.node_rect(&b.output)) else {
+                    continue;
+                };
+                let rects: Vec<Rect> = b.members.iter().filter_map(|m| flow.node_rect(m)).collect();
+                let points = boundary_points(input, output, b.padding);
+                let outline = bubble(&rects, &points, b.padding, CORNER_RADIUS);
+                if outline.len() < 3 {
+                    continue;
+                }
+                let path: Vec<_> = outline.iter().map(|p| ctx.to_window(*p)).collect();
+                let base = color(b.kind);
+                let mut fill = gpui::PathBuilder::fill();
+                fill.add_polygon(&path, true);
+                if let Ok(p) = fill.build() {
+                    window.paint_path(p, base.opacity(0.16));
+                }
+                let mut stroke = gpui::PathBuilder::stroke(px(1.5));
+                stroke.add_polygon(&path, true);
+                if let Ok(p) = stroke.build() {
+                    window.paint_path(p, base.opacity(0.55));
+                }
             }
-            let path: Vec<_> = outline.iter().map(|p| ctx.to_window(*p)).collect();
-            let base = color(b.kind);
-            let mut fill = gpui::PathBuilder::fill();
-            fill.add_polygon(&path, true);
-            if let Ok(p) = fill.build() {
-                window.paint_path(p, base.opacity(0.16));
-            }
-            let mut stroke = gpui::PathBuilder::stroke(px(1.5));
-            stroke.add_polygon(&path, true);
-            if let Ok(p) = stroke.build() {
-                window.paint_path(p, base.opacity(0.55));
-            }
-        }
+        });
     })
 }
 

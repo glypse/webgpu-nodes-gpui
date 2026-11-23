@@ -220,7 +220,8 @@ impl Playback {
         });
         cx.spawn_in(window, async move |this, cx| {
             while woken.recv().await.is_ok() {
-                if this.update_in(cx, |p, window, cx| p.media_ready(window, cx)).is_err() {
+                let updated = guard::guard("media ready", || this.update_in(cx, |p, window, cx| p.media_ready(window, cx)));
+                if updated.is_none_or(|updated| updated.is_err()) {
                     break;
                 }
             }
@@ -302,15 +303,17 @@ impl Playback {
         self.compile_poll = Some(cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(COMPILE_POLL).await;
-                let more = this.update_in(cx, |p, window, cx| {
-                    p.compiles_ready(window, cx);
-                    let more = p.compiling();
-                    if !more {
-                        p.compile_poll = None;
-                    }
-                    more
+                let more = guard::guard("compiles ready", || {
+                    this.update_in(cx, |p, window, cx| {
+                        p.compiles_ready(window, cx);
+                        let more = p.compiling();
+                        if !more {
+                            p.compile_poll = None;
+                        }
+                        more
+                    })
                 });
-                if !more.unwrap_or(false) {
+                if !more.and_then(Result::ok).unwrap_or(false) {
                     break;
                 }
             }
@@ -681,7 +684,6 @@ impl Playback {
     }
 }
 
-/// The size frames render at: the followed pane's while following it, else `stored`.
 /// The media `plan` reads, from the project's files. Each file is hashed once: its hash is kept until the file changes.
 fn media_sources(
     files: &AssetFiles,
@@ -710,6 +712,7 @@ fn uniform_values(uniforms: &[(String, shader_graph::UniformValue)]) -> BTreeMap
     uniforms.iter().map(|(name, v)| (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect())).collect()
 }
 
+/// The size frames render at: the followed pane's while following it, else `stored`.
 fn canvas_size(follow: bool, pane: Option<Size>, stored: Size) -> Size {
     match (follow, pane) {
         (true, Some(pane)) => pane,

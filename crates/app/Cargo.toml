@@ -10,11 +10,9 @@ guard = { path = "../guard" }
 gpui.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true
-wgpu.workspace = true
 anyhow.workspace = true
 gpui-flow = { path = "../flow" }
 shader-graph = { path = "../shader-graph" }
-pollster.workspace = true
 runtime = { path = "../runtime" }
 export = { path = "../export" }
 theme = { path = "../theme" }

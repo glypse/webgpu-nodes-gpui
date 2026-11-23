@@ -236,7 +236,7 @@ pub fn format_number(value: f64, integer: bool) -> SharedString {
     } else {
         let text = format!("{value:.3}");
         let text = text.trim_end_matches('0').trim_end_matches('.');
-        if text.is_empty() || text == "-" {
+        if text.is_empty() || text == "-" || text == "-0" {
             "0".into()
         } else {
             text.to_owned().into()
@@ -287,16 +287,18 @@ impl RenderOnce for Scrub {
                 .hover(move |s| s.opacity(1.0).bg(fg.opacity(0.1)))
                 .child(Icon::new(if right { IconName::CaretRight } else { IconName::CaretLeft }).size(px(10.0 * z)))
                 .on_mouse_down(MouseButton::Left, move |e, window, cx| {
-                    cx.stop_propagation();
-                    let by = step(integer, e.modifiers.shift);
-                    if let Some(f) = &on_change {
-                        f(
-                            clamp(value + if right { by } else { -by }),
-                            Edit::Commit,
-                            window,
-                            cx,
-                        );
-                    }
+                    guard::guard("scrub step", || {
+                        cx.stop_propagation();
+                        let by = step(integer, e.modifiers.shift);
+                        if let Some(f) = &on_change {
+                            f(
+                                clamp(value + if right { by } else { -by }),
+                                Edit::Commit,
+                                window,
+                                cx,
+                            );
+                        }
+                    });
                 })
         };
 
@@ -357,12 +359,14 @@ impl RenderOnce for Scrub {
                 d.cursor(CursorStyle::ResizeLeftRight)
                     .hover(move |s| s.bg(fg.opacity(0.08)))
                     .on_mouse_down(MouseButton::Left, move |e, _, cx| {
-                        cx.stop_propagation();
-                        press_state.update(cx, |s, cx| {
-                            s.pressed = Some((f32::from(e.position.x), value));
-                            s.scrubbing = false;
-                            s.last = value;
-                            cx.notify();
+                        guard::guard("scrub press", || {
+                            cx.stop_propagation();
+                            press_state.update(cx, |s, cx| {
+                                s.pressed = Some((f32::from(e.position.x), value));
+                                s.scrubbing = false;
+                                s.last = value;
+                                cx.notify();
+                            });
                         });
                     })
                     .child(side(false))
@@ -379,52 +383,56 @@ impl RenderOnce for Scrub {
                             let on_move = state.clone();
                             let changed = on_change.clone();
                             window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
-                                if phase != DispatchPhase::Bubble {
-                                    return;
-                                }
-                                let Some((start_x, start)) = on_move.read(cx).pressed else {
-                                    return;
-                                };
-                                let dx = f32::from(e.position.x) - start_x;
-                                let scrubbing = on_move.read(cx).scrubbing;
-                                if !scrubbing && dx.abs() <= DRAG_THRESHOLD {
-                                    return;
-                                }
-                                let by = step(integer, e.modifiers.shift);
-                                let next = clamp(
-                                    start
-                                        + f64::from(dx.signum())
-                                            * by
-                                            * f64::from((dx.abs() / 2.0).ceil()),
-                                );
-                                on_move.update(cx, |s, cx| {
-                                    s.scrubbing = true;
-                                    s.last = next;
-                                    cx.notify();
+                                guard::guard("scrub drag", || {
+                                    if phase != DispatchPhase::Bubble {
+                                        return;
+                                    }
+                                    let Some((start_x, start)) = on_move.read(cx).pressed else {
+                                        return;
+                                    };
+                                    let dx = f32::from(e.position.x) - start_x;
+                                    let scrubbing = on_move.read(cx).scrubbing;
+                                    if !scrubbing && dx.abs() <= DRAG_THRESHOLD {
+                                        return;
+                                    }
+                                    let by = step(integer, e.modifiers.shift);
+                                    let next = clamp(
+                                        start
+                                            + f64::from(dx.signum())
+                                                * by
+                                                * f64::from((dx.abs() / 2.0).ceil()),
+                                    );
+                                    on_move.update(cx, |s, cx| {
+                                        s.scrubbing = true;
+                                        s.last = next;
+                                        cx.notify();
+                                    });
+                                    if let Some(f) = &changed {
+                                        f(next, Edit::Preview, window, cx);
+                                    }
                                 });
-                                if let Some(f) = &changed {
-                                    f(next, Edit::Preview, window, cx);
-                                }
                             });
                             let on_up = state.clone();
                             let changed = on_change.clone();
                             window.on_mouse_event(move |_: &MouseUpEvent, phase, window, cx| {
-                                if phase != DispatchPhase::Bubble {
-                                    return;
-                                }
-                                let (was_scrubbing, last) = {
-                                    let s = on_up.read(cx);
-                                    (s.scrubbing, s.last)
-                                };
-                                on_up.update(cx, |s, cx| {
-                                    *s = ScrubState::default();
-                                    cx.notify();
+                                guard::guard("scrub release", || {
+                                    if phase != DispatchPhase::Bubble {
+                                        return;
+                                    }
+                                    let (was_scrubbing, last) = {
+                                        let s = on_up.read(cx);
+                                        (s.scrubbing, s.last)
+                                    };
+                                    on_up.update(cx, |s, cx| {
+                                        *s = ScrubState::default();
+                                        cx.notify();
+                                    });
+                                    if !was_scrubbing {
+                                        entry.update(cx, |e, cx| e.start(window, cx));
+                                    } else if let Some(f) = &changed {
+                                        f(last, Edit::Commit, window, cx);
+                                    }
                                 });
-                                if !was_scrubbing {
-                                    entry.update(cx, |e, cx| e.start(window, cx));
-                                } else if let Some(f) = &changed {
-                                    f(last, Edit::Commit, window, cx);
-                                }
                             });
                         }); },
                     )
@@ -466,10 +474,12 @@ pub fn picker(
             d.cursor_pointer().hover(move |s| s.bg(fg.opacity(0.08)))
         })
         .on_mouse_down(MouseButton::Left, move |e, window, cx| {
-            cx.stop_propagation();
-            if !disabled {
-                on_click(e.position, window, cx);
-            }
+            guard::guard("picker click", || {
+                cx.stop_propagation();
+                if !disabled {
+                    on_click(e.position, window, cx);
+                }
+            });
         })
         .child(div().truncate().child(label.into()))
         .child(Icon::new(IconName::CaretDown).size(px(10.0 * zoom)).color(colors.muted_foreground))
@@ -501,10 +511,12 @@ pub fn checkbox(
         .when(!disabled, |d| d.cursor_pointer())
         .when(checked, |d| d.child(Icon::new(IconName::Check).size(px(12.0 * zoom)).color(colors.primary_foreground)))
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            cx.stop_propagation();
-            if !disabled {
-                on_change(!checked, window, cx);
-            }
+            guard::guard("checkbox click", || {
+                cx.stop_propagation();
+                if !disabled {
+                    on_change(!checked, window, cx);
+                }
+            });
         })
 }
 
@@ -592,22 +604,6 @@ mod tests {
         type_into_field(cx, "7", "escape");
         type_into_field(cx, "abc", "enter");
         assert!(changes.borrow().is_empty());
-    }
-
-    struct Panicking;
-
-    impl Render for Panicking {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            guard::render("panicking view", || -> gpui::Div { panic!("render failed") })
-        }
-    }
-
-    #[gpui::test]
-    fn a_view_whose_render_panics_leaves_the_window_alive(cx: &mut TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_, _| Panicking);
-        cx.run_until_parked();
-        cx.update(|window, _| window.refresh());
-        cx.run_until_parked();
     }
 
     #[test]

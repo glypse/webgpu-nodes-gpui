@@ -297,17 +297,17 @@ fn value_control(
             let current = enum_value(input.value.as_ref(), variants);
             let label = variants
                 .iter()
-                .find(|v| Some(v.int()) == current)
+                .find(|v| Some(v.value) == current)
                 .map_or_else(String::new, |v| v.label.clone());
             let items: Vec<ListItem> = variants
                 .iter()
                 .map(|v| {
-                    let (ed, node, handle, value) = (ed.clone(), node.clone(), handle.clone(), v.int());
+                    let (ed, node, handle, value) = (ed.clone(), node.clone(), handle.clone(), v.value);
                     ListItem::new(
                         v.label.clone(),
                         Some(Some(value) == current),
                         Rc::new(move |_, cx| {
-                            ed.update(cx, |e, cx| e.set_enum(&node, &handle, value, cx)).ok();
+                            super::update_editor(&ed, cx, |e, cx| e.set_enum(&node, &handle, value, cx));
                         }),
                     )
                 })
@@ -321,7 +321,7 @@ fn value_control(
                 cx,
                 move |at, _, cx| {
                     let items = items.clone();
-                    ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                    super::update_editor(&ed, cx, |e, cx| e.open_list(at, items, cx));
                 },
             )
             .into_any_element()
@@ -346,13 +346,12 @@ fn value_control(
                             readonly,
                             cx,
                             move |checked, _, cx| {
-                                ed.update(cx, |e, cx| {
+                                super::update_editor(&ed, cx, |e, cx| {
                                     e.set_component(&node, &handle, ty, i, f64::from(u8::from(checked)), Edit::Commit, cx);
-                                })
-                                .ok();
+                                });
                             },
                         ))
-                        .children((n > 1).then(|| label_text(["x", "y", "z", "w"][i].to_owned(), z, cx)))
+                        .children((n > 1).then(|| ["x", "y", "z", "w"].get(i).map(|c| label_text((*c).to_owned(), z, cx))).flatten())
                 }))
                 .into_any_element()
         }
@@ -374,7 +373,7 @@ fn value_control(
                         .range(min, max)
                         .readonly(readonly)
                         .on_change(move |v, edit, _, cx| {
-                            ed.update(cx, |e, cx| e.set_component(&node, &handle, ty, i, v, edit, cx)).ok();
+                            super::update_editor(&ed, cx, |e, cx| e.set_component(&node, &handle, ty, i, v, edit, cx));
                         })
                 }))
                 .into_any_element()
@@ -401,7 +400,7 @@ fn value_control(
                     cx.stop_propagation();
                     if !readonly {
                         let (node, handle, at) = (node.clone(), handle.clone(), e.position);
-                        ed.update(cx, |ed, cx| ed.open_color_picker(at, &node, &handle, ty, cx)).ok();
+                        super::update_editor(&ed, cx, |ed, cx| ed.open_color_picker(at, &node, &handle, ty, cx));
                     }
                 })
                 .child(div().flex_1().bg(opaque))
@@ -422,7 +421,7 @@ fn value_control(
                         .range(Some(0.0), None)
                         .readonly(readonly)
                         .on_change(move |v, edit, _, cx| {
-                            ed.update(cx, |e, cx| e.set_component(&node, &handle, ty, 3, v, edit, cx)).ok();
+                            super::update_editor(&ed, cx, |e, cx| e.set_component(&node, &handle, ty, 3, v, edit, cx));
                         })
                 }))
                 .into_any_element()
@@ -553,7 +552,7 @@ pub fn render_node(
                         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                             cx.stop_propagation();
                             if !locked {
-                                ed.update(cx, |e, cx| e.toggle_unlinked_sockets(&id, cx)).ok();
+                                super::update_editor(&ed, cx, |e, cx| e.toggle_unlinked_sockets(&id, cx));
                             }
                         })
                         .child(Icon::new(IconName::EyeSlash).size(s(14.0)))
@@ -573,7 +572,7 @@ pub fn render_node(
                         .hover(|st| st.bg(c.muted).text_color(c.foreground))
                         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                             cx.stop_propagation();
-                            settings_ed.update(cx, |e, cx| e.open_sheet(&settings_id, cx)).ok();
+                            super::update_editor(&settings_ed, cx, |e, cx| e.open_sheet(&settings_id, cx));
                         })
                         .child(Icon::new(IconName::Faders).size(s(14.0))),
                 ),
@@ -612,7 +611,7 @@ pub fn render_node(
                         IconName::TreeView,
                         "Enter node group",
                         Rc::new(move |cx| {
-                            enter.update(cx, |e, cx| e.enter_group(&enter_id, cx)).ok();
+                            super::update_editor(&enter, cx, |e, cx| e.enter_group(&enter_id, cx));
                         }),
                     ))
                     .when(view.group_locked && !view.locked, |d| {
@@ -621,7 +620,7 @@ pub fn render_node(
                             IconName::LockSimple,
                             "Locked group - clone & edit",
                             Rc::new(move |cx| {
-                                clone.update(cx, |e, cx| e.clone_group(&clone_id, cx)).ok();
+                                super::update_editor(&clone, cx, |e, cx| e.clone_group(&clone_id, cx));
                             }),
                         ))
                     }),
@@ -642,7 +641,7 @@ pub fn render_node(
                 cx,
                 move |at, _, cx| {
                     let pick = node_type_picker(&id, &choice);
-                    ed.update(cx, |e, cx| e.open_type_picker(at, pick, cx)).ok();
+                    super::update_editor(&ed, cx, |e, cx| e.open_type_picker(at, pick, cx));
                 },
             ))
         }))
@@ -673,7 +672,7 @@ pub fn render_node(
                     cx,
                     move |at, _, cx| {
                         let pick = variable_type_picker(&id, &choice);
-                        ed.update(cx, |e, cx| e.open_type_picker(at, pick, cx)).ok();
+                        super::update_editor(&ed, cx, |e, cx| e.open_type_picker(at, pick, cx));
                     },
                 ))
         }))
@@ -692,7 +691,7 @@ pub fn render_node(
                         label.clone(),
                         Some(value == setting.value),
                         Rc::new(move |_, cx| {
-                            ed.update(cx, |e, cx| e.set_setting(&id, &key, &value, cx)).ok();
+                            super::update_editor(&ed, cx, |e, cx| e.set_setting(&id, &key, &value, cx));
                         }),
                     )
                 })
@@ -706,7 +705,7 @@ pub fn render_node(
                 cx,
                 move |at, _, cx| {
                     let items = items.clone();
-                    ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                    super::update_editor(&ed, cx, |e, cx| e.open_list(at, items, cx));
                 },
             ))
         }));
@@ -801,7 +800,7 @@ pub fn render_node(
             "+ socket",
             Rc::new(move |at, cx| {
                 let (ed, id) = (ed.clone(), id.clone());
-                ed.update(cx, |e, cx| e.open_type_list(at, id, true, cx)).ok();
+                super::update_editor(&ed, cx, |e, cx| e.open_type_list(at, id, true, cx));
             }),
         )
         .into_any_element()
@@ -819,7 +818,7 @@ pub fn render_node(
             "+ item",
             Rc::new(move |at, cx| {
                 let (ed, id) = (ed.clone(), id.clone());
-                ed.update(cx, |e, cx| e.open_type_list(at, id, false, cx)).ok();
+                super::update_editor(&ed, cx, |e, cx| e.open_type_list(at, id, false, cx));
             }),
         )
     };

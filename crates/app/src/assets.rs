@@ -1,6 +1,7 @@
 //! Bringing files from disk into a project as its assets.
 
-use std::fs;
+use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -21,6 +22,7 @@ use theme::{ActiveTheme as _, Icon, IconName, popup};
 
 use crate::editor::{Editor, EditorEvent};
 use crate::playback::Playback;
+use crate::project::read_capped;
 
 /// A file read from disk, ready to import.
 pub struct PickedFile {
@@ -33,7 +35,7 @@ impl PickedFile {
     /// The file's media type comes from its extension, as the platform's file picker gives it.
     pub fn read(path: &Path) -> Result<Self, String> {
         let name = crate::project::file_name(path);
-        let bytes = fs::read(path).map_err(|e| format!("{name}: {e}"))?;
+        let bytes = read_capped(path).map_err(|e| format!("{name}: {e}"))?;
         let mime = mime_guess::from_path(path).first_or_octet_stream().essence_str().to_owned();
         Ok(Self { name, mime, bytes: Arc::new(bytes) })
     }
@@ -68,15 +70,26 @@ pub fn pick_and_import<T: 'static>(
     window: &mut Window,
     cx: &mut Context<T>,
 ) {
-    let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
-    let editor = editor.clone();
-    let playback = playback.clone();
+    let (editor, playback) = (editor.clone(), playback.clone());
+    pick_files(true, window, cx, read_paths, move |read, window, cx| {
+        import_read(&editor, &playback, read, None, window, cx);
+    });
+}
+
+/// Asks the user for files, reads them on the background executor with `read`, and hands the result
+/// to `then` on the UI thread. Nothing runs when the user cancels.
+pub fn pick_files<T: 'static, R: Send + 'static>(
+    multiple: bool,
+    window: &mut Window,
+    cx: &mut Context<T>,
+    read: impl FnOnce(&[PathBuf]) -> R + Send + 'static,
+    then: impl FnOnce(R, &mut Window, &mut App) + 'static,
+) {
+    let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple, prompt: None });
     cx.spawn_in(window, async move |_, cx| {
-        let picked = match paths.await {
-            Ok(Ok(Some(paths))) => paths,
-            _ => return,
-        };
-        cx.update(|window, cx| import_paths(&editor, &playback, &picked, window, cx)).ok();
+        let Ok(Ok(Some(paths))) = paths.await else { return };
+        let outcome = cx.background_executor().spawn(async move { read(&paths) }).await;
+        cx.update(|window, cx| then(outcome, window, cx)).ok();
     })
     .detach();
 }
@@ -105,7 +118,7 @@ fn import_into(
     cx: &mut Context<Editor>,
 ) -> Imports {
     let mut imports = Imports::default();
-    editor.edit_model(cx, |model| {
+    editor.edit(cx, |model| {
         model.batched(|model| {
             imports = import(model, picked);
             if let (Some(node), Some((id, _))) = (node, imports.files.first()) {
@@ -139,10 +152,7 @@ pub fn import_paths(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let (picked, mut problems) = read_paths(paths);
-    let imports = editor.update(cx, |e, cx| import_into(e, playback, &picked, None, window, cx));
-    problems.extend(imports.problems);
-    report_problems(window, &problems, cx);
+    import_read(editor, playback, read_paths(paths), None, window, cx);
 }
 
 /// Asks for one media file, imports it and makes `node`, an Image or Video node, read it: its picker's Import entry.
@@ -153,29 +163,23 @@ pub fn pick_and_import_for_node<T: 'static>(
     window: &mut Window,
     cx: &mut Context<T>,
 ) {
-    let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
     let (editor, playback, node) = (editor.clone(), playback.clone(), node.to_owned());
-    cx.spawn_in(window, async move |_, cx| {
-        let picked = match paths.await {
-            Ok(Ok(Some(paths))) => paths,
-            _ => return,
-        };
-        cx.update(|window, cx| import_for_node(&editor, &playback, &node, &picked, window, cx)).ok();
-    })
-    .detach();
+    pick_files(false, window, cx, read_paths, move |read, window, cx| {
+        import_read(&editor, &playback, read, Some(&node), window, cx);
+    });
 }
 
-/// Imports the file at `paths` and makes `node` read it, as one undo step.
-pub fn import_for_node(
+/// Imports what was read from disk (see `import_into`) and reports the files that couldn't be used, with those that failed to import.
+fn import_read(
     editor: &Entity<Editor>,
     playback: &Entity<Playback>,
-    node: &str,
-    paths: &[PathBuf],
+    read: (Vec<PickedFile>, Vec<String>),
+    node: Option<&str>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let (picked, mut problems) = read_paths(paths);
-    let imports = editor.update(cx, |e, cx| import_into(e, playback, &picked, Some(node), window, cx));
+    let (picked, mut problems) = read;
+    let imports = editor.update(cx, |e, cx| import_into(e, playback, &picked, node, window, cx));
     problems.extend(imports.problems);
     report_problems(window, &problems, cx);
 }
@@ -207,7 +211,7 @@ pub fn report_problems(window: &mut Window, problems: &[String], cx: &mut App) {
     log::warn!("left out of the project: {}", problems.join("; "));
     let mut detail = "What couldn't be read was left out.".to_owned();
     for problem in problems {
-        detail.push_str(&format!("\n• {problem}"));
+        let _ = write!(detail, "\n• {problem}");
     }
     drop(window.prompt(PromptLevel::Warning, "Some files couldn't be used", Some(&detail), &["OK"], cx));
 }
@@ -248,6 +252,15 @@ impl Render for AssetDragPreview {
                 .text_size(px(12.0))
                 .child(self.name.clone())
         })
+    }
+}
+
+/// How many nodes read an asset, as the tile and the delete prompt word it.
+fn usage_text(usage: usize) -> String {
+    match usage {
+        0 => "Unused".to_owned(),
+        1 => "Used by 1 node".to_owned(),
+        n => format!("Used by {n} nodes"),
     }
 }
 
@@ -297,14 +310,6 @@ impl Tile {
         match self.asset.kind() {
             AssetKind::Image => format!("{} × {}", info.width, info.height),
             AssetKind::Video => format!("{} × {} · video", info.width, info.height),
-        }
-    }
-
-    fn usage_text(&self) -> String {
-        match self.usage {
-            0 => "Unused".to_owned(),
-            1 => "Used by 1 node".to_owned(),
-            n => format!("Used by {n} nodes"),
         }
     }
 
@@ -381,12 +386,14 @@ impl Render for Tile {
                     cx.new(|_| AssetDragPreview { name: SharedString::from(drag.name.clone()) })
                 })
                 .on_click(move |event, window, cx| {
-                    if event.click_count() != 2 {
-                        return;
-                    }
-                    if let Some(tile) = click_tile.upgrade() {
-                        tile.update(cx, |tile, cx| tile.start_rename(window, cx));
-                    }
+                    guard::guard("asset tile click", || {
+                        if event.click_count() != 2 {
+                            return;
+                        }
+                        if let Some(tile) = click_tile.upgrade() {
+                            tile.update(cx, |tile, cx| tile.start_rename(window, cx));
+                        }
+                    });
                 })
                 .child(
                     div()
@@ -417,7 +424,7 @@ impl Render for Tile {
                         .text_size(px(11.0))
                         .text_color(theme.colors.muted_foreground)
                         .truncate()
-                        .child(self.usage_text()),
+                        .child(usage_text(self.usage)),
                 )
                 .context_menu(move |menu, _, _| {
                     let replace_panel = panel.clone();
@@ -474,15 +481,19 @@ impl AssetsPanel {
     pub fn new(editor: Entity<Editor>, playback: Entity<Playback>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |this, _, event: &EditorEvent, _, cx| {
-                if let EditorEvent::Edited = event {
-                    this.refresh(cx);
-                }
+                guard::guard("assets edited", || {
+                    if let EditorEvent::Edited = event {
+                        this.refresh(cx);
+                    }
+                });
             }),
             cx.observe(&playback, |this, playback, cx| {
-                let signature = media_signature(playback.read(cx));
-                if signature != this.files_seen {
-                    this.refresh(cx);
-                }
+                guard::guard("assets media", || {
+                    let signature = media_signature(playback.read(cx));
+                    if signature != this.files_seen {
+                        this.refresh(cx);
+                    }
+                });
             }),
         ];
         let mut panel =
@@ -501,13 +512,14 @@ impl AssetsPanel {
         let files = self.playback.read(cx).asset_files().clone();
         self.files_seen = media_signature(self.playback.read(cx));
         let before: Vec<_> = self.tiles.iter().map(|t| t.entity_id()).collect();
+        let mut existing: HashMap<String, Entity<Tile>> =
+            self.tiles.drain(..).map(|tile| (tile.read(cx).asset.id().to_owned(), tile)).collect();
         let mut tiles = Vec::with_capacity(assets.len());
         for asset in &assets {
             let usage = usages.get(asset.id()).copied().unwrap_or(0);
             let file = files.get(asset.id());
             let status = self.playback.read(cx).media_status(asset.id());
-            let existing = self.tiles.iter().find(|tile| tile.read(cx).asset.id() == asset.id()).cloned();
-            let tile = existing.unwrap_or_else(|| {
+            let tile = existing.remove(asset.id()).unwrap_or_else(|| {
                 let panel = me.clone();
                 let asset = asset.clone();
                 cx.new(|_| Tile { panel, asset, file: None, usage: 0, status: None, thumbnail: None, rename: None })
@@ -524,7 +536,7 @@ impl AssetsPanel {
     fn rename(&mut self, id: &str, name: &str, cx: &mut Context<Self>) {
         let name = name.to_owned();
         let id = id.to_owned();
-        self.editor.update(cx, |e, cx| e.edit_model(cx, |m| m.rename_asset(&id, &name)));
+        self.editor.update(cx, |e, cx| e.edit(cx, |m| m.rename_asset(&id, &name)));
     }
 
     fn delete(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -534,8 +546,7 @@ impl AssetsPanel {
             self.remove(id, cx);
             return;
         }
-        let used = if usage == 1 { "Used by 1 node".to_owned() } else { format!("Used by {usage} nodes") };
-        let detail = format!("{used}, which will read a transparent image instead.\nUndo brings it back.");
+        let detail = format!("{}, which will read a transparent image instead.\nUndo brings it back.", usage_text(usage));
         let answer = window.prompt(PromptLevel::Warning, &format!("Delete {name}?"), Some(&detail), &["Delete", "Cancel"], cx);
         let id = id.to_owned();
         cx.spawn_in(window, async move |this, cx| {
@@ -548,45 +559,41 @@ impl AssetsPanel {
 
     fn remove(&mut self, id: &str, cx: &mut Context<Self>) {
         let id = id.to_owned();
-        self.editor.update(cx, |e, cx| e.edit_model(cx, |m| m.remove_asset(&id)));
+        self.editor.update(cx, |e, cx| e.edit(cx, |m| m.remove_asset(&id)));
     }
 
     /// Gives the asset another file of its kind, keeping its id, from a file the user picks.
     fn replace(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
         let id = id.to_owned();
-        let editor = self.editor.clone();
-        let playback = self.playback.clone();
-        cx.spawn_in(window, async move |_, cx| {
-            let picked = match paths.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                _ => None,
-            };
-            let Some(path) = picked else { return };
-            cx.update(|window, cx| replace_file(&editor, &playback, &id, &path, window, cx)).ok();
-        })
-        .detach();
+        let (editor, playback) = (self.editor.clone(), self.playback.clone());
+        pick_files(
+            false,
+            window,
+            cx,
+            |paths| paths.first().map(|path| PickedFile::read(path)),
+            move |read, window, cx| match read {
+                Some(Ok(file)) => replace_file(&editor, &playback, &id, file, window, cx),
+                Some(Err(problem)) => report_problems(window, &[problem], cx),
+                None => {}
+            },
+        );
     }
 }
 
-/// Replaces an asset's file with the one at `path`, if that is an asset of the same kind.
+/// Replaces an asset's file with `file`, if that is an asset of the same kind.
 fn replace_file(
     editor: &Entity<Editor>,
     playback: &Entity<Playback>,
     id: &str,
-    path: &Path,
+    file: PickedFile,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let file = match PickedFile::read(path) {
-        Ok(file) => file,
-        Err(problem) => return report_problems(window, &[problem], cx),
-    };
     let kind = editor.read(cx).model().asset(id).map(Asset::kind);
     let replacement = describe_asset(id, ImportFile { name: &file.name, mime: &file.mime, bytes: &file.bytes }, &SystemVideoProbe);
     match (kind, replacement) {
         (Some(kind), Ok(asset)) if asset.kind() == kind => {
-            editor.update(cx, |e, cx| e.edit_model(cx, |m| m.replace_asset(asset)));
+            editor.update(cx, |e, cx| e.edit(cx, |m| m.replace_asset(asset)));
             let bytes = file.bytes.clone();
             let id = id.to_owned();
             playback.update(cx, |p, cx| {
@@ -771,13 +778,15 @@ mod tests {
         let (editor, playback, _panel, mut vcx) = panel(cx);
         let node = editor.update(&mut vcx, |e, cx| {
             let mut id = String::new();
-            e.edit_model(cx, |m| id = m.add_node(IMAGE, Point::new(0.0, 0.0)).expect("adds"));
+            e.edit(cx, |m| id = m.add_node(IMAGE, Point::new(0.0, 0.0)).expect("adds"));
             id
         });
         let dir = std::env::temp_dir().join(format!("wgnodes-import-for-node-{}", std::process::id()));
         let path = scratch_png(&dir, "Photo.png", 3);
 
-        vcx.update(|window, cx| import_for_node(&editor, &playback, &node, std::slice::from_ref(&path), window, cx));
+        vcx.update(|window, cx| {
+            import_read(&editor, &playback, read_paths(std::slice::from_ref(&path)), Some(&node), window, cx)
+        });
         vcx.run_until_parked();
         let read = |vcx: &mut gpui::VisualTestContext| {
             editor.read_with(vcx, |e, _| e.model().node(&node).and_then(|n| n.data.asset.clone()))
@@ -859,7 +868,8 @@ mod tests {
             (asset.id().to_owned(), asset.hash().to_owned())
         });
 
-        vcx.update(|window, cx| replace_file(&editor, &playback, &id, &other, window, cx));
+        let file = PickedFile::read(&other).expect("reads");
+        vcx.update(|window, cx| replace_file(&editor, &playback, &id, file, window, cx));
         vcx.run_until_parked();
         let (count, new_hash, size) = editor.read_with(&vcx, |e, _| {
             let model = e.model();

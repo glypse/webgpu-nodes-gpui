@@ -29,8 +29,9 @@ impl PreferencesDialog {
             input.set_value(font_text, window, cx);
             input
         });
+        // Applied on Enter or when the field loses focus, not on each keystroke, since each one saves the file.
         let subscriptions = vec![cx.subscribe_in(&font, window, |_, input, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::Change | InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                 let text = input.read(cx).value().trim().to_owned();
                 guard::guard("interface font", || {
                     preferences::update(window, cx, |p| p.font = text);

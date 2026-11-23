@@ -52,13 +52,15 @@ pub struct PreviewArea {
 impl PreviewArea {
     pub fn new(playback: Entity<Playback>, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&playback, |this, playback, cx| {
-            let following = playback.read(cx).following();
-            // The canvas fills the pane while following, so it starts fitted to it.
-            if following && !this.following {
-                this.manual = None;
-            }
-            this.following = following;
-            cx.notify();
+            guard::guard("preview following", || {
+                let following = playback.read(cx).following();
+                // The canvas fills the pane while following, so it starts fitted to it.
+                if following && !this.following {
+                    this.manual = None;
+                }
+                this.following = following;
+                cx.notify();
+            });
         });
         Self {
             id: cx.entity_id(),
@@ -88,14 +90,17 @@ impl PreviewArea {
         playback.pane_frame(self.id).map_or_else(|| playback.size_of(self.id), |(size, _)| size)
     }
 
+    fn pane_dims(&self) -> (f32, f32) {
+        (f32::from(self.pane.size.width), f32::from(self.pane.size.height))
+    }
+
     fn fit_zoom(&self, cx: &App) -> f32 {
         let res = self.resolution(cx);
         if res.width == 0 || res.height == 0 {
             return 1.0;
         }
-        let pane: gpui::Size<f32> = size(self.pane.size.width.into(), self.pane.size.height.into());
-        ((pane.width * self.scale) / res.width as f32)
-            .min((pane.height * self.scale) / res.height as f32)
+        let (pane_width, pane_height) = self.pane_dims();
+        ((pane_width * self.scale) / res.width as f32).min((pane_height * self.scale) / res.height as f32)
     }
 
     pub fn fit(&mut self, cx: &mut Context<Self>) {
@@ -117,10 +122,7 @@ impl PreviewArea {
         let next = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         let current = self.zoom(cx);
         let scale = next / current;
-        let pane = (
-            f32::from(self.pane.size.width),
-            f32::from(self.pane.size.height),
-        );
+        let pane = self.pane_dims();
         let anchor = anchor.map_or((pane.0 / 2.0, pane.1 / 2.0), |a| (a.x.into(), a.y.into()));
         let offset = self.manual.map_or((0.0, 0.0), |m| (m.x, m.y));
         let centre = (pane.0 / 2.0 + offset.0, pane.1 / 2.0 + offset.1);
@@ -168,10 +170,7 @@ impl PreviewArea {
             res.height as f32 * zoom / self.scale,
         );
         let offset = self.manual.map_or((0.0, 0.0), |m| (m.x, m.y));
-        let pane = (
-            f32::from(self.pane.size.width),
-            f32::from(self.pane.size.height),
-        );
+        let pane = self.pane_dims();
         Bounds::new(
             point(
                 px(snap(pane.0 / 2.0 + offset.0 - width / 2.0)),
@@ -376,8 +375,12 @@ impl PreviewToolbar {
         cx: &mut Context<Self>,
     ) -> Self {
         let observe = [
-            cx.observe(&area, |_, _, cx| cx.notify()),
-            cx.observe(&playback, |_, _, cx| cx.notify()),
+            cx.observe(&area, |_, _, cx| {
+                guard::guard("preview toolbar", || cx.notify());
+            }),
+            cx.observe(&playback, |_, _, cx| {
+                guard::guard("preview toolbar", || cx.notify());
+            }),
         ];
         Self {
             area,
@@ -463,10 +466,14 @@ pub(crate) fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut A
     let directory = std::env::var_os("HOME").map_or_else(std::env::temp_dir, Into::into);
     let path = cx.prompt_for_new_path(&directory, Some("frame.png"));
     cx.spawn(async move |_| {
-        if let Ok(Ok(Some(path))) = path.await
-            && let Err(error) = std::fs::write(&path, png)
-        {
-            log::error!("export to {} failed: {error:#}", path.display());
+        match path.await {
+            Ok(Ok(Some(path))) => {
+                if let Err(error) = std::fs::write(&path, png) {
+                    log::error!("export to {} failed: {error:#}", path.display());
+                }
+            }
+            Ok(Err(error)) => log::error!("the save dialog failed: {error:#}"),
+            _ => {}
         }
     })
     .detach();
@@ -474,17 +481,17 @@ pub(crate) fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut A
 
 impl Render for PreviewToolbar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(kind) = self.open.as_ref().filter(|m| m.popup.is_none()).map(|m| m.kind) {
-            let menu = self.menu(kind, window, cx);
-            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
-                this.open = None;
-                cx.notify();
-            });
-            if let Some(open) = self.open.as_mut() {
-                open.popup = Some(opened);
-            }
-        }
         guard::render("PreviewToolbar", || {
+            if let Some(kind) = self.open.as_ref().filter(|m| m.popup.is_none()).map(|m| m.kind) {
+                let menu = self.menu(kind, window, cx);
+                let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
+                    this.open = None;
+                    cx.notify();
+                });
+                if let Some(open) = self.open.as_mut() {
+                    open.popup = Some(opened);
+                }
+            }
             let resolution = self.playback.read(cx).size_of(self.area.entity_id());
             let zoom = self.area.read(cx).zoom(cx);
             let this = cx.entity();
@@ -553,7 +560,7 @@ pub fn new_area(
     let forget = {
         let playback = playback.clone();
         cx.observe_release(&area, move |_, cx| {
-            playback.update(cx, |p, cx| p.forget_pane(id, cx));
+            guard::guard("forget preview pane", || playback.update(cx, |p, cx| p.forget_pane(id, cx)));
         })
     };
     area.update(cx, |this, _| this._released = Some(forget));

@@ -132,7 +132,6 @@ impl Editor {
         let (node, input) = (node.to_owned(), input.to_owned());
         let subscription = cx.subscribe(&picker, move |editor: &mut Editor, _, event: &ColorPickerEvent, cx| {
             let ColorPickerEvent::Change(color) = *event;
-            let (node, input) = (node.clone(), input.clone());
             guard::guard("color picker", || {
                 let (id, handle) = (node.clone(), input.clone());
                 // Edited as RGB, the alpha is kept (opaque if never set) for when the input becomes RGBA.

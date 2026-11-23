@@ -85,7 +85,7 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
                 MenuItem::action("New", NewProject),
                 MenuItem::action("Save", SaveProject),
                 MenuItem::action("Save as…", SaveProjectAs),
-                MenuItem::action("Upload", OpenProject),
+                MenuItem::action("Open…", OpenProject),
                 MenuItem::action("Import media…", ImportMedia),
                 MenuItem::separator(),
                 MenuItem::action("Export selected group", editor::ExportSelectedGroup),
@@ -121,8 +121,6 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
                 MenuItem::action("Exit node group", editor::ExitNodeGroup),
                 MenuItem::separator(),
                 MenuItem::action("Toggle node sheet", editor::ToggleNodeSheet),
-                MenuItem::separator(),
-                MenuItem::action("Preferences…", OpenPreferences),
             ],
         },
         Menu {
@@ -181,31 +179,29 @@ fn main() -> ExitCode {
         // Global listeners run while the focused window is updated, so quitting waits until it is done.
         cx.on_action(|_: &Quit, cx| cx.defer(shell::request_quit));
         refresh_menus(cx);
-        let window_size = launch.window.unwrap_or(cli::Size { width: 1400.0, height: 860.0 });
-        let opened = windows::open_project(
-            Start::Launch(launch.project.clone()),
-            launch.zoom,
-            None,
-            Some((window_size.width, window_size.height)),
-            cx,
-        );
+        let window_size = launch.window.map_or(windows::DEFAULT_SIZE, |size| (size.width, size.height));
+        let opened = windows::open_project(Start::Launch(launch.project.clone()), launch.zoom, None, Some(window_size), cx);
         match opened {
             Ok(handle) => {
                 if launch.play
                     && let Err(error) = handle.update(cx, |root, window, cx| {
-                        if let Ok(shell) = root.view().clone().downcast::<Shell>() {
-                            shell.update(cx, |shell, cx| shell.play(window, cx));
-                        }
+                        guard::guard("start playback", || {
+                            if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                                shell.update(cx, |shell, cx| shell.play(window, cx));
+                            }
+                        });
                     })
                 {
                     log::error!("failed to start playback: {error:#}");
                 }
                 if launch.output
                     && let Err(error) = handle.update(cx, |root, window, cx| {
-                        if let Ok(shell) = root.view().clone().downcast::<Shell>() {
-                            let owner = window.window_handle();
-                            shell.update(cx, |shell, cx| shell.new_output(owner, cx));
-                        }
+                        guard::guard("open the output window", || {
+                            if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                                let owner = window.window_handle();
+                                shell.update(cx, |shell, cx| shell.new_output(owner, cx));
+                            }
+                        });
                     })
                 {
                     log::error!("failed to open the output window: {error:#}");
@@ -284,16 +280,18 @@ async fn wind_down(launch: cli::Cli, handle: WindowHandle<gpui_component::Root>,
 
 #[cfg(test)]
 mod tests {
+    use gpui::Action as _;
+
     use super::*;
 
-    /// The item labels of a menu, separators as "-".
-    fn labels(menu: &Menu) -> Vec<String> {
+    /// The actions of a menu's items in order, separators as "-".
+    fn entries(menu: &Menu) -> Vec<&'static str> {
         menu.items
             .iter()
             .map(|item| match item {
-                MenuItem::Action { name, .. } => name.to_string(),
-                MenuItem::Separator => "-".to_owned(),
-                _ => "?".to_owned(),
+                MenuItem::Action { action, .. } => action.name(),
+                MenuItem::Separator => "-",
+                _ => "?",
             })
             .collect()
     }
@@ -303,34 +301,73 @@ mod tests {
     }
 
     #[test]
-    fn file_edit_and_display_menus_list_items_in_order() {
+    fn file_edit_and_display_menus_list_actions_in_order() {
         let menus = menus(false, false);
         assert_eq!(
-            labels(menu(&menus, "File")),
+            entries(menu(&menus, "File")),
             [
-                "New", "Save", "Save as…", "Upload", "Import media…", "-", "Export selected group", "Import groups", "-",
-                "Export frame as PNG", "Export video…", "-",
-                "Project settings…", "-", "Developer tools",
+                NewProject.name(),
+                SaveProject.name(),
+                SaveProjectAs.name(),
+                OpenProject.name(),
+                ImportMedia.name(),
+                "-",
+                editor::ExportSelectedGroup.name(),
+                ImportGroups.name(),
+                "-",
+                ExportFrame.name(),
+                ExportVideo.name(),
+                "-",
+                OpenProjectSettings.name(),
+                "-",
+                ToggleDeveloperTools.name(),
             ]
         );
         assert_eq!(
-            labels(menu(&menus, "Window")),
-            ["New output window", "-", "Toggle full screen", "Toggle output stretch", "-", "Close window"]
-        );
-        assert_eq!(
-            labels(menu(&menus, "Edit")),
+            entries(menu(&menus, "Window")),
             [
-                "Undo", "Redo", "-", "Group selected", "Ungroup selected", "-", "Preview selected node", "-",
-                "Layout selected nodes", "Layout graph", "Layout document", "-",
-                "Remove all unused group references", "-", "Enter node group", "Exit node group", "-",
-                "Toggle node sheet", "-", "Preferences…",
+                NewOutputWindow.name(),
+                "-",
+                ToggleFullscreen.name(),
+                ToggleOutputStretch.name(),
+                "-",
+                CloseWindow.name(),
             ]
         );
         assert_eq!(
-            labels(menu(&menus, "Display")),
+            entries(menu(&menus, "Edit")),
             [
-                "Toggle mode", "-", "Play", "-", "Zoom preview in", "Zoom preview out", "Fit preview",
-                "Preview at actual size",
+                editor::Undo.name(),
+                editor::Redo.name(),
+                "-",
+                editor::GroupSelected.name(),
+                editor::UngroupSelected.name(),
+                "-",
+                editor::PreviewSelectedNode.name(),
+                "-",
+                editor::LayoutSelected.name(),
+                editor::LayoutGraph.name(),
+                editor::LayoutDocument.name(),
+                "-",
+                editor::PruneUnusedGroups.name(),
+                "-",
+                editor::EnterNodeGroup.name(),
+                editor::ExitNodeGroup.name(),
+                "-",
+                editor::ToggleNodeSheet.name(),
+            ]
+        );
+        assert_eq!(
+            entries(menu(&menus, "Display")),
+            [
+                ToggleMode.name(),
+                "-",
+                TogglePlayback.name(),
+                "-",
+                MenuZoomPreviewIn.name(),
+                MenuZoomPreviewOut.name(),
+                MenuFitPreview.name(),
+                MenuActualSizePreview.name(),
             ]
         );
     }
@@ -340,6 +377,9 @@ mod tests {
         let menus = menus(true, true);
         let file = menu(&menus, "File");
         assert!(matches!(file.items.last(), Some(item) if item.is_checked()));
-        assert_eq!(labels(menu(&menus, "Display"))[2], "Pause");
+        assert!(matches!(
+            &menu(&menus, "Display").items[2],
+            MenuItem::Action { name, .. } if name.as_ref() == "Pause"
+        ));
     }
 }

@@ -10,6 +10,7 @@ use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use theme::{ActiveTheme as _, IconName, NumberEvent, NumberField, popup};
 
 use crate::playback::{Playback, PlaybackEvent};
+use crate::properties::FRAME_RATES;
 
 /// How far below the target rate counts as falling behind, past what timing jitter explains.
 const SLOW_RATIO: f64 = 0.95;
@@ -19,7 +20,6 @@ const FRAME_FIELD_WIDTH: f32 = 144.0;
 const TIME_WIDTH: f32 = 64.0;
 const READOUT_WIDTH: f32 = 8.0 + FRAME_FIELD_WIDTH + 4.0 + TIME_WIDTH;
 const TIMING_WIDTH: f32 = 320.0;
-const FRAME_RATES: [f64; 5] = [24.0, 30.0, 60.0, 120.0, 144.0];
 
 /// The playback controls of a timeline area's header. Only the play state is
 /// kept here, so the bar re-renders when it changes rather than with every
@@ -38,11 +38,13 @@ impl TimelineBar {
         let readout = cx.new(|cx| TimelineReadout::new(playback.clone(), window, cx));
         let timing = cx.new(|cx| TimingControl::new(playback.clone(), cx));
         let subscription = cx.subscribe(&playback, |this, playback, _: &PlaybackEvent, cx| {
-            let playing = playback.read(cx).player.playing();
-            if playing != this.playing {
-                this.playing = playing;
-                cx.notify();
-            }
+            guard::guard("timeline playing", || {
+                let playing = playback.read(cx).player.playing();
+                if playing != this.playing {
+                    this.playing = playing;
+                    cx.notify();
+                }
+            });
         });
         Self {
             playback,
@@ -72,18 +74,22 @@ impl TimelineReadout {
         });
         let subscriptions = [
             cx.observe(&playback, |this, playback, cx| {
-                let frame = playback.read(cx).player.clock.frame;
-                this.frame.update(cx, |field, cx| field.set_value(frame as f64, cx));
-                cx.notify();
+                guard::guard("timeline frame", || {
+                    let frame = playback.read(cx).player.clock.frame;
+                    this.frame.update(cx, |field, cx| field.set_value(frame as f64, cx));
+                    cx.notify();
+                });
             }),
             cx.subscribe_in(
                 &frame,
                 window,
                 |this, _, event: &NumberEvent, window, cx| {
-                    let NumberEvent::Change(frame) = *event;
-                    this.playback.update(cx, |p, cx| {
-                        let fps = p.timing().fps;
-                        p.seek(frame / fps, window, cx);
+                    guard::guard("timeline seek", || {
+                        let NumberEvent::Change(frame) = *event;
+                        this.playback.update(cx, |p, cx| {
+                            let fps = p.timing().fps;
+                            p.seek(frame / fps, window, cx);
+                        });
                     });
                 },
             ),
@@ -111,7 +117,9 @@ struct TimingControl {
 
 impl TimingControl {
     fn new(playback: Entity<Playback>, cx: &mut Context<Self>) -> Self {
-        let observe = cx.observe(&playback, |_, _, cx| cx.notify());
+        let observe = cx.observe(&playback, |_, _, cx| {
+            guard::guard("timing control", || cx.notify());
+        });
         Self {
             playback,
             menu: None,
@@ -129,7 +137,8 @@ impl TimingControl {
             })
         };
         PopupMenu::build(window, cx, move |menu, _, _| {
-            let menu = FRAME_RATES.iter().fold(menu.min_w(px(176.0)), |menu, &fps| {
+            let menu = FRAME_RATES.iter().fold(menu.min_w(px(176.0)), |menu, &rate| {
+                let fps = f64::from(rate);
                 menu.item(
                     PopupMenuItem::new(format!("{fps} fps"))
                         .checked(timing.fps == fps)
@@ -161,7 +170,7 @@ impl Render for TimelineBar {
         let act = move |f: fn(&mut Playback, &mut Window, &mut Context<Playback>)| {
             let playback = playback.clone();
             move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                playback.update(cx, |p, cx| f(p, window, cx));
+                guard::guard("timeline button", || playback.update(cx, |p, cx| f(p, window, cx)));
             }
         };
 
@@ -250,6 +259,7 @@ impl Render for TimelineReadout {
 
 impl Render for TimingControl {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("timing control", || {
         if self.menu.as_ref().is_some_and(|m| m.popup.is_none()) {
             let menu = self.menu(window, cx);
             let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
@@ -260,7 +270,6 @@ impl Render for TimingControl {
                 m.popup = Some(opened);
             }
         }
-        guard::render("timing control", || {
         let theme = cx.theme().clone();
         let c = &theme.colors;
         let playback = self.playback.read(cx);

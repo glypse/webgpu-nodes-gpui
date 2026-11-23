@@ -6,22 +6,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use gpui::{App, Context, Entity, PathPromptOptions, Window};
-use shader_graph::assets::{BundleKind, pack_bundle};
-use shader_graph::graph::{GroupsExport, GroupsFile, read_groups};
+use gpui::{App, Context, Entity, Window};
+use shader_graph::assets::BundleKind;
+use shader_graph::graph::{GroupsBundle, GroupsExport, GroupsFile, read_groups};
 
-use crate::assets::report_problems;
+use crate::assets::{pick_files, report_problems};
 use crate::editor::Editor;
 use crate::playback::Playback;
-use crate::project::{self, AssetFiles};
+use crate::project::{self, AssetFiles, read_capped};
 
 /// The groups bundle of an export: its JSON and the files of the assets it reads, as the project has them.
 pub fn encode(export: &GroupsExport, files: &AssetFiles) -> Result<Vec<u8>> {
-    let entries = export.assets.iter().filter_map(|asset| {
-        let data = files.get(asset.id())?;
-        Some((asset.file(), data.as_slice()))
-    });
-    Ok(pack_bundle(BundleKind::Groups, &export.json, entries)?)
+    project::pack(BundleKind::Groups, &export.json, &export.assets, files)
 }
 
 pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -35,33 +31,19 @@ pub fn pick_and_import<T: 'static>(
     window: &mut Window,
     cx: &mut Context<T>,
 ) {
-    let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
-    let editor = editor.clone();
-    let playback = playback.clone();
-    cx.spawn_in(window, async move |_, cx| {
-        let picked = match paths.await {
-            Ok(Ok(Some(paths))) => paths,
-            _ => return,
-        };
-        cx.update(|window, cx| import_paths(&editor, &playback, &picked, window, cx)).ok();
-    })
-    .detach();
+    let (editor, playback) = (editor.clone(), playback.clone());
+    pick_files(true, window, cx, read_bundles, move |(bundles, problems), window, cx| {
+        import_bundles(&editor, &playback, bundles, problems, window, cx);
+    });
 }
 
-/// Imports the groups of the bundles at `paths` as one undo step, with the files of the assets they bring.
-/// Files that can't be used are left out; the others come in together, and what went wrong is reported once.
-pub fn import_paths(
-    editor: &Entity<Editor>,
-    playback: &Entity<Playback>,
-    paths: &[PathBuf],
-    window: &mut Window,
-    cx: &mut App,
-) {
+/// Reads and parses the bundles at `paths`. Those that can't be used are returned as problems.
+fn read_bundles(paths: &[PathBuf]) -> (Vec<(String, GroupsBundle)>, Vec<String>) {
     let mut problems = Vec::new();
     let mut bundles = Vec::new();
     for path in paths {
         let name = project::file_name(path);
-        let bytes = match fs::read(path) {
+        let bytes = match read_capped(path) {
             Ok(bytes) => bytes,
             Err(e) => {
                 problems.push(format!("{name}: {e}"));
@@ -82,6 +64,19 @@ pub fn import_paths(
             Err(e) => problems.push(format!("{name}: {e}")),
         }
     }
+    (bundles, problems)
+}
+
+/// Imports the groups of the bundles as one undo step, with the files of the assets they bring.
+/// Files that can't be used are left out; the others come in together, and what went wrong is reported once.
+fn import_bundles(
+    editor: &Entity<Editor>,
+    playback: &Entity<Playback>,
+    mut bundles: Vec<(String, GroupsBundle)>,
+    mut problems: Vec<String>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     if bundles.is_empty() {
         report_problems(window, &problems, cx);
         return;
@@ -89,16 +84,17 @@ pub fn import_paths(
 
     let groups: Vec<GroupsFile> = bundles.iter().map(|(_, bundle)| bundle.file.clone()).collect();
     let mut result = None;
-    editor.update(cx, |e, cx| e.edit_model(cx, |m| result = Some(m.import_groups(&groups))));
+    editor.update(cx, |e, cx| e.edit(cx, |m| result = Some(m.import_groups(&groups))));
     match result {
         Some(Ok(import)) => {
+            // Each asset's file is moved out of its bundle: an added asset is the only one reading that path.
             let files: Vec<(String, Arc<Vec<u8>>)> = import
                 .added
                 .iter()
                 .filter_map(|added| {
-                    let (_, bundle) = bundles.get(added.source.bundle)?;
-                    let data = bundle.files.get(&added.source.path)?;
-                    Some((added.asset.id().to_owned(), Arc::new(data.clone())))
+                    let (_, bundle) = bundles.get_mut(added.source.bundle)?;
+                    let data = bundle.files.remove(&added.source.path)?;
+                    Some((added.asset.id().to_owned(), Arc::new(data)))
                 })
                 .collect();
             if !files.is_empty() {
@@ -127,7 +123,7 @@ pub fn import_paths(
 
 #[cfg(test)]
 mod tests {
-    use shader_graph::assets::{Asset, AssetFile, asset_hash};
+    use shader_graph::assets::{Asset, AssetFile, asset_hash, pack_bundle};
     use shader_graph::graph::{GraphDocument, GraphModel, GraphNode, GraphProject, GroupRef, NODE_GROUP, Point};
 
     use super::*;

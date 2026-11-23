@@ -15,7 +15,8 @@ use crate::shell::{Shell, Start};
 
 actions!(windows, [NewOutputWindow, ToggleFullscreen, ToggleOutputStretch, CloseWindow]);
 
-const DEFAULT_SIZE: (f32, f32) = (1400.0, 860.0);
+/// The size of a project window opened without one, in points.
+pub const DEFAULT_SIZE: (f32, f32) = (1400.0, 860.0);
 /// How far a new project window sits from the one it opens beside.
 const CASCADE: f32 = 28.0;
 
@@ -44,18 +45,22 @@ pub fn init(cx: &mut App) {
     // window is being updated, so they act on windows once that is done.
     cx.on_action(|_: &ToggleFullscreen, cx| {
         cx.defer(|cx| {
-            if let Some(active) = cx.active_window() {
-                cx.update_window(active, |_, window, _| window.toggle_fullscreen()).ok();
-            }
+            guard::guard("toggle full screen", || {
+                if let Some(active) = cx.active_window() {
+                    cx.update_window(active, |_, window, _| window.toggle_fullscreen()).ok();
+                }
+            });
         });
     });
     cx.on_action(|_: &CloseWindow, cx| {
         cx.defer(|cx| {
-            if let Some(active) = cx.active_window()
-                && shell_in(active, cx).is_none()
-            {
-                cx.update_window(active, |_, window, _| window.remove_window()).ok();
-            }
+            guard::guard("close window", || {
+                if let Some(active) = cx.active_window()
+                    && shell_in(active, cx).is_none()
+                {
+                    cx.update_window(active, |_, window, _| window.remove_window()).ok();
+                }
+            });
         });
     });
     // The preferences don't belong to a project, so they open from any window.
@@ -190,7 +195,6 @@ pub fn owner_closed(owner: EntityId, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::path::PathBuf;
     use std::rc::Rc;
 
     use gpui::{TestAppContext, VisualTestContext};
@@ -202,8 +206,7 @@ mod tests {
 
     /// A project window that starts without a project file.
     fn project_window(cx: &mut TestAppContext) -> (Entity<Shell>, VisualTestContext) {
-        let missing = PathBuf::from("/nonexistent/untitled.wgnodes");
-        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(missing), None, window, cx));
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::start(Start::Blank, None, window, cx));
         cx.run_until_parked();
         (shell, cx.clone())
     }

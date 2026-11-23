@@ -74,7 +74,11 @@ const RESOLUTION_PRESETS: &[(&str, u32, u32)] = &[
     ("Vertical", 1080, 1920),
 ];
 
-const FRAME_RATES: &[u32] = &[24, 25, 30, 50, 60, 120];
+/// The frame rates offered as presets.
+pub const FRAME_RATES: &[u32] = &[24, 25, 30, 50, 60, 120, 144];
+
+/// The longest a video's start or duration may be, in seconds.
+pub(crate) const MAX_SECONDS: f64 = 24.0 * 60.0 * 60.0;
 
 pub struct PropertiesPanel {
     editor: Entity<Editor>,
@@ -135,17 +139,19 @@ impl PropertiesPanel {
         let fps = cx.new(|cx| {
             NumberField::new(settings.timing.fps, cx).label("FPS").step(1.0).min(1.0).max(MAX_FPS)
         });
-        let start = cx.new(|cx| NumberField::new(output.start, cx).label("Start").min(0.0));
-        let duration = cx.new(|cx| NumberField::new(output.duration, cx).label("Duration").min(0.0));
+        let start = cx.new(|cx| NumberField::new(output.start, cx).label("Start").min(0.0).max(MAX_SECONDS));
+        let duration = cx.new(|cx| NumberField::new(output.duration, cx).label("Duration").min(0.0).max(MAX_SECONDS));
         let export_fps = cx.new(|cx| {
             NumberField::new(output.fps, cx).label("FPS").step(1.0).min(1.0).max(MAX_FPS)
         });
         let job = cx.new(|_| ExportJob::default());
         let subscriptions = vec![
             cx.observe(&playback, |this, playback, cx| {
-                if playback.read(cx).render_size() != this.shown {
-                    cx.notify();
-                }
+                guard::guard("preview size", || {
+                    if playback.read(cx).render_size() != this.shown {
+                        cx.notify();
+                    }
+                });
             }),
             cx.subscribe(&width, |this, _, NumberEvent::Change(v), cx| {
                 guard::guard("canvas width", || this.edit_project(cx, |s| s.canvas.width = *v as u32));
@@ -157,16 +163,22 @@ impl PropertiesPanel {
                 guard::guard("frame rate", || this.edit_project(cx, |s| s.timing.fps = *v));
             }),
             cx.subscribe(&start, |this, _, NumberEvent::Change(v), cx| {
-                this.output.start = *v;
-                cx.notify();
+                guard::guard("export start", || {
+                    this.output.start = *v;
+                    cx.notify();
+                });
             }),
             cx.subscribe(&duration, |this, _, NumberEvent::Change(v), cx| {
-                this.output.duration = *v;
-                cx.notify();
+                guard::guard("export duration", || {
+                    this.output.duration = *v;
+                    cx.notify();
+                });
             }),
             cx.subscribe(&export_fps, |this, _, NumberEvent::Change(v), cx| {
-                this.output.fps = *v;
-                cx.notify();
+                guard::guard("export frame rate", || {
+                    this.output.fps = *v;
+                    cx.notify();
+                });
             }),
             cx.subscribe(&job, |this, _, event: &JobEvent, cx| {
                 guard::guard("export finished", || this.finished(event, cx));
@@ -246,7 +258,7 @@ impl PropertiesPanel {
                 "canvas-size",
                 ["Fixed size", "Follow preview"],
                 usize::from(follow),
-                cx.listener_for_group(|this, index, cx| {
+                Self::listener_for_group(cx, |this, index, cx| {
                     this.edit_project(cx, |s| s.canvas.follow_preview = index == 1);
                 }),
             ),
@@ -324,7 +336,7 @@ impl PropertiesPanel {
                 "playback",
                 ["Real time", "Fixed frame rate"],
                 usize::from(!timing.realtime),
-                cx.listener_for_group(|this, index, cx| {
+                Self::listener_for_group(cx, |this, index, cx| {
                     this.edit_project(cx, |s| s.timing.realtime = index == 0);
                 }),
             ),
@@ -336,7 +348,7 @@ impl PropertiesPanel {
             "frame-rates",
             FRAME_RATES.iter().map(|rate| rate.to_string()),
             current.unwrap_or(usize::MAX),
-            cx.listener_for_group(|this, index, cx| {
+            Self::listener_for_group(cx, |this, index, cx| {
                 if let Some(&rate) = FRAME_RATES.get(index) {
                     this.edit_project(cx, |s| s.timing.fps = f64::from(rate));
                 }
@@ -412,8 +424,10 @@ impl PropertiesPanel {
                 .disabled(running || !enabled)
         });
         ButtonGroup::new(id).children(buttons).on_click(move |indices: &Vec<usize>, _, cx| {
-            let Some(value) = indices.first().and_then(|&i| options.get(i).copied()) else { return };
-            weak.update(cx, |panel, cx| choose(panel, value, cx)).ok();
+            guard::guard("choice", || {
+                let Some(value) = indices.first().and_then(|&i| options.get(i).copied()) else { return };
+                weak.update(cx, |panel, cx| choose(panel, value, cx)).ok();
+            });
         })
     }
 
@@ -554,11 +568,13 @@ impl PropertiesPanel {
                 .checked(output.alpha)
                 .disabled(running)
                 .on_click(move |checked: &bool, _, cx| {
-                    weak.update(cx, |panel, cx| {
-                        panel.output.alpha = *checked;
-                        cx.notify();
-                    })
-                    .ok();
+                    guard::guard("export alpha", || {
+                        weak.update(cx, |panel, cx| {
+                            panel.output.alpha = *checked;
+                            cx.notify();
+                        })
+                        .ok();
+                    });
                 })
                 .into_any_element()
         });
@@ -624,7 +640,14 @@ impl PropertiesPanel {
         let suggested = format!("webgpu-nodes.{}", self.output.container.extension());
         let chosen = cx.prompt_for_new_path(&directory, Some(&suggested));
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(path))) = chosen.await else { return };
+            let path = match chosen.await {
+                Ok(Ok(Some(path))) => path,
+                Ok(Err(error)) => {
+                    log::error!("the save dialog failed: {error:#}");
+                    return;
+                }
+                _ => return,
+            };
             this.update_in(cx, |panel, _, cx| {
                 guard::guard("start export", || panel.begin(program, path, cx));
             })
@@ -743,9 +766,11 @@ fn segmented_buttons(
     on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
 ) -> ButtonGroup {
     ButtonGroup::new(id).children(buttons).on_click(move |indices: &Vec<usize>, window, cx| {
-        if let Some(&index) = indices.first() {
-            on_change(index, window, cx);
-        }
+        guard::guard("segmented control", || {
+            if let Some(&index) = indices.first() {
+                on_change(index, window, cx);
+            }
+        });
     })
 }
 
@@ -799,24 +824,15 @@ pub(crate) fn card<V: 'static>(
         .into_any_element()
 }
 
-/// A change handler for a `segmented` group, run on the panel.
-trait GroupListener {
+impl PropertiesPanel {
+    /// A change handler for a `segmented` group, run on the panel.
     fn listener_for_group(
-        &self,
-        f: impl Fn(&mut PropertiesPanel, usize, &mut Context<PropertiesPanel>) + 'static,
-    ) -> impl Fn(usize, &mut Window, &mut App) + 'static;
-}
-
-impl GroupListener for Context<'_, PropertiesPanel> {
-    fn listener_for_group(
-        &self,
+        cx: &Context<Self>,
         f: impl Fn(&mut PropertiesPanel, usize, &mut Context<PropertiesPanel>) + 'static,
     ) -> impl Fn(usize, &mut Window, &mut App) + 'static {
-        let weak = self.entity().downgrade();
+        let weak = cx.entity().downgrade();
         move |index, _, cx| {
-            guard::guard("properties", || {
-                weak.update(cx, |this, cx| f(this, index, cx)).ok();
-            });
+            weak.update(cx, |this, cx| f(this, index, cx)).ok();
         }
     }
 }

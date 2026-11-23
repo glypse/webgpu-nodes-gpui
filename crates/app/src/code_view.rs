@@ -20,11 +20,13 @@ impl CodeView {
         // rather than read in render: the view then re-renders only when the
         // program's text changes.
         let subscription = cx.subscribe(&playback, |this, playback, _: &PlaybackEvent, cx| {
-            let code = playback.read(cx).code.clone();
-            if code != this.code {
-                this.code = code;
-                cx.notify();
-            }
+            guard::guard("code view update", || {
+                let code = playback.read(cx).code.clone();
+                if code != this.code {
+                    this.code = code;
+                    cx.notify();
+                }
+            });
         });
         Self {
             code,
@@ -34,33 +36,34 @@ impl CodeView {
 }
 
 impl Render for CodeView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("code view", || {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        div()
-            .id("code")
-            .size_full()
-            .overflow_scroll()
-            .p_3()
-            .font_family(theme.mono_font.clone())
-            .text_size(theme.text.xs)
-            .text_color(c.foreground)
-            .children(self.code.lines().enumerate().map(|(i, line)| {
-                div()
-                    .flex()
-                    .gap_3()
-                    .whitespace_nowrap()
-                    .child(
-                        div()
-                            .w(px(28.0))
-                            .flex_none()
-                            .text_right()
-                            .text_color(c.muted_foreground)
-                            .child((i + 1).to_string()),
-                    )
-                    .child(line.to_string())
-            }))
-    })
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("code view", || {
+            let theme = cx.theme();
+            let c = &theme.colors;
+            div()
+                .id("code")
+                .size_full()
+                .overflow_scroll()
+                .p_3()
+                .font_family(theme.mono_font.clone())
+                .text_size(theme.text.xs)
+                .text_color(c.foreground)
+                .children(self.code.lines().enumerate().map(|(i, line)| {
+                    div()
+                        .flex()
+                        .gap_3()
+                        .whitespace_nowrap()
+                        .child(
+                            div()
+                                .w(px(28.0))
+                                .flex_none()
+                                .text_right()
+                                .text_color(c.muted_foreground)
+                                .child((i + 1).to_string()),
+                        )
+                        .child(line.to_string())
+                }))
+        })
     }
 }
 

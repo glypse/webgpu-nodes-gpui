@@ -38,7 +38,7 @@ const WIDTHS: [&str; 5] = ["", "Scalar", "Vector 2", "Vector 3", "Vector 4"];
 pub fn on_editor(weak: &WeakEntity<Editor>, f: impl Fn(&mut Editor, &mut Context<Editor>) + 'static) -> OnSelect {
     let weak = weak.clone();
     Rc::new(move |_: &mut gpui::Window, cx: &mut App| {
-        weak.update(cx, |e, cx| f(e, cx)).ok();
+        super::update_editor(&weak, cx, |e, cx| f(e, cx));
     })
 }
 

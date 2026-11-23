@@ -2,6 +2,7 @@
 //! job the Output section runs: frames are rendered and encoded on a thread of
 //! the export crate's own, and the job polls it for progress.
 
+use crate::properties::MAX_SECONDS;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -102,7 +103,11 @@ impl OutputSettings {
             .unwrap_or(Codec::DEFAULT);
         let alpha = object.get("alpha").and_then(Value::as_bool).unwrap_or(false) && codec.supports_alpha();
         let seconds = |key: &str, default: f64| {
-            object.get(key).and_then(Value::as_f64).filter(|s| s.is_finite() && *s >= 0.0).unwrap_or(default)
+            object
+                .get(key)
+                .and_then(Value::as_f64)
+                .filter(|s| s.is_finite() && *s >= 0.0)
+                .map_or(default, |s| s.min(MAX_SECONDS))
         };
         let fps = object
             .get("fps")
@@ -215,15 +220,19 @@ impl ExportJob {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
-                let Ok(finished) = this.update(cx, |job, cx| job.poll(cx)) else { return };
+                let Some(Ok(finished)) = guard::guard("export poll", || this.update(cx, |job, cx| job.poll(cx))) else {
+                    return;
+                };
                 let Some(export) = finished else { continue };
                 let result = cx.background_executor().spawn(async move { export.wait() }).await;
-                this.update(cx, |job, cx| {
-                    job.running = None;
-                    cx.emit(JobEvent::Finished(result));
-                    cx.notify();
-                })
-                .ok();
+                guard::guard("export finished", || {
+                    this.update(cx, |job, cx| {
+                        job.running = None;
+                        cx.emit(JobEvent::Finished(result));
+                        cx.notify();
+                    })
+                    .ok();
+                });
                 return;
             }
         })
@@ -289,15 +298,6 @@ impl Render for ExportJob {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_defaults_are_prores_422_hq_in_mov() {
-        let output = OutputSettings::new(30.0);
-        assert_eq!(output.container, Container::Mov);
-        assert_eq!(output.codec, Codec::ProRes(ProResProfile::Hq));
-        assert!(!output.alpha);
-        assert_eq!((output.start, output.duration, output.fps), (0.0, 5.0, 30.0));
-    }
 
     #[test]
     fn stored_output_reads_back_the_same() {

@@ -60,21 +60,25 @@ impl OutputView {
     ) -> Self {
         let id = cx.entity_id();
         let subscriptions = vec![
-            cx.observe(&playback, |_, _, cx| cx.notify()),
+            cx.observe(&playback, |_, _, cx| {
+                guard::guard("output observe", || cx.notify());
+            }),
             // The window last used is the one frames follow while the canvas follows a preview.
             cx.observe_window_activation(window, move |this, window, cx| {
-                if window.is_window_active() {
-                    let playback = this.playback.clone();
-                    cx.update_window(this.owner, |_, owner, cx| {
-                        playback.update(cx, |p, cx| p.follow_pane(id, owner, cx));
-                    })
-                    .ok();
-                }
+                guard::guard("output activation", || {
+                    if window.is_window_active() {
+                        let playback = this.playback.clone();
+                        cx.update_window(this.owner, |_, owner, cx| {
+                            playback.update(cx, |p, cx| p.follow_pane(id, owner, cx));
+                        })
+                        .ok();
+                    }
+                });
             }),
             cx.on_release({
                 let playback = playback.clone();
                 move |_, cx| {
-                    playback.update(cx, |p, cx| p.forget_pane(id, cx));
+                    guard::guard("output release", || playback.update(cx, |p, cx| p.forget_pane(id, cx)));
                 }
             }),
         ];

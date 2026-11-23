@@ -86,7 +86,7 @@ pub fn save_window(path: &Path, title: Option<&str>) -> Result<()> {
             continue;
         }
         if let Some(title) = title
-            && window.title().map_or(true, |t| t != title)
+            && !window.title().is_ok_and(|t| t == title)
         {
             continue;
         }

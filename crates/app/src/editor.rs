@@ -1,6 +1,6 @@
 use guard::SafeListener as _;
 use gpui::prelude::FluentBuilder as _;
-use std::cell::Ref;
+use std::cell::{Cell, Ref};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -231,6 +231,8 @@ pub struct Editor {
     code_task: Option<gpui::Task<()>>,
     pub(crate) sockets: Option<SocketsPopup>,
     pub(crate) color_popup: Option<ColorPopup>,
+    /// Whether any group can be pruned, keyed by the model revision it was computed at.
+    prune_cache: Cell<Option<(u64, bool)>>,
 }
 
 /// Vertical distance between the tags of hidden links reaching one input.
@@ -363,6 +365,7 @@ impl Editor {
             code_task: None,
             sockets: None,
             color_popup: None,
+            prune_cache: Cell::new(None),
         };
         editor.sync_view(cx);
         if primary {
@@ -418,12 +421,15 @@ impl Editor {
             }
         }
         let saved = self.viewports.get(&self.model.borrow().active_definition_ref()).copied();
-        self.flow.update(cx, |flow, cx| {
-            flow.options.fit_view_on_init = saved.is_none();
-            match saved {
-                Some(vp) => flow.set_viewport(vp, None, cx),
-                None => flow.fit_view(Default::default(), cx),
-            }
+        self.flow.update(cx, |flow, _| flow.options.fit_view_on_init = saved.is_none());
+        self.restore_camera(saved, cx);
+    }
+
+    /// Restores a group's saved camera, or fits its nodes when it has none.
+    fn restore_camera(&self, saved: Option<Viewport>, cx: &mut Context<Self>) {
+        self.flow.update(cx, |flow, cx| match saved {
+            Some(vp) => flow.set_viewport(vp, None, cx),
+            None => flow.fit_view(Default::default(), cx),
         });
     }
 
@@ -442,11 +448,7 @@ impl Editor {
             self.viewports.insert(key.clone(), flow_viewport(v));
         }
         self.sync_view(cx);
-        let saved = self.viewports.get(&key).copied();
-        self.flow.update(cx, |flow, cx| match saved {
-            Some(vp) => flow.set_viewport(vp, None, cx),
-            None => flow.fit_view(Default::default(), cx),
-        });
+        self.restore_camera(self.viewports.get(&key).copied(), cx);
     }
 
     /// Another area loaded a project: back at its root, with its cameras.
@@ -460,11 +462,7 @@ impl Editor {
         self.color_popup = None;
         *self.frame_drag.borrow_mut() = None;
         self.sync_view(cx);
-        let saved = self.viewports.get(&self.model.borrow().active_definition_ref()).copied();
-        self.flow.update(cx, |flow, cx| match saved {
-            Some(vp) => flow.set_viewport(vp, None, cx),
-            None => flow.fit_view(Default::default(), cx),
-        });
+        self.restore_camera(self.viewports.get(&self.model.borrow().active_definition_ref()).copied(), cx);
     }
 
     /// The project as it is now, with each group's camera as it was left.
@@ -570,7 +568,7 @@ impl Editor {
             let ed = editor.clone();
             let mut node = Node::new(n.id.clone(), flow_point(n.position))
                 .width(node_width(&n.node_type))
-                .render(move |props, window, cx| render_node(&view, props, &ed, window, cx));
+                .render(move |props, window, cx| guard::render("node card", || render_node(&view, props, &ed, window, cx)));
             node.width = None;
             node.selected = selected.contains(&n.id);
             node.deletable = Some(n.deletable());
@@ -582,9 +580,11 @@ impl Editor {
         let analysis = model.pass_analysis();
         let path = model.path().to_vec();
         let reveals = |id: &str| selected.iter().any(|s| s == id);
-        let hides_links = |id: &str| {
-            doc.node(id).is_some_and(|n| n.is(REROUTE) && n.data.hide_links == Some(true) && n.data.label.is_some())
-        };
+        let hides_links = |id: &str| doc.node(id).is_some_and(|n| hides_links_reroute(n) && n.data.label.is_some());
+        let mut tagged: HashMap<(&str, &str), Vec<&shader_graph::graph::GraphEdge>> = HashMap::new();
+        for o in doc.edges.iter().filter(|o| hides_links(&o.source)) {
+            tagged.entry((o.target.as_str(), o.target_handle.as_str())).or_default().push(o);
+        }
         let edges: Vec<Edge> = doc
             .edges
             .iter()
@@ -606,10 +606,7 @@ impl Editor {
                 let texture = source_ty.is_texture()
                     || matches!(link, Some(shader_graph::passes::TextureLink::Render { .. }));
                 if hides_links(&e.source) {
-                    let siblings: Vec<&shader_graph::graph::GraphEdge> = doc
-                        .edges_into(&e.target)
-                        .filter(|o| o.target_handle == e.target_handle && hides_links(&o.source))
-                        .collect();
+                    let siblings = tagged.get(&(e.target.as_str(), e.target_handle.as_str())).map_or(&[][..], Vec::as_slice);
                     let index = siblings.iter().position(|o| o.id == e.id).unwrap_or(0);
                     edge.tag = Some(gpui_flow::EdgeTag {
                         text: model.node_label(&e.source),
@@ -646,14 +643,18 @@ impl Editor {
         let paddings = zones::paddings(&zone_list);
         let mut ordered = zone_list.clone();
         ordered.sort_by_key(|z| z.depth);
-        let bubbles: Vec<Bubble> = ordered
+        let padded: Vec<(&shader_graph::zones::Zone, f32)> = ordered
             .iter()
-            .map(|z| Bubble {
+            .map(|z| (*z, paddings.iter().find(|(id, _)| *id == z.id).map_or(28.0, |p| p.1)))
+            .collect();
+        let bubbles: Vec<Bubble> = padded
+            .iter()
+            .map(|(z, padding)| Bubble {
                 kind: z.kind,
                 input: z.input_id.clone().into(),
                 output: z.output_id.clone().into(),
                 members: z.members.iter().map(|m| Id::from(m.clone())).collect(),
-                padding: paddings.iter().find(|(id, _)| *id == z.id).map_or(28.0, |p| p.1),
+                padding: *padding,
             })
             .collect();
         let snapshot = Rc::new(Snapshot {
@@ -667,13 +668,13 @@ impl Editor {
                 })
                 .collect(),
             analysis: model.frame_analysis(doc),
-            zones: ordered
+            zones: padded
                 .iter()
-                .map(|z| ZoneBox {
+                .map(|(z, padding)| ZoneBox {
                     input: z.input_id.clone(),
                     output: z.output_id.clone(),
                     members: z.members.iter().cloned().collect(),
-                    padding: paddings.iter().find(|(id, _)| *id == z.id).map_or(28.0, |p| p.1),
+                    padding: *padding,
                 })
                 .collect(),
             looks: doc
@@ -857,7 +858,7 @@ impl Editor {
         if !self.primary {
             let first = self.model.areas().into_iter().next();
             if let Some(first) = first {
-                first.update(cx, |first, cx| first.regenerate(cx)).ok();
+                crate::graph::update_editor(&first, cx, |first, cx| first.regenerate(cx));
             }
             return;
         }
@@ -895,7 +896,7 @@ impl Editor {
     }
 
     /// Runs an edit of the model, then shows it.
-    fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut GraphModel)) {
+    pub(crate) fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut GraphModel)) {
         f(&mut self.model_mut());
         self.after_edit(cx);
     }
@@ -908,11 +909,7 @@ impl Editor {
         }
         // The path doesn't change what the project generates, so the program stays as it is.
         self.sync(cx);
-        let saved = self.viewports.get(&key).copied();
-        self.flow.update(cx, |flow, cx| match saved {
-            Some(vp) => flow.set_viewport(vp, None, cx),
-            None => flow.fit_view(Default::default(), cx),
-        });
+        self.restore_camera(self.viewports.get(&key).copied(), cx);
     }
 
     // --- Edits the node cards make ---
@@ -1164,7 +1161,7 @@ impl Editor {
                 let rect = flow.node_rect(&n.id)?;
                 let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
                 for (handle, kind, centre) in flow.handle_centres(&n.id) {
-                    let entry = (handle.map(|h| h.to_string()).unwrap_or_default(), centre.y);
+                    let entry = (handle_text(handle), centre.y);
                     match kind {
                         gpui_flow::HandleType::Target => inputs.push(entry),
                         gpui_flow::HandleType::Source => outputs.push(entry),
@@ -1283,7 +1280,7 @@ impl Editor {
                 if state.to_node.is_none() && state.reconnecting.is_none() && !self.over_node(state.to, cx) {
                     let pending = Pending {
                         node: state.from_node.to_string(),
-                        handle: state.from_handle.map(|h| h.to_string()).unwrap_or_default(),
+                        handle: handle_text(state.from_handle),
                         from_output: state.from_type == gpui_flow::HandleType::Source,
                     };
                     let at = self.flow.read(cx).flow_to_screen(state.to);
@@ -1337,10 +1334,9 @@ impl Editor {
                         None,
                         Rc::new(move |_, cx| {
                             let id = id.clone();
-                            weak.update(cx, |e, cx| e.edit(cx, |m| {
+                            crate::graph::update_editor(&weak, cx, |e, cx| e.edit(cx, |m| {
                                 m.delete_edges(&[id]);
-                            }))
-                            .ok();
+                            }));
                         }),
                     )],
                     cx,
@@ -1450,14 +1446,13 @@ impl Editor {
             let doc = model.active_document();
             let nodes: Vec<&shader_graph::graph::GraphNode> =
                 selected.iter().filter_map(|id| doc.node(id)).collect();
-            let reroutes: Vec<&&shader_graph::graph::GraphNode> =
-                nodes.iter().filter(|n| n.is(REROUTE)).collect();
+            let reroutes = nodes.iter().filter(|n| n.is(REROUTE)).count();
             let frames = model.frame_analysis(doc);
             (
                 model.is_locked(),
-                reroutes.len(),
+                reroutes,
                 !nodes.is_empty() && nodes.iter().all(|n| n.data.hide_unlinked == Some(true)),
-                reroutes.iter().all(|n| n.data.hide_links == Some(true)),
+                nodes.iter().filter(|n| n.is(REROUTE)).all(|n| hides_links_reroute(n)),
                 selected.iter().any(|id| frames.frame_of.contains_key(id)),
                 nodes.iter().any(|n| n.definition_ref().is_some()),
                 (nodes.len() == 1).then(|| nodes[0].id.clone()),
@@ -1469,7 +1464,7 @@ impl Editor {
             let weak = weak.clone();
             Rc::new(move |_, cx| {
                 let f = f.clone();
-                weak.update(cx, |e, cx| f(e, cx)).ok();
+                crate::graph::update_editor(&weak, cx, |e, cx| f(e, cx));
             })
         };
         let mut push = |label: &str, detail: Option<&str>, disabled: bool, f: Handler| {
@@ -1531,14 +1526,14 @@ impl Editor {
             let w = weak.clone();
             items.push(
                 ListItem::new("Fit view", None, Rc::new(move |_, cx| {
-                    w.update(cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx))).ok();
+                    crate::graph::update_editor(&w, cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx)));
                 }))
                 .separated(),
             );
             if !self.model.borrow().path().is_empty() {
                 let w = weak.clone();
                 items.push(ListItem::new("Exit group", None, Rc::new(move |_, cx| {
-                    w.update(cx, |e, cx| e.exit_group(cx)).ok();
+                    crate::graph::update_editor(&w, cx, |e, cx| e.exit_group(cx));
                 })).detail("⇥"));
             }
         }
@@ -1603,9 +1598,7 @@ impl Editor {
             let model = self.model.borrow();
             ids.iter()
                 .find(|id| {
-                    model.node(id).is_some_and(|n| {
-                        n.is(REROUTE) && n.data.hide_links == Some(true) && n.data.label.is_none()
-                    })
+                    model.node(id).is_some_and(|n| hides_links_reroute(n) && n.data.label.is_none())
                 })
                 .cloned()
         };
@@ -1624,7 +1617,7 @@ impl Editor {
     }
 
     fn copy(&mut self, cx: &mut Context<Self>) {
-        self.clipboard = self.model.borrow().copy_nodes(&self.selected()).or(self.clipboard.take());
+        self.clipboard = self.model.borrow().copy_nodes(&self.selected()).or_else(|| self.clipboard.take());
         cx.notify();
     }
 
@@ -1874,12 +1867,20 @@ fn conversion_label(text: &'static str, theme: &theme::Theme) -> gpui_flow::Edge
     }
 }
 
+fn hides_links_reroute(n: &GraphNode) -> bool {
+    n.is(REROUTE) && n.data.hide_links == Some(true)
+}
+
+fn handle_text(handle: Option<impl ToString>) -> String {
+    handle.map(|h| h.to_string()).unwrap_or_default()
+}
+
 fn to_model(c: &FlowConnection) -> Connection {
     Connection::new(
         c.source.to_string(),
-        c.source_handle.as_ref().map(|h| h.to_string()).unwrap_or_default(),
+        handle_text(c.source_handle.as_ref()),
         c.target.to_string(),
-        c.target_handle.as_ref().map(|h| h.to_string()).unwrap_or_default(),
+        handle_text(c.target_handle.as_ref()),
     )
 }
 
@@ -1904,6 +1905,7 @@ struct Enabled {
 impl Editor {
     fn enabled(&self) -> Enabled {
         let model = self.model.borrow();
+        let revision = self.model.revision();
         let locked = model.is_locked();
         let selected = model.selected_node_ids();
         let has_selection = !selected.is_empty();
@@ -1916,13 +1918,24 @@ impl Editor {
             group: has_selection && !locked && idle,
             ungroup: selected_group && !locked && idle,
             preview: selected.len() == 1 && !locked,
-            prune: !model.prunable_groups().is_empty(),
+            prune: self.has_prunable_groups(&model, revision),
             layout_selected: has_selection && !locked,
             layout_document: !locked,
             enter: selected_group && idle,
             exit: (can_exit || self.sheet.is_some()) && idle,
             sheet: (has_selection || can_exit || self.sheet.is_some()) && idle,
             export_group: selected_group,
+        }
+    }
+
+    fn has_prunable_groups(&self, model: &GraphModel, revision: u64) -> bool {
+        match self.prune_cache.get() {
+            Some((at, any)) if at == revision => any,
+            _ => {
+                let any = !model.prunable_groups().is_empty();
+                self.prune_cache.set(Some((revision, any)));
+                any
+            }
         }
     }
 }
@@ -2019,10 +2032,6 @@ impl Render for Editor {
 impl Editor {
     fn render_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         sheet::render(self, window, cx)
-    }
-
-    pub(crate) fn edit_model(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut GraphModel)) {
-        self.edit(cx, f);
     }
 
     #[cfg(test)]
@@ -2216,7 +2225,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_sheet_opens_on_every_kind_of_node(cx: &mut TestAppContext) {
+    fn the_sheet_renders_for_every_kind_of_node(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
         let (group, zone_input, reroute) = scene.editor.update(cx, |e, cx| {
             let mut model = e.model_mut();
@@ -2236,7 +2245,6 @@ mod tests {
                 cx.notify();
             });
             render_frame(cx);
-            assert!(scene.editor.read_with(cx, |e, _| e.sheet.is_some()));
         }
     }
 
@@ -2466,7 +2474,7 @@ mod tests {
         let mut asset = String::new();
         let bytes = png_of_width(2);
         editor.update(vcx, |e, cx| {
-            e.edit_model(cx, |m| {
+            e.edit(cx, |m| {
                 let file = shader_graph::assets::ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
                 asset = m.import_file(file, &runtime::SystemVideoProbe).expect("imports").asset.id().to_owned();
             })

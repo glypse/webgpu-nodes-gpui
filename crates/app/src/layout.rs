@@ -11,7 +11,7 @@ use crate::shell::Panel;
 
 /// The key of the layout in the project's JSON.
 const KEY: &str = "layout";
-/// What a path may hold.
+/// Bounds on a layout read from a project file, which may have been edited by hand.
 const MAX_PATH: usize = 64;
 const MAX_AREAS: usize = 256;
 
@@ -70,63 +70,76 @@ fn fraction(v: &Value) -> Option<f64> {
     v.as_f64().filter(|f| f.is_finite() && (0.0..=1.0).contains(f))
 }
 
+/// A viewport coordinate or zoom outside f32's range would become infinite or NaN, so the camera is dropped instead.
 fn viewport(v: &Value) -> Option<Viewport> {
-    let number = |key: &str| v.get(key)?.as_f64().filter(|f| f.is_finite());
+    let number = |key: &str| v.get(key)?.as_f64().filter(|f| f.abs() <= f64::from(f32::MAX));
     let zoom = number("zoom").filter(|z| *z > 0.0)?;
     Some(Viewport { x: number("x")? as f32, y: number("y")? as f32, zoom: zoom as f32 })
 }
 
-fn editor_from_json(v: &Value) -> Option<(Panel, Option<GraphView>)> {
-    match v.get("type")?.as_str()? {
-        "graph" => {
+fn editor_from_json(v: &Value) -> Result<(Panel, Option<GraphView>), &'static str> {
+    match v.get("type").and_then(Value::as_str) {
+        Some("graph") => {
             let path: Vec<String> = v
-                .get("path")?
-                .as_array()?
-                .iter()
-                .map(|id| id.as_str().map(str::to_owned))
-                .collect::<Option<_>>()?;
-            (path.len() <= MAX_PATH).then_some(())?;
+                .get("path")
+                .and_then(Value::as_array)
+                .and_then(|ids| ids.iter().map(|id| id.as_str().map(str::to_owned)).collect::<Option<_>>())
+                .ok_or("a graph area has no path")?;
+            if path.len() > MAX_PATH {
+                return Err("a graph area's path is too long");
+            }
             let view = GraphView { path, viewport: v.get("viewport").and_then(viewport) };
-            Some((Panel::Graph, Some(view)))
+            Ok((Panel::Graph, Some(view)))
         }
-        "preview" => Some((Panel::Preview, None)),
-        "timeline" => Some((Panel::Timeline, None)),
-        "code" => Some((Panel::Code, None)),
-        "assets" => Some((Panel::Assets, None)),
-        "properties" => Some((Panel::Properties, None)),
-        _ => None,
+        Some("preview") => Ok((Panel::Preview, None)),
+        Some("timeline") => Ok((Panel::Timeline, None)),
+        Some("code") => Ok((Panel::Code, None)),
+        Some("assets") => Ok((Panel::Assets, None)),
+        Some("properties") => Ok((Panel::Properties, None)),
+        _ => Err("an area's editor is missing or unknown"),
     }
 }
 
-/// The layout a project was saved with. `None` when it has none or it isn't a valid tiling of the window.
+/// The layout a project was saved with. `None` when it has none, or when what it has isn't a valid tiling of the window;
+/// the latter is logged with its reason.
 pub fn load(project: &GraphProject) -> Option<Layout> {
     let areas = project.extra.get(KEY)?.get("areas")?.as_array()?;
+    match from_areas(areas) {
+        Ok(layout) => Some(layout),
+        Err(reason) => {
+            log::warn!("ignoring the saved layout: {reason}");
+            None
+        }
+    }
+}
+
+fn from_areas(areas: &[Value]) -> Result<Layout, &'static str> {
     if areas.is_empty() || areas.len() > MAX_AREAS {
-        return None;
+        return Err("it has no areas, or too many");
     }
     let mut ids = HashSet::new();
     let mut views = Vec::new();
     let mut parsed = Vec::new();
     for area in areas {
-        let id = area.get("id")?.as_str()?;
+        let id = area.get("id").and_then(Value::as_str).ok_or("an area has no id")?;
         ids.insert(id);
-        let rect = area.get("rect")?;
-        let side = |key: &str| fraction(rect.get(key)?);
+        let rect = area.get("rect").ok_or("an area has no rect")?;
+        let side = |key: &str| rect.get(key).and_then(fraction).ok_or("an area's rect isn't within the window");
         let rect = Rect::new(side("left")?, side("top")?, side("right")?, side("bottom")?);
         if rect.right <= rect.left || rect.bottom <= rect.top {
-            return None;
+            return Err("an area is empty");
         }
-        let (panel, view) = editor_from_json(area.get("editor")?)?;
+        let (panel, view) = editor_from_json(area.get("editor").ok_or("an area has no editor")?)?;
         views.push(view);
         parsed.push((rect, panel));
     }
     if ids.len() != areas.len() {
-        return None;
+        return Err("two areas share an id");
     }
     let screen = Screen::new(parsed);
-    screen.validate().ok()?;
+    screen.validate().map_err(|_| "the areas don't tile the window")?;
     let graphs = screen.areas().iter().zip(views).filter_map(|(area, view)| Some((area.id, view?))).collect();
-    Some(Layout { screen, graphs })
+    Ok(Layout { screen, graphs })
 }
 
 #[cfg(test)]

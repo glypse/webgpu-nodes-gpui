@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
-use shader_graph::assets::{BundleKind, pack_bundle, unpack_bundle, verified_files};
-use shader_graph::graph::GraphProject;
+use shader_graph::assets::{Asset, BundleKind, pack_bundle, unpack_bundle, verified_files};
+use shader_graph::graph::{GraphProject, MAX_BUNDLE_BYTES};
 
 pub const EXTENSION: &str = BundleKind::Project.extension();
 const ZIP_MAGIC: &[u8] = b"PK";
@@ -19,9 +19,17 @@ pub struct Loaded {
     pub files: AssetFiles,
 }
 
+/// Reads a file whole, refusing one larger than a bundle can be, before reading it.
+pub fn read_capped(path: &Path) -> std::io::Result<Vec<u8>> {
+    if fs::metadata(path)?.len() > MAX_BUNDLE_BYTES {
+        return Err(std::io::Error::other("it is too large to use"));
+    }
+    fs::read(path)
+}
+
 /// Reads a project from a bundle (zip with `project.json` and its assets' files) or from bare JSON.
 pub fn read(path: &Path) -> Result<Loaded> {
-    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let bytes = read_capped(path).with_context(|| format!("reading {}", path.display()))?;
     parse(&bytes)
 }
 
@@ -32,7 +40,7 @@ fn parse(bytes: &[u8]) -> Result<Loaded> {
     }
     let bundle = unpack_bundle(bytes, BundleKind::Project)?;
     let project = GraphProject::from_json(&bundle.json)?;
-    let verified = verified_files(&bundle, &project.assets);
+    let verified = verified_files(bundle, &project.assets);
     for asset in &verified.altered {
         log::warn!("the file of the asset \"{}\" isn't what the project says, so it's left out", asset.name());
     }
@@ -40,17 +48,18 @@ fn parse(bytes: &[u8]) -> Result<Loaded> {
     Ok(Loaded { project, files })
 }
 
-fn encode(project: &GraphProject, files: &AssetFiles) -> Result<Vec<u8>> {
-    let entries = project.assets.iter().filter_map(|asset| {
+/// Packs `json` and the files of the `assets` the project holds, as a bundle of `kind`.
+pub fn pack(kind: BundleKind, json: &str, assets: &[Asset], files: &AssetFiles) -> Result<Vec<u8>> {
+    let entries = assets.iter().filter_map(|asset| {
         let data = files.get(asset.id())?;
         Some((asset.file(), data.as_slice()))
     });
-    Ok(pack_bundle(BundleKind::Project, &project.to_json(), entries)?)
+    Ok(pack_bundle(kind, json, entries)?)
 }
 
 /// Writes the project and its assets' files as a bundle, replacing the file only once it is whole.
 pub fn write(path: &Path, project: &GraphProject, files: &AssetFiles) -> Result<()> {
-    let bytes = encode(project, files)?;
+    let bytes = pack(BundleKind::Project, &project.to_json(), &project.assets, files)?;
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(".tmp");
     let temporary = PathBuf::from(temporary);

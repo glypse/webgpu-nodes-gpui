@@ -71,18 +71,18 @@ pub fn details(
         let items: Vec<ListItem> = variants
             .iter()
             .map(|v| {
-                let (r, id, value) = (reference.to_owned(), handle.id.clone(), v.int());
+                let (r, id, value) = (reference.to_owned(), handle.id.clone(), v.value);
                 ListItem::new(
                     v.label.clone(),
                     Some(Some(value) == current),
                     on_editor(&weak, move |e, cx| {
                         let (r, id) = (r.clone(), id.clone());
-                        e.edit_model(cx, move |m| m.set_handle_default(&r, &id, Some(InputValue::from(value as f64))));
+                        e.edit(cx, move |m| m.set_handle_default(&r, &id, Some(InputValue::from(value as f64))));
                     }),
                 )
             })
             .collect();
-        let name = variants.iter().find(|v| Some(v.int()) == current).map_or_else(String::new, |v| v.label.clone());
+        let name = variants.iter().find(|v| Some(v.value) == current).map_or_else(String::new, |v| v.label.clone());
         let w = weak.clone();
         div().flex().child(super::fields::picker(
             SharedString::from(format!("default-{}", handle.id)),
@@ -92,7 +92,7 @@ pub fn details(
             cx,
             move |at, _, cx| {
                 let items = items.clone();
-                w.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                super::update_editor(&w, cx, |e, cx| e.open_list(at, items, cx));
             },
         ))
     } else {
@@ -106,13 +106,12 @@ pub fn details(
                 .readonly(locked)
                 .on_change(move |v, _: Edit, _, cx| {
                     let (r, id) = (r.clone(), id.clone());
-                    w.update(cx, |e, cx| {
-                        e.edit_model(cx, move |m| {
+                    super::update_editor(&w, cx, |e, cx| {
+                        e.edit(cx, move |m| {
                             let current = m.project().document(&r).and_then(|d| d.defaults.get(&id).copied());
                             m.set_handle_default(&r, &id, Some(InputValue::with_component(current.as_ref(), ty, i, v)));
                         });
-                    })
-                    .ok();
+                    });
                 });
             if toggle_values {
                 scrub = scrub.range(Some(0.0), Some(1.0));
@@ -131,7 +130,7 @@ pub fn details(
             let (r, id) = (reference.to_owned(), handle.id.clone());
             Rc::new(move |this: &mut Editor, variants: Vec<EnumVariant>, cx: &mut Context<Editor>| {
                 let (r, id) = (r.clone(), id.clone());
-                this.edit_model(cx, move |m| m.set_handle_variants(&r, &id, Some(variants)));
+                this.edit(cx, move |m| m.set_handle_variants(&r, &id, Some(variants)));
             })
         };
         for (i, variant) in options.iter().enumerate() {
@@ -223,7 +222,7 @@ pub fn details(
                         .child(Checkbox::new(SharedString::from(format!("compile-{id}"))).checked(on).disabled(locked).on_change(
                             move |checked, _, cx| {
                                 let (r, id, checked) = (r.clone(), id.clone(), *checked);
-                                w.update(cx, |e, cx| e.edit_model(cx, move |m| m.set_handle_compiled(&r, &id, checked))).ok();
+                                super::update_editor(&w, cx, |e, cx| e.edit(cx, move |m| m.set_handle_compiled(&r, &id, checked)));
                             },
                         ))
                         .child(label("Compile in", cx)),
@@ -241,7 +240,7 @@ pub fn details(
                 Rc::new(move |e, value, cx| {
                     let (r, id) = (r.clone(), id.clone());
                     let (min, max) = if is_min { (value, max) } else { (min, value) };
-                    e.edit_model(cx, move |m| m.set_handle_range(&r, &id, min, max));
+                    e.edit(cx, move |m| m.set_handle_range(&r, &id, min, max));
                 })
             };
             let body = match current {
@@ -269,7 +268,7 @@ pub fn details(
                                 .readonly(locked)
                                 .on_change(move |v, _: Edit, _, cx| {
                                     let set = set.clone();
-                                    w.update(cx, |e, cx| set(e, Some(v), cx)).ok();
+                                    super::update_editor(&w, cx, |e, cx| set(e, Some(v), cx));
                                 }),
                         )
                         .when(!locked, |d| {
@@ -305,7 +304,7 @@ pub fn details(
                     Some(current == display),
                     on_editor(&weak, move |e, cx| {
                         let (r, id) = (r.clone(), id.clone());
-                        e.edit_model(cx, move |m| m.set_handle_display(&r, &id, display));
+                        e.edit(cx, move |m| m.set_handle_display(&r, &id, display));
                     }),
                 )
             })
@@ -320,7 +319,7 @@ pub fn details(
                 cx,
                 move |at, _, cx| {
                     let items = items.clone();
-                    w.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                    super::update_editor(&w, cx, |e, cx| e.open_list(at, items, cx));
                 },
             ))),
         );

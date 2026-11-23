@@ -315,7 +315,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
         let id = node_id.clone();
         Rc::new(move |this, text, cx| {
             let id = id.clone();
-            this.edit_model(cx, move |m: &mut GraphModel| {
+            this.edit(cx, move |m: &mut GraphModel| {
                 let text = text.trim().to_owned();
                 let custom = (!text.is_empty() && text != m.default_node_label(&id)).then_some(text);
                 if m.node(&id).is_some_and(|n| n.data.label != custom) {
@@ -358,7 +358,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                 }
                 let id = id.clone();
                 this.sheet_fields.inputs.remove(&format!("label-{id}"));
-                this.edit_model(cx, move |m| m.set_node_label(&id, None));
+                this.edit(cx, move |m| m.set_node_label(&id, None));
             }))
             .child(Icon::new(IconName::ArrowCounterClockwise).size(px(14.0)))
     };
@@ -383,7 +383,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                     Checkbox::new("hide-links").checked(subject.hide_links).disabled(locked).on_change(
                         move |_, _, cx| {
                             let ids = vec![id.clone()];
-                            weak.update(cx, |e, cx| e.edit_model(cx, move |m| m.toggle_hidden_links(&ids))).ok();
+                            super::update_editor(&weak, cx, |e, cx| e.edit(cx, move |m| m.toggle_hidden_links(&ids)));
                         },
                     )
                 }))
@@ -407,7 +407,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             Rc::new(move |this, text, cx| {
                 let id = id.clone();
                 let note = text.trim_end().to_owned();
-                this.edit_model(cx, move |m: &mut GraphModel| {
+                this.edit(cx, move |m: &mut GraphModel| {
                     m.update_node_data(&id, |d| set_frame_note(d, Some(&note)));
                 });
             })
@@ -436,7 +436,7 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                                         return;
                                     }
                                     let id = id.clone();
-                                    this.edit_model(cx, move |m| m.update_node_data(&id, |d| set_frame_tint(d, option)));
+                                    this.edit(cx, move |m| m.update_node_data(&id, |d| set_frame_tint(d, option)));
                                 }))
                         }),
                     ),
@@ -507,7 +507,7 @@ fn group_settings(
             let node = node.clone();
             Rc::new(move |this, text, cx| {
                 let node = node.clone();
-                this.edit_model(cx, move |m: &mut GraphModel| m.set_group_label(&node, &text));
+                this.edit(cx, move |m: &mut GraphModel| m.set_group_label(&node, &text));
             })
         };
         let input = field(editor, format!("group-{reference}"), &group.label, "Group name", window, cx, commit);
@@ -529,7 +529,7 @@ fn group_settings(
                 let (reference, id) = (reference.clone(), variable.id.clone());
                 Rc::new(move |this, text, cx| {
                     let (reference, id) = (reference.clone(), id.clone());
-                    this.edit_model(cx, move |m| m.set_type_variable(&reference, &id, Some(&text), None));
+                    this.edit(cx, move |m| m.set_type_variable(&reference, &id, Some(&text), None));
                 })
             };
             let name = field(editor, format!("variable-{}", variable.id), &variable.name, "Name", window, cx, name_commit);
@@ -543,7 +543,7 @@ fn group_settings(
                     let (r, vid) = (r.clone(), vid.clone());
                     let change: type_set_picker::Change = Rc::new(move |next, e, cx| {
                         let (r, vid) = (r.clone(), vid.clone());
-                        e.edit_model(cx, move |m| m.set_type_variable(&r, &vid, None, Some(&next)));
+                        e.edit(cx, move |m| m.set_type_variable(&r, &vid, None, Some(&next)));
                     });
                     let items = type_set_picker::items(&w, at, types.clone(), change);
                     this.open_list(at, items, cx);
@@ -574,7 +574,7 @@ fn group_settings(
                     .when(!locked, |d| {
                         d.child(button(SharedString::from(format!("rm-{}", variable.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
                             let (r, vid) = (r.clone(), vid.clone());
-                            this.edit_model(cx, move |m| m.remove_type_variable(&r, &vid));
+                            this.edit(cx, move |m| m.remove_type_variable(&r, &vid));
                         }))
                     }),
             );
@@ -583,7 +583,7 @@ fn group_settings(
             let r = reference.clone();
             section = section.child(outline_button("add-variable", "Add shared type", false, cx, move |this, _, cx| {
                 let r = r.clone();
-                this.edit_model(cx, move |m| {
+                this.edit(cx, move |m| {
                     m.add_type_variable(&r, shader_graph::types::FLOAT_TYPES);
                 });
             }));
@@ -606,7 +606,7 @@ fn group_settings(
                 let (reference, id) = (reference.clone(), handle.id.clone());
                 Rc::new(move |this, text, cx| {
                     let (reference, id) = (reference.clone(), id.clone());
-                    this.edit_model(cx, move |m| {
+                    this.edit(cx, move |m| {
                         m.set_handle_label(&reference, side, &id, &text);
                     });
                 })
@@ -630,7 +630,7 @@ fn group_settings(
                                 Some(handle_ty.variable() == Some(v.id.as_str())),
                                 on_editor(&w, move |e, cx| {
                                     let (r, hid, vid) = (r.clone(), hid.clone(), vid.clone());
-                                    e.edit_model(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::Variable { variable: vid }));
+                                    e.edit(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::Variable { variable: vid }));
                                 }),
                             )
                             .detail(type_set_of(&v.types).map_or("Custom", |s| s.label))
@@ -643,7 +643,7 @@ fn group_settings(
                             Some(handle_ty.is_inferred()),
                             on_editor(&w, move |e, cx| {
                                 let (r, hid) = (r.clone(), hid.clone());
-                                e.edit_model(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::inferred()));
+                                e.edit(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::inferred()));
                             }),
                         )
                         .detail("What reaches it");
@@ -659,7 +659,7 @@ fn group_settings(
                         inferred: None,
                         on_pick: Rc::new(move |ty, e, cx| {
                             let (r, hid) = (r2.clone(), hid2.clone());
-                            e.edit_model(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::Fixed(ty)));
+                            e.edit(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::Fixed(ty)));
                         }),
                         on_reset: None,
                         extra,
@@ -688,15 +688,15 @@ fn group_settings(
                     .when(!locked, |d| {
                         d.child(button(SharedString::from(format!("up-{}", handle.id)), Icon::new(IconName::ArrowUp).size(px(14.0)), cx, move |this, cx| {
                             let (r, h) = (r1.clone(), h1.clone());
-                            this.edit_model(cx, move |m| m.move_handle(&r, side, &h, -1));
+                            this.edit(cx, move |m| m.move_handle(&r, side, &h, -1));
                         }))
                         .child(button(SharedString::from(format!("down-{}", handle.id)), Icon::new(IconName::ArrowDown).size(px(14.0)), cx, move |this, cx| {
                             let (r, h) = (r2.clone(), h2.clone());
-                            this.edit_model(cx, move |m| m.move_handle(&r, side, &h, 1));
+                            this.edit(cx, move |m| m.move_handle(&r, side, &h, 1));
                         }))
                         .child(button(SharedString::from(format!("del-{}", handle.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
                             let (r, h) = (r3.clone(), h3.clone());
-                            this.edit_model(cx, move |m| m.remove_handle(&r, side, &h));
+                            this.edit(cx, move |m| m.remove_handle(&r, side, &h));
                         }))
                     });
             section = section.child(handle_row).children(details);
@@ -722,7 +722,7 @@ fn group_settings(
                                 None,
                                 on_editor(&w, move |e, cx| {
                                     let (r, variants) = (r.clone(), variants.clone());
-                                    e.edit_model(cx, move |m| {
+                                    e.edit(cx, move |m| {
                                         m.add_handle(&r, side, HandleType::Fixed(ty), Some(variants), None);
                                     });
                                 }),
@@ -736,7 +736,7 @@ fn group_settings(
                                 None,
                                 on_editor(&w, move |e, cx| {
                                     let r = r2.clone();
-                                    e.edit_model(cx, move |m| {
+                                    e.edit(cx, move |m| {
                                         m.add_handle(&r, side, HandleType::inferred(), None, None);
                                     });
                                 }),
@@ -754,7 +754,7 @@ fn group_settings(
                             inferred: None,
                             on_pick: Rc::new(move |ty, e, cx| {
                                 let r = r.clone();
-                                e.edit_model(cx, move |m| {
+                                e.edit(cx, move |m| {
                                     m.add_handle(&r, side, HandleType::Fixed(ty), None, None);
                                 });
                             }),
@@ -810,7 +810,7 @@ fn zone_settings(
             |cx| NumberField::new(f64::from(DEFAULT_MAX_ITERATIONS), cx).integer().min(0.0).max(f64::from(MAX_ITERATIONS)),
             Rc::new(move |this, value, cx| {
                 let id = id.clone();
-                this.edit_model(cx, move |m| m.set_zone_max_iterations(&id, value as u32));
+                this.edit(cx, move |m| m.set_zone_max_iterations(&id, value as u32));
             }),
         );
         body = body.child(
@@ -831,7 +831,7 @@ fn zone_settings(
             let (zone, id) = (zone.to_owned(), item.id.clone());
             Rc::new(move |this, text, cx| {
                 let (zone, id) = (zone.clone(), id.clone());
-                this.edit_model(cx, move |m| {
+                this.edit(cx, move |m| {
                     m.rename_zone_item(&zone, &id, &text);
                 });
             })
@@ -853,7 +853,7 @@ fn zone_settings(
                     Some(ty.is_inferred()),
                     on_editor(&w, move |e, cx| {
                         let (z, iid) = (z.clone(), iid.clone());
-                        e.edit_model(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::inferred()));
+                        e.edit(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::inferred()));
                     }),
                 )
                 .detail("Initial value")
@@ -865,7 +865,7 @@ fn zone_settings(
                     Some(ty.variable() == Some(v.id.as_str())),
                     on_editor(&w, move |e, cx| {
                         let (z, iid, vid) = (z.clone(), iid.clone(), vid.clone());
-                        e.edit_model(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::Variable { variable: vid }));
+                        e.edit(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::Variable { variable: vid }));
                     }),
                 );
                 if i == 0 {
@@ -885,7 +885,7 @@ fn zone_settings(
                     inferred: None,
                     on_pick: Rc::new(move |t, e, cx| {
                         let (z, iid) = (z.clone(), iid.clone());
-                        e.edit_model(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::Fixed(t)));
+                        e.edit(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::Fixed(t)));
                     }),
                     on_reset: None,
                     extra,
@@ -916,7 +916,7 @@ fn zone_settings(
                             Some(current.is_none()),
                             on_editor(&w, move |e, cx| {
                                 let (z, iid) = (z.clone(), iid.clone());
-                                e.edit_model(cx, move |m| m.set_zone_item_format(&z, &iid, None));
+                                e.edit(cx, move |m| m.set_zone_item_format(&z, &iid, None));
                             }),
                         )
                     }];
@@ -927,7 +927,7 @@ fn zone_settings(
                             Some(current.as_deref() == Some(format.id())),
                             on_editor(&w, move |e, cx| {
                                 let (z, iid) = (z.clone(), iid.clone());
-                                e.edit_model(cx, move |m| m.set_zone_item_format(&z, &iid, Some(format)));
+                                e.edit(cx, move |m| m.set_zone_item_format(&z, &iid, Some(format)));
                             }),
                         ));
                     }
@@ -957,7 +957,7 @@ fn zone_settings(
                                 Some(size.as_deref() == mode.map(ItemSizeMode::id)),
                                 on_editor(&w, move |e, cx| {
                                     let (z, iid) = (z.clone(), iid.clone());
-                                    e.edit_model(cx, move |m| m.set_zone_item_size(&z, &iid, mode));
+                                    e.edit(cx, move |m| m.set_zone_item_size(&z, &iid, mode));
                                 }),
                             )
                         })
@@ -972,15 +972,15 @@ fn zone_settings(
         section = section.child(row.when(!locked, |d| {
             d.child(button(SharedString::from(format!("iup-{}", item.id)), Icon::new(IconName::ArrowUp).size(px(14.0)), cx, move |this, cx| {
                 let (z, i) = (z1.clone(), i1.clone());
-                this.edit_model(cx, move |m| m.move_zone_item(&z, &i, -1));
+                this.edit(cx, move |m| m.move_zone_item(&z, &i, -1));
             }))
             .child(button(SharedString::from(format!("idown-{}", item.id)), Icon::new(IconName::ArrowDown).size(px(14.0)), cx, move |this, cx| {
                 let (z, i) = (z2.clone(), i2.clone());
-                this.edit_model(cx, move |m| m.move_zone_item(&z, &i, 1));
+                this.edit(cx, move |m| m.move_zone_item(&z, &i, 1));
             }))
             .child(button(SharedString::from(format!("idel-{}", item.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
                 let (z, i) = (z3.clone(), i3.clone());
-                this.edit_model(cx, move |m| m.remove_zone_item(&z, &i));
+                this.edit(cx, move |m| m.remove_zone_item(&z, &i));
             }))
         }));
     }
@@ -993,7 +993,7 @@ fn zone_settings(
                 None,
                 on_editor(&w, move |e, cx| {
                     let z = z2.clone();
-                    e.edit_model(cx, move |m| {
+                    e.edit(cx, move |m| {
                         m.add_zone_item(&z, HandleType::inferred(), None);
                     });
                 }),
@@ -1007,7 +1007,7 @@ fn zone_settings(
                     inferred: None,
                     on_pick: Rc::new(move |t, e, cx| {
                         let z = z.clone();
-                        e.edit_model(cx, move |m| {
+                        e.edit(cx, move |m| {
                             m.add_zone_item(&z, HandleType::Fixed(t), None);
                         });
                     }),

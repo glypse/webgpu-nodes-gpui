@@ -37,11 +37,10 @@ pub fn render_color(editor: &Editor, cx: &mut Context<Editor>) -> Option<AnyElem
             cx,
             popup.at,
             move |_, cx| {
-                weak.update(cx, |e, cx| {
+                super::update_editor(&weak, cx, |e, cx| {
                     e.color_popup = None;
                     cx.notify();
-                })
-                .ok();
+                });
             },
             popup.picker.clone(),
         )
@@ -71,7 +70,7 @@ fn small_button(
         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
             cx.stop_propagation();
             if enabled {
-                weak.update(cx, |e, cx| on_click(e, cx)).ok();
+                super::update_editor(&weak, cx, |e, cx| on_click(e, cx));
             }
         })
         .child(label)
@@ -129,11 +128,10 @@ pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context
             cx,
             at,
             move |_, cx| {
-                weak.update(cx, |e, cx| {
+                super::update_editor(&weak, cx, |e, cx| {
                     e.sockets = None;
                     cx.notify();
-                })
-                .ok();
+                });
             },
             panel,
         )
@@ -199,11 +197,10 @@ fn socket_row(
             cx.stop_propagation();
             if !locked {
                 let (at, picker) = (e.position, picker.clone());
-                weak.update(cx, |ed, cx| {
+                super::update_editor(&weak, cx, |ed, cx| {
                     let items = super::type_picker::items(&cx.entity().downgrade(), picker);
                     ed.open_list(at, items, cx);
-                })
-                .ok();
+                });
             }
         })
         .child(socket.ty.id());

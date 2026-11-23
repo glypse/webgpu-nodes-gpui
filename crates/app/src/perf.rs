@@ -114,7 +114,7 @@ mod tests {
             e.model().root().nodes.iter().find(|n| n.definition_ref().is_some_and(|r| r.starts_with("std-fractal-voronoi"))).map(|n| n.id.clone())
         });
         let group = group.expect("a fractal voronoi group");
-        timed("no-op edit (sync + regenerate)", cx, |cx| editor.update(cx, |e, cx| e.edit_model(cx, |_| {})));
+        timed("no-op edit (sync + regenerate)", cx, |cx| editor.update(cx, |e, cx| e.edit(cx, |_| {})));
         timed("frame without sheet", cx, |cx| editor.update(cx, |_, cx| cx.notify()));
         timed("clone", cx, |cx| editor.update(cx, |e, cx| e.clone_group(&group, cx)));
         timed("enter", cx, |cx| editor.update(cx, |e, cx| e.enter_group(&group, cx)));
@@ -148,10 +148,10 @@ mod tests {
         eprintln!("30 frames while playing with the sheet open: {:?}", t.elapsed());
         let _ = before;
         cx.update(|window, cx| playback.update(cx, |p, cx| p.toggle(window, cx)));
-        timed("no-op edit with sheet", cx, |cx| editor.update(cx, |e, cx| e.edit_model(cx, |_| {})));
+        timed("no-op edit with sheet", cx, |cx| editor.update(cx, |e, cx| e.edit(cx, |_| {})));
         timed("delete", cx, |cx| {
             editor.update(cx, |e, cx| {
-                e.edit_model(cx, |m| {
+                e.edit(cx, |m| {
                     m.delete_nodes(std::slice::from_ref(&group), &[]);
                 })
             })

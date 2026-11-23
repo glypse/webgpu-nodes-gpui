@@ -65,7 +65,7 @@ pub fn header(view: &FrameView, props: &NodeProps, ed: &WeakEntity<Editor>, cx: 
         .on_mouse_down(MouseButton::Left, move |event, _, cx| {
             if event.click_count == 2 {
                 cx.stop_propagation();
-                editor.update(cx, |e, cx| e.open_sheet(&id, cx)).ok();
+                super::update_editor(&editor, cx, |e, cx| e.open_sheet(&id, cx));
             }
         })
         .child(
@@ -241,17 +241,12 @@ pub fn frame_at(
     point: GraphPoint,
     excluded: &HashSet<String>,
 ) -> Option<String> {
-    let mut found: Option<(&String, usize)> = None;
-    let mut ids: Vec<&String> = boxes.keys().collect();
-    ids.sort();
-    for id in ids {
-        let depth = analysis.frames.get(id).map_or(0, |f| f.depth);
-        if excluded.contains(id) || !boxes[id].contains(point) || found.is_some_and(|(_, d)| d >= depth) {
-            continue;
-        }
-        found = Some((id, depth));
-    }
-    found.map(|(id, _)| id.clone())
+    let depth = |id: &String| analysis.frames.get(id).map_or(0, |f| f.depth);
+    boxes
+        .iter()
+        .filter(|(id, bounds)| !excluded.contains(*id) && bounds.contains(point))
+        .max_by(|(a, _), (b, _)| depth(a).cmp(&depth(b)).then_with(|| b.cmp(a)))
+        .map(|(id, _)| id.clone())
 }
 
 /// The frame each node of `node_ids` (but those in frames among them) is
@@ -284,42 +279,44 @@ pub fn drop_targets(
 /// A back layer painting the frames' boxes, outermost first.
 pub fn layer(flow: WeakEntity<Flow>, snapshot: Rc<Snapshot>, drag: SharedDrag) -> Layer {
     Rc::new(move |ctx: &LayerContext, window, cx| {
-        let Some(flow) = flow.upgrade() else { return };
-        let flow = flow.read(cx);
-        let (loose, drop_frame) = match &*drag.borrow() {
-            Some(d) => (d.loose.clone(), d.drop_frame.clone()),
-            None => (HashSet::new(), None),
-        };
-        let (boxes, analysis) = boxes(&snapshot, flow, &loose);
-        let mut ordered: Vec<(&String, &Bounds)> = boxes.iter().collect();
-        ordered.sort_by_key(|(id, _)| (analysis.frames.get(*id).map_or(0, |f| f.depth), (*id).clone()));
-        let theme = cx.theme().clone();
-        let zoom = ctx.viewport.zoom;
-        for (id, b) in ordered {
-            let tint = snapshot.looks.get(id).and_then(|l| l.tint);
-            let color = tint_color(tint, &theme);
-            let dropping = drop_frame.as_ref() == Some(id);
-            let selected = flow.nodes().iter().any(|n| n.selected && n.id.as_ref() == id.as_str());
-            let bounds = gpui::Bounds {
-                origin: ctx.to_window(Xy::new(b.x, b.y)),
-                size: size(px(b.width * zoom), px(b.height * zoom)),
+        guard::guard("frames layer", || {
+            let Some(flow) = flow.upgrade() else { return };
+            let flow = flow.read(cx);
+            let (loose, drop_frame) = match &*drag.borrow() {
+                Some(d) => (d.loose.clone(), d.drop_frame.clone()),
+                None => (HashSet::new(), None),
             };
-            let (background, border, style) = if dropping {
-                (color.opacity(0.2), color, BorderStyle::Dashed)
-            } else if selected {
-                (color.opacity(0.1), theme.colors.primary, BorderStyle::Solid)
-            } else {
-                (color.opacity(0.1), color.opacity(0.35), BorderStyle::Solid)
-            };
-            window.paint_quad(gpui::quad(
-                bounds,
-                theme.radius.md * zoom,
-                background,
-                px(1.0),
-                border,
-                style,
-            ));
-        }
+            let (boxes, analysis) = boxes(&snapshot, flow, &loose);
+            let mut ordered: Vec<(&String, &Bounds)> = boxes.iter().collect();
+            ordered.sort_by_key(|(id, _)| (analysis.frames.get(*id).map_or(0, |f| f.depth), (*id).clone()));
+            let theme = cx.theme().clone();
+            let zoom = ctx.viewport.zoom;
+            for (id, b) in ordered {
+                let tint = snapshot.looks.get(id).and_then(|l| l.tint);
+                let color = tint_color(tint, &theme);
+                let dropping = drop_frame.as_ref() == Some(id);
+                let selected = flow.nodes().iter().any(|n| n.selected && n.id.as_ref() == id.as_str());
+                let bounds = gpui::Bounds {
+                    origin: ctx.to_window(Xy::new(b.x, b.y)),
+                    size: size(px(b.width * zoom), px(b.height * zoom)),
+                };
+                let (background, border, style) = if dropping {
+                    (color.opacity(0.2), color, BorderStyle::Dashed)
+                } else if selected {
+                    (color.opacity(0.1), theme.colors.primary, BorderStyle::Solid)
+                } else {
+                    (color.opacity(0.1), color.opacity(0.35), BorderStyle::Solid)
+                };
+                window.paint_quad(gpui::quad(
+                    bounds,
+                    theme.radius.md * zoom,
+                    background,
+                    px(1.0),
+                    border,
+                    style,
+                ));
+            }
+        });
     })
 }
 

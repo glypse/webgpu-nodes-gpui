@@ -67,7 +67,7 @@ pub fn row(
                 format.id(),
                 Some(format.id() == row.format),
                 Rc::new(move |_, cx| {
-                    ed.update(cx, |e, cx| e.set_render_item_format(&node, &item, format, cx)).ok();
+                    super::update_editor(&ed, cx, |e, cx| e.set_render_item_format(&node, &item, format, cx));
                 }),
             )
         })
@@ -96,7 +96,7 @@ pub fn row(
             cx,
             move |at, _, cx| {
                 let items = items.clone();
-                open.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                super::update_editor(&open, cx, |e, cx| e.open_list(at, items, cx));
             },
         )))
         .child(icon_button(
@@ -106,7 +106,7 @@ pub fn row(
             z,
             cx,
             move |_, cx| {
-                remove.update(cx, |e, cx| e.remove_render_item(&node_id, &item_id, cx)).ok();
+                super::update_editor(&remove, cx, |e, cx| e.remove_render_item(&node_id, &item_id, cx));
             },
         ))
 }
@@ -120,7 +120,7 @@ pub fn add(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) 
         locked,
         cx,
         move |_, _, cx| {
-            ed.update(cx, |e, cx| e.add_render_item(&node_id, cx)).ok();
+            super::update_editor(&ed, cx, |e, cx| e.add_render_item(&node_id, cx));
         },
     ))
 }
@@ -128,6 +128,6 @@ pub fn add(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) 
 pub fn sockets_button(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) -> impl IntoElement {
     let (ed, node_id) = (ed.clone(), node.to_owned());
     icon_button(SharedString::from(format!("sockets-{node}")), Icon::new(IconName::Plugs).size(px(14.0 * z)), !locked, z, cx, move |at, cx| {
-        ed.update(cx, |e, cx| e.open_sockets(&node_id, at, cx)).ok();
+        super::update_editor(&ed, cx, |e, cx| e.open_sockets(&node_id, at, cx));
     })
 }

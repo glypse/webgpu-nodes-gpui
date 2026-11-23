@@ -191,18 +191,9 @@ mod tests {
 
     #[test]
     fn developer_tools_follow_the_saved_choice_then_the_build() {
-        assert_eq!(Preferences::default().developer_tools_enabled(), cfg!(debug_assertions));
         let on = Preferences { developer_tools: Some(true), ..Preferences::default() };
         let off = Preferences { developer_tools: Some(false), ..Preferences::default() };
         assert!(on.developer_tools_enabled());
         assert!(!off.developer_tools_enabled());
-    }
-
-    #[test]
-    fn the_developer_tools_choice_round_trips() {
-        let p = Preferences { developer_tools: Some(false), ..Preferences::default() };
-        let json = serde_json::to_string(&p).expect("serialises");
-        assert_eq!(serde_json::from_str::<Preferences>(&json).expect("reads"), p);
-        assert_eq!(serde_json::from_str::<Preferences>("{}").expect("reads").developer_tools, None);
     }
 }

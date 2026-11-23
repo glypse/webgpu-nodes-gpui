@@ -44,7 +44,7 @@ Purpose: the gpui window app (node editor, preview, timeline, code view, propert
 - `--screenshot` exit status is non-zero if the PNG wasn't written.
 
 ## Adding common things
-- Action: declare in the module's `actions!`, bind a key if any, handle with `safe_listener` on the owning view, add a `MenuItem::action` in `main.rs::menus()`, and extend the label test in `main.rs` if the item is in a checked list.
+- Action: declare in the module's `actions!`, bind a key if any, handle with `safe_listener` on the owning view, add a `MenuItem::action` in `main.rs::menus()`, and extend the menu test in `main.rs` if the item is in a checked list.
 - Screen panel/area: add a `Panel` variant (`shell.rs`, `impl screen::Editor` `all()`), handle it in the `ScreenView::new` factory in `Shell::new`, and add its case to `layout.rs::editor_json`.
 - Properties section: `properties.rs` (`Section`, `SectionInfo`, `impl Render for PropertiesPanel`). Saved project settings go through `Editor::update_settings` and `EditorEvent::Settings`.
 - User preference: field on `preferences::Preferences` and a control in `preferences_window.rs`.

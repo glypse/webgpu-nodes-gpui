@@ -222,7 +222,7 @@ pub fn color_binding(model: &GraphModel, node: &GraphNode) -> Option<ColorBindin
     let current = enum_value(stored(node, &descriptor.default_data, mode), &variants)?;
     let binding = modes.get(&current.to_string())?;
     let linked = linked_inputs(model, &node.id);
-    let read = |c: &String| stored(node, &descriptor.default_data, c).map_or(0.0, |v| v.component(0));
+    let read = |c: &str| stored(node, &descriptor.default_data, c).map_or(0.0, |v| v.component(0));
     let [x, y, z] = &binding.components;
     Some(ColorBinding {
         mode: ColorMode::parse(&binding.space).unwrap_or(ColorMode::Rgb),
@@ -257,7 +257,7 @@ pub fn vector_of(color: Rgba) -> InputValue {
 impl Widgets {
     /// Entities of the nodes no longer in the document are dropped.
     pub fn retain(&mut self, nodes: &BTreeSet<String>) {
-        let present = |key: &String| nodes.contains(key.split('/').next().unwrap_or(key));
+        let present = |key: &str| nodes.contains(key.split('/').next().unwrap_or(key));
         self.curves.retain(|k, _| present(k));
         self.ramps.retain(|k, _| present(k));
         self.wheels.retain(|k, _| present(k));
@@ -522,7 +522,7 @@ pub fn render(
                     .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                         cx.stop_propagation();
                         if enabled {
-                            ed.update(cx, |e, cx| e.set_cases(&node, next, cx)).ok();
+                            super::update_editor(&ed, cx, |e, cx| e.set_cases(&node, next, cx));
                         }
                     })
                     .child(Icon::new(label).size(px(12.0 * z)))
@@ -677,7 +677,7 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
             let ed = ed.clone();
             move |at, _, cx| {
                 let items = choices.clone();
-                ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                super::update_editor(&ed, cx, |e, cx| e.open_list(at, items, cx));
             }
         },
     );
@@ -696,7 +696,7 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
                 .stack(Stack::Single)
                 .readonly(locked)
                 .on_change(move |v, edit, _, cx| {
-                    ed.update(cx, |e, cx| e.set_video_playback(&node, change(v), edit, cx)).ok();
+                    super::update_editor(&ed, cx, |e, cx| e.set_video_playback(&node, change(v), edit, cx));
                 })
         };
         let end_items: Vec<ListItem> = VIDEO_ENDS
@@ -707,10 +707,9 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
                     end_label(end),
                     Some(end == playback.end),
                     Rc::new(move |_, cx| {
-                        ed.update(cx, |e, cx| {
+                        super::update_editor(&ed, cx, |e, cx| {
                             e.set_video_playback(&node, PlaybackChange { end: Some(end), ..Default::default() }, Edit::Commit, cx)
-                        })
-                        .ok();
+                        });
                     }),
                 )
             })
@@ -724,7 +723,7 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
             cx,
             move |at, _, cx| {
                 let items = end_items.clone();
-                end_ed.update(cx, |e, cx| e.open_list(at, items, cx)).ok();
+                super::update_editor(&end_ed, cx, |e, cx| e.open_list(at, items, cx));
             },
         );
         body = body
@@ -753,7 +752,7 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
 fn import_choice(ed: &WeakEntity<Editor>, node: &str) -> OnSelect {
     let (ed, node) = (ed.clone(), node.to_owned());
     Rc::new(move |window, cx| {
-        ed.update(cx, |e, cx| e.import_for_node(&node, window, cx)).ok();
+        super::update_editor(&ed, cx, |e, cx| e.import_for_node(&node, window, cx));
     })
 }
 
@@ -761,6 +760,6 @@ fn import_choice(ed: &WeakEntity<Editor>, node: &str) -> OnSelect {
 fn asset_choice(ed: &WeakEntity<Editor>, node: &str, asset: Option<String>) -> OnSelect {
     let (ed, node) = (ed.clone(), node.to_owned());
     Rc::new(move |_, cx| {
-        ed.update(cx, |e, cx| e.set_node_asset(&node, asset.as_deref(), cx)).ok();
+        super::update_editor(&ed, cx, |e, cx| e.set_node_asset(&node, asset.as_deref(), cx));
     })
 }

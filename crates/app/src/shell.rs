@@ -220,13 +220,21 @@ impl Shell {
         let mut layout = None;
         let mut stored_output = None;
         let opening = match start {
-            Start::Launch(requested) => requested.or_else(project::last).and_then(|last| match project::read(&last) {
-                Ok(loaded) => Some((last, loaded)),
-                Err(e) => {
-                    log::warn!("couldn't reopen {}: {e:#}", last.display());
-                    None
-                }
-            }),
+            Start::Launch(requested) => {
+                let remembered = requested.is_none();
+                requested.or_else(project::last).and_then(|last| match project::read(&last) {
+                    Ok(loaded) => Some((last, loaded)),
+                    Err(e) => {
+                        // Forgotten so an unreadable last project doesn't report on every launch.
+                        if remembered {
+                            project::remember(None);
+                        }
+                        let message = format!("Couldn't open {}", project::file_name(&last));
+                        Self::report(window, &message, &e, cx);
+                        None
+                    }
+                })
+            }
             Start::Blank => None,
             Start::Loaded(path, loaded) => {
                 project::remember(Some(&path));
@@ -247,140 +255,40 @@ impl Shell {
         playback.update(cx, |p, cx| {
             p.set_source(first, window, cx)
         });
-        cx.subscribe_in(&editor, window, {
-            let playback = playback.clone();
-            move |this, _, event: &EditorEvent, window, cx| {
-                if let EditorEvent::ExportGroup = event {
-                    guard::guard("export group", || this.export_selected_group(window, cx));
-                    return;
-                }
-                playback.update(cx, |p, cx| {
-                    guard::guard("playback update", || match event {
-                        EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
-                        EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
-                        EditorEvent::Settings(settings) => apply_settings(p, settings, window, cx),
-                        EditorEvent::Edited | EditorEvent::ExportGroup => {}
-                    })
-                });
-                this.refresh_title(window, cx);
-            }
-        })
-        .detach();
-
-        cx.subscribe_in(&playback, window, |this, playback, event: &PlaybackEvent, window, cx| {
-            let PlaybackEvent::Changed = event;
-            guard::guard("playback settings", || this.adopt_playback_settings(playback, cx));
-            // The menus show the focused window's playback.
-            if window.is_window_active() {
-                let playing = playback.read(cx).playing();
-                crate::set_playing(cx, playing);
-            }
-        })
-        .detach();
-        cx.observe_window_activation(window, |this, window, cx| {
-            if window.is_window_active() {
-                let playing = this.playback.read(cx).playing();
-                crate::set_playing(cx, playing);
-            }
-        })
-        .detach();
+        subscribe_editor(&editor, &playback, window, cx);
+        subscribe_playback(&playback, window, cx);
 
         let output = video_export::from_stored(stored_output.as_ref(), editor.read(cx).settings().timing.fps);
         let properties = cx.new(|cx| PropertiesPanel::new(editor.clone(), playback.clone(), output, cx));
-        cx.observe_in(&properties, window, |this, _, window, cx| this.refresh_title(window, cx)).detach();
+        cx.observe_in(&properties, window, |this, _, window, cx| {
+            guard::guard("properties title", || this.refresh_title(window, cx));
+        })
+        .detach();
         let views = Rc::new(RefCell::new(AreaViews { startup_zoom: zoom, ..Default::default() }));
         if let Some(layout) = &layout {
             views.borrow_mut().pending.extend(layout.graphs.iter().cloned());
         }
+        let sources = AreaSources { playback: playback.clone(), editor: editor.clone(), properties: properties.clone() };
         let screen = cx.new(|cx| {
-            let playback = playback.clone();
-            let editor = editor.clone();
             let views = views.clone();
-            let properties = properties.clone();
-            ScreenView::new(layout.map_or_else(default_screen, |l| l.screen), move |id, panel, window, cx| {
-                let mut views = views.borrow_mut();
-                match panel {
-                    Panel::Graph => {
-                        let area = match views.graphs.get(&id).cloned() {
-                            Some(area) => area,
-                            None => {
-                                let area = if views.primary_shown {
-                                    let share = editor.read(cx).share();
-                                    cx.new(|cx| Editor::another_area(share, window, cx))
-                                } else {
-                                    views.primary_shown = true;
-                                    editor.clone()
-                                };
-                                if let Some(view) = views.pending.remove(&id) {
-                                    area.update(cx, |e, cx| e.set_view(&view, cx));
-                                }
-                                if views.graphs.is_empty()
-                                    && let Some(zoom) = views.startup_zoom
-                                {
-                                    area.update(cx, |e, cx| e.fit_at_zoom(zoom, cx));
-                                }
-                                views.graphs.insert(id, area.clone());
-                                area
-                            }
-                        };
-                        let crumbs = views
-                            .breadcrumbs
-                            .entry(id)
-                            .or_insert_with(|| cx.new(|cx| Breadcrumbs::new(area.clone(), cx)))
-                            .clone();
-                        AreaContent { toolbar: Some(crumbs.into()), body: Some(area.into()) }
-                    }
-                    Panel::Preview => {
-                        let (area, toolbar) = views
-                            .previews
-                            .entry(id)
-                            .or_insert_with(|| preview::new_area(&playback, cx))
-                            .clone();
-                        AreaContent {
-                            toolbar: Some(toolbar.into()),
-                            body: Some(area.into()),
-                        }
-                    }
-                    Panel::Timeline => {
-                        let bar = views
-                            .timelines
-                            .entry(id)
-                            .or_insert_with(|| {
-                                cx.new(|cx| TimelineBar::new(playback.clone(), window, cx))
-                            })
-                            .clone();
-                        AreaContent { toolbar: Some(bar.into()), body: None }
-                    }
-                    Panel::Assets => {
-                        let panel = views
-                            .assets
-                            .entry(id)
-                            .or_insert_with(|| cx.new(|cx| AssetsPanel::new(editor.clone(), playback.clone(), window, cx)))
-                            .clone();
-                        AreaContent { toolbar: None, body: Some(panel.into()) }
-                    }
-                    Panel::Properties => AreaContent { toolbar: None, body: Some(properties.clone().into()) },
-                    Panel::Code => AreaContent {
-                        toolbar: None,
-                        body: Some(
-                            views
-                                .code
-                                .entry(id)
-                                .or_insert_with(|| code_view::new(&playback, cx))
-                                .clone()
-                                .into(),
-                        ),
-                    },
-                }
-            }, cx)
+            ScreenView::new(
+                layout.map_or_else(default_screen, |l| l.screen),
+                move |id, panel, window, cx| area_content(&views, &sources, id, panel, window, cx),
+                cx,
+            )
         });
         let id = cx.entity_id();
         let mut shell = Self { screen, playback, editor, properties, saved_output: output, views, path, confirming: false };
         shell.refresh_title(window, cx);
-        cx.on_release(move |_, cx| windows::owner_closed(id, cx)).detach();
+        cx.on_release(move |_, cx| {
+            guard::guard("owner closed", || windows::owner_closed(id, cx));
+        })
+        .detach();
         let shell_weak = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
-            shell_weak.update(cx, |this, cx| this.close_requested(window, cx)).unwrap_or(true)
+            guard::guard("window should close", || shell_weak.update(cx, |this, cx| this.close_requested(window, cx)))
+                .and_then(Result::ok)
+                .unwrap_or(true)
         });
         shell
     }
@@ -438,19 +346,21 @@ impl Shell {
     }
 
     /// The preview's size and the timeline's timing are project settings too: edits made there are kept.
+    /// Playback emits this on every drawn frame, so the settings are only written when they differ.
     fn adopt_playback_settings(&mut self, playback: &Entity<Playback>, cx: &mut Context<Self>) {
         let (resolution, timing) = {
             let p = playback.read(cx);
             (p.resolution, p.timing())
         };
-        let mut settings = self.editor.read(cx).settings();
+        let current = self.editor.read(cx).settings();
+        let mut settings = current;
         if !settings.canvas.follow_preview {
             settings.canvas.width = resolution.width;
             settings.canvas.height = resolution.height;
         }
         settings.timing.fps = timing.fps;
         settings.timing.realtime = timing.realtime;
-        if settings != self.editor.read(cx).settings() {
+        if settings != current {
             self.editor.update(cx, |e, cx| e.update_settings(settings, cx));
         }
     }
@@ -551,10 +461,12 @@ impl Shell {
         cx.spawn_in(window, async move |this, cx| {
             let discard = answer.await == Ok(0);
             this.update_in(cx, |this, window, cx| {
-                this.confirming = false;
-                if discard {
-                    guard::guard("discard changes", || then(this, window, cx));
-                }
+                guard::guard("discard changes", || {
+                    this.confirming = false;
+                    if discard {
+                        then(this, window, cx);
+                    }
+                });
             })
             .ok();
         })
@@ -602,14 +514,7 @@ impl Shell {
             prompt: None,
         });
         cx.spawn_in(window, async move |this, cx| {
-            let picked = match paths.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                Ok(Err(e)) => {
-                    log::error!("the open dialog failed: {e:#}");
-                    None
-                }
-                _ => None,
-            };
+            let picked = dialog_answer(paths.await, "open").and_then(|paths| paths.into_iter().next());
             if let Some(path) = picked {
                 this.update_in(cx, |this, window, cx| {
                     guard::guard("open project", || this.open_path(path, window, cx));
@@ -674,37 +579,30 @@ impl Shell {
         }
     }
 
-    /// Asks where to save the selected group's groups bundle, named after the group.
+    /// Asks where to save the selected group's groups bundle, named after the group, then encodes it.
     fn export_selected_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(reference) = self.editor.read(cx).selected_group_ref() else { return };
         let export = self.editor.read(cx).model().export_group(&reference);
         let Some(export) = export else { return };
         let files = self.playback.read(cx).asset_files().clone();
-        let bytes = match group_bundles::encode(&export, &files) {
-            Ok(bytes) => bytes,
-            Err(e) => return Self::report(window, "Couldn't export the group", &e, cx),
-        };
         let directory = dirs_home().unwrap_or_else(|| PathBuf::from("."));
         let suggested = format!("{}.{}", export.name, BundleKind::Groups.extension());
         let chosen = cx.prompt_for_new_path(&directory, Some(&suggested));
         cx.spawn_in(window, async move |this, cx| {
-            let picked = match chosen.await {
-                Ok(Ok(path)) => path,
-                Ok(Err(e)) => {
-                    log::error!("the save dialog failed: {e:#}");
-                    None
-                }
-                Err(_) => None,
-            };
-            if let Some(path) = picked {
-                this.update_in(cx, |_, window, cx| {
-                    if let Err(e) = group_bundles::write(&path, &bytes) {
-                        let message = format!("Couldn't save {}", project::file_name(&path));
-                        Self::report(window, &message, &e, cx);
+            let Some(path) = dialog_answer(chosen.await, "save") else { return };
+            let bytes = cx.background_executor().spawn(async move { group_bundles::encode(&export, &files) }).await;
+            this.update_in(cx, |_, window, cx| {
+                guard::guard("export group", || match bytes {
+                    Ok(bytes) => {
+                        if let Err(e) = group_bundles::write(&path, &bytes) {
+                            let message = format!("Couldn't save {}", project::file_name(&path));
+                            Self::report(window, &message, &e, cx);
+                        }
                     }
-                })
-                .ok();
-            }
+                    Err(e) => Self::report(window, "Couldn't export the group", &e, cx),
+                });
+            })
+            .ok();
         })
         .detach();
     }
@@ -723,15 +621,7 @@ impl Shell {
         );
         let chosen = cx.prompt_for_new_path(&directory, Some(&suggested));
         cx.spawn_in(window, async move |this, cx| {
-            let picked = match chosen.await {
-                Ok(Ok(path)) => path,
-                Ok(Err(e)) => {
-                    log::error!("the save dialog failed: {e:#}");
-                    None
-                }
-                Err(_) => None,
-            };
-            if let Some(path) = picked {
+            if let Some(path) = dialog_answer(chosen.await, "save") {
                 this.update_in(cx, |this, window, cx| {
                     guard::guard("save project", || this.save_to(path, window, cx));
                 })
@@ -781,7 +671,145 @@ fn apply_settings(
     }
 }
 
-/// The names of the assets whose files the project's bundle doesn't have, or that don't match them.
+/// The entities an area's content is built from.
+#[derive(Clone)]
+struct AreaSources {
+    playback: Entity<Playback>,
+    editor: Entity<Editor>,
+    properties: Entity<PropertiesPanel>,
+}
+
+/// Forwards the editor's changes to the playback, and keeps the title in step with them.
+fn subscribe_editor(editor: &Entity<Editor>, playback: &Entity<Playback>, window: &mut Window, cx: &mut Context<Shell>) {
+    let playback = playback.clone();
+    cx.subscribe_in(editor, window, move |this, _, event: &EditorEvent, window, cx| {
+        if let EditorEvent::ExportGroup = event {
+            guard::guard("export group", || this.export_selected_group(window, cx));
+            return;
+        }
+        playback.update(cx, |p, cx| {
+            guard::guard("playback update", || match event {
+                EditorEvent::Shader(shader) => p.set_source(shader.clone(), window, cx),
+                EditorEvent::Uniforms(values) => p.set_uniforms(values, window, cx),
+                EditorEvent::Settings(settings) => apply_settings(p, settings, window, cx),
+                EditorEvent::Edited | EditorEvent::ExportGroup => {}
+            })
+        });
+        guard::guard("editor title", || this.refresh_title(window, cx));
+    })
+    .detach();
+}
+
+/// Adopts the playback's settings and keeps the menus' Play or Pause item in step with it.
+fn subscribe_playback(playback: &Entity<Playback>, window: &mut Window, cx: &mut Context<Shell>) {
+    cx.subscribe_in(playback, window, |this, playback, event: &PlaybackEvent, window, cx| {
+        let PlaybackEvent::Changed = event;
+        guard::guard("playback settings", || this.adopt_playback_settings(playback, cx));
+        // The menus show the focused window's playback.
+        if window.is_window_active() {
+            let playing = playback.read(cx).playing();
+            crate::set_playing(cx, playing);
+        }
+    })
+    .detach();
+    cx.observe_window_activation(window, |this, window, cx| {
+        guard::guard("playback activation", || {
+            if window.is_window_active() {
+                let playing = this.playback.read(cx).playing();
+                crate::set_playing(cx, playing);
+            }
+        });
+    })
+    .detach();
+}
+
+/// Get-or-create for an area's view. `make` runs with the views unborrowed, since it may create
+/// entities that read them.
+fn cached<V: Clone>(
+    views: &RefCell<AreaViews>,
+    map: fn(&mut AreaViews) -> &mut HashMap<AreaId, V>,
+    id: AreaId,
+    make: impl FnOnce() -> V,
+) -> V {
+    if let Some(view) = map(&mut views.borrow_mut()).get(&id) {
+        return view.clone();
+    }
+    let view = make();
+    map(&mut views.borrow_mut()).insert(id, view.clone());
+    view
+}
+
+/// The content of an area showing `panel`, from the views it already has or new ones.
+fn area_content(
+    views: &RefCell<AreaViews>,
+    sources: &AreaSources,
+    id: AreaId,
+    panel: &Panel,
+    window: &mut Window,
+    cx: &mut App,
+) -> AreaContent {
+    let AreaSources { playback, editor, properties } = sources;
+    match panel {
+        Panel::Graph => {
+            let area = cached(views, |v| &mut v.graphs, id, || {
+                let primary_taken = std::mem::replace(&mut views.borrow_mut().primary_shown, true);
+                let area = if primary_taken {
+                    let share = editor.read(cx).share();
+                    cx.new(|cx| Editor::another_area(share, window, cx))
+                } else {
+                    editor.clone()
+                };
+                let pending = views.borrow_mut().pending.remove(&id);
+                if let Some(view) = pending {
+                    area.update(cx, |e, cx| e.set_view(&view, cx));
+                }
+                let first = views.borrow().graphs.is_empty();
+                let startup_zoom = views.borrow().startup_zoom;
+                if let (true, Some(zoom)) = (first, startup_zoom) {
+                    area.update(cx, |e, cx| e.fit_at_zoom(zoom, cx));
+                }
+                area
+            });
+            let crumbs = cached(views, |v| &mut v.breadcrumbs, id, || cx.new(|cx| Breadcrumbs::new(area.clone(), cx)));
+            AreaContent { toolbar: Some(crumbs.into()), body: Some(area.into()) }
+        }
+        Panel::Preview => {
+            let (area, toolbar) = cached(views, |v| &mut v.previews, id, || preview::new_area(playback, cx));
+            AreaContent { toolbar: Some(toolbar.into()), body: Some(area.into()) }
+        }
+        Panel::Timeline => {
+            let bar = cached(views, |v| &mut v.timelines, id, || {
+                cx.new(|cx| TimelineBar::new(playback.clone(), window, cx))
+            });
+            AreaContent { toolbar: Some(bar.into()), body: None }
+        }
+        Panel::Assets => {
+            let panel = cached(views, |v| &mut v.assets, id, || {
+                cx.new(|cx| AssetsPanel::new(editor.clone(), playback.clone(), window, cx))
+            });
+            AreaContent { toolbar: None, body: Some(panel.into()) }
+        }
+        Panel::Properties => AreaContent { toolbar: None, body: Some(properties.clone().into()) },
+        Panel::Code => {
+            let code = cached(views, |v| &mut v.code, id, || code_view::new(playback, cx));
+            AreaContent { toolbar: None, body: Some(code.into()) }
+        }
+    }
+}
+
+/// What a file dialog answered with. A cancelled dialog, or one that failed (which is logged), gives `None`.
+fn dialog_answer<T, C>(answer: Result<anyhow::Result<Option<T>>, C>, dialog: &str) -> Option<T> {
+    match answer {
+        Ok(Ok(picked)) => picked,
+        Ok(Err(e)) => {
+            log::error!("the {dialog} dialog failed: {e:#}");
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+/// The names of the assets the project's bundle has no file for.
 fn unusable_files(project: &GraphProject, files: &AssetFiles) -> Vec<String> {
     project
         .assets
@@ -826,98 +854,99 @@ fn dirs_home() -> Option<PathBuf> {
 }
 
 impl Render for Shell {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("shell", || {
-        preferences::apply(window, cx);
-        let has_preview = !self.views.borrow().previews.is_empty();
-        let theme = cx.theme();
-        div()
-            .key_context("Shell")
-            .size_full()
-            .bg(theme.colors.background)
-            .text_color(theme.colors.foreground)
-            .font_family(theme.font.clone())
-            .on_action(cx.safe_listener(|this, _: &TogglePlayback, window, cx| {
-                let playback = this.playback.clone();
-                playback.update(cx, |p, cx| p.toggle(window, cx));
-            }))
-            .on_action(cx.safe_listener(|this, _: &PreviousFrame, window, cx| {
-                this.playback.update(cx, |p, cx| p.step(-1, window, cx));
-            }))
-            .on_action(cx.safe_listener(|this, _: &NextFrame, window, cx| {
-                this.playback.update(cx, |p, cx| p.step(1, window, cx));
-            }))
-            .on_action(cx.safe_listener(|this, _: &GoToStart, window, cx| {
-                this.playback.update(cx, |p, cx| p.seek(0.0, window, cx));
-            }))
-            .on_action(cx.safe_listener(|this, _: &NewProject, window, cx| {
-                this.new_project(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &OpenProject, window, cx| {
-                this.open_project(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &SaveProject, window, cx| {
-                this.save_project(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &SaveProjectAs, window, cx| {
-                this.save_project_as(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &ImportMedia, window, cx| {
-                assets::pick_and_import(&this.editor, &this.playback, window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &ImportGroups, window, cx| {
-                group_bundles::pick_and_import(&this.editor, &this.playback, window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &ExportVideo, window, cx| {
-                this.export_video(window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, window, cx| {
-                this.reveal_properties(None, window, cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &NewOutputWindow, window, cx| {
-                this.new_output(window.window_handle(), cx);
-            }))
-            .on_action(cx.safe_listener(|this, _: &CloseWindow, window, cx| {
-                if this.close_requested(window, cx) {
-                    window.remove_window();
-                }
-            }))
-            .on_action(cx.safe_listener(|this, _: &ExportFrame, window, cx| {
-                preview::export_png(&this.playback, window, cx);
-            }))
-            .on_action(cx.safe_listener(|_, _: &ToggleMode, window, cx| {
-                preferences::toggle_mode(window, cx);
-            }))
-            .when(has_preview, |d| {
-                d.on_action(cx.safe_listener(|this, _: &ZoomPreviewIn, window, cx| {
-                    this.over_previews(window, cx, PreviewArea::zoom_in);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("shell", || {
+            preferences::apply(window, cx);
+            let has_preview = !self.views.borrow().previews.is_empty();
+            let theme = cx.theme();
+            div()
+                .key_context("Shell")
+                .size_full()
+                .bg(theme.colors.background)
+                .text_color(theme.colors.foreground)
+                .font_family(theme.font.clone())
+                .on_action(cx.safe_listener(|this, _: &TogglePlayback, window, cx| {
+                    let playback = this.playback.clone();
+                    playback.update(cx, |p, cx| p.toggle(window, cx));
                 }))
-                .on_action(cx.safe_listener(|this, _: &ZoomPreviewOut, window, cx| {
-                    this.over_previews(window, cx, PreviewArea::zoom_out);
+                .on_action(cx.safe_listener(|this, _: &PreviousFrame, window, cx| {
+                    this.playback.update(cx, |p, cx| p.step(-1, window, cx));
                 }))
-                .on_action(cx.safe_listener(|this, _: &FitPreview, window, cx| {
-                    this.over_previews(window, cx, PreviewArea::fit);
+                .on_action(cx.safe_listener(|this, _: &NextFrame, window, cx| {
+                    this.playback.update(cx, |p, cx| p.step(1, window, cx));
                 }))
-                .on_action(cx.safe_listener(|this, _: &ActualSizePreview, window, cx| {
-                    this.over_previews(window, cx, PreviewArea::actual_size);
+                .on_action(cx.safe_listener(|this, _: &GoToStart, window, cx| {
+                    this.playback.update(cx, |p, cx| p.seek(0.0, window, cx));
                 }))
-                .on_action(cx.safe_listener(|this, _: &MenuZoomPreviewIn, window, cx| {
-                    this.menu_previews(window, cx, PreviewArea::zoom_in);
+                .on_action(cx.safe_listener(|this, _: &NewProject, window, cx| {
+                    this.new_project(window, cx);
                 }))
-                .on_action(cx.safe_listener(|this, _: &MenuZoomPreviewOut, window, cx| {
-                    this.menu_previews(window, cx, PreviewArea::zoom_out);
+                .on_action(cx.safe_listener(|this, _: &OpenProject, window, cx| {
+                    this.open_project(window, cx);
                 }))
-                .on_action(cx.safe_listener(|this, _: &MenuFitPreview, window, cx| {
-                    this.menu_previews(window, cx, PreviewArea::fit);
+                .on_action(cx.safe_listener(|this, _: &SaveProject, window, cx| {
+                    this.save_project(window, cx);
                 }))
-                .on_action(cx.safe_listener(|this, _: &MenuActualSizePreview, window, cx| {
-                    this.menu_previews(window, cx, PreviewArea::actual_size);
+                .on_action(cx.safe_listener(|this, _: &SaveProjectAs, window, cx| {
+                    this.save_project_as(window, cx);
                 }))
-            })
-            .on_drop(cx.safe_listener(|this, paths: &ExternalPaths, window, cx| {
-                assets::import_paths(&this.editor, &this.playback, &paths.0, window, cx);
-            }))
-            .child(self.screen.clone().cached(StyleRefinement::default().size_full()))
-    })
+                .on_action(cx.safe_listener(|this, _: &ImportMedia, window, cx| {
+                    assets::pick_and_import(&this.editor, &this.playback, window, cx);
+                }))
+                .on_action(cx.safe_listener(|this, _: &ImportGroups, window, cx| {
+                    group_bundles::pick_and_import(&this.editor, &this.playback, window, cx);
+                }))
+                .on_action(cx.safe_listener(|this, _: &ExportVideo, window, cx| {
+                    this.export_video(window, cx);
+                }))
+                .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, window, cx| {
+                    this.reveal_properties(None, window, cx);
+                }))
+                .on_action(cx.safe_listener(|this, _: &NewOutputWindow, window, cx| {
+                    this.new_output(window.window_handle(), cx);
+                }))
+                .on_action(cx.safe_listener(|this, _: &CloseWindow, window, cx| {
+                    if this.close_requested(window, cx) {
+                        window.remove_window();
+                    }
+                }))
+                .on_action(cx.safe_listener(|this, _: &ExportFrame, window, cx| {
+                    preview::export_png(&this.playback, window, cx);
+                }))
+                .on_action(cx.safe_listener(|_, _: &ToggleMode, window, cx| {
+                    preferences::toggle_mode(window, cx);
+                }))
+                .when(has_preview, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &ZoomPreviewIn, window, cx| {
+                        this.over_previews(window, cx, PreviewArea::zoom_in);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &ZoomPreviewOut, window, cx| {
+                        this.over_previews(window, cx, PreviewArea::zoom_out);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &FitPreview, window, cx| {
+                        this.over_previews(window, cx, PreviewArea::fit);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &ActualSizePreview, window, cx| {
+                        this.over_previews(window, cx, PreviewArea::actual_size);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &MenuZoomPreviewIn, window, cx| {
+                        this.menu_previews(window, cx, PreviewArea::zoom_in);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &MenuZoomPreviewOut, window, cx| {
+                        this.menu_previews(window, cx, PreviewArea::zoom_out);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &MenuFitPreview, window, cx| {
+                        this.menu_previews(window, cx, PreviewArea::fit);
+                    }))
+                    .on_action(cx.safe_listener(|this, _: &MenuActualSizePreview, window, cx| {
+                        this.menu_previews(window, cx, PreviewArea::actual_size);
+                    }))
+                })
+                .on_drop(cx.safe_listener(|this, paths: &ExternalPaths, window, cx| {
+                    assets::import_paths(&this.editor, &this.playback, &paths.0, window, cx);
+                }))
+                .child(self.screen.clone().cached(StyleRefinement::default().size_full()))
+        })
     }
 }
 
@@ -943,8 +972,7 @@ mod tests {
             preferences::init(cx);
             init(cx);
         });
-        let missing = PathBuf::from("/nonexistent/untitled.wgnodes");
-        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(Some(missing), None, window, cx));
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::start(Start::Blank, None, window, cx));
         cx.run_until_parked();
         (shell, cx.clone())
     }

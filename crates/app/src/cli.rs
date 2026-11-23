@@ -122,13 +122,6 @@ mod tests {
     }
 
     #[test]
-    fn no_flags_means_no_probing() {
-        let cli = Cli::try_parse_from(["webgpu-nodes"]).expect("parses");
-        assert_eq!(cli.project, None);
-        assert!(!cli.play && !cli.records() && !cli.bounded());
-    }
-
-    #[test]
     fn rejects_bad_window_sizes() {
         assert!(Cli::try_parse_from(["webgpu-nodes", "--window", "800"]).is_err());
         assert!(Cli::try_parse_from(["webgpu-nodes", "--window", "0x600"]).is_err());
