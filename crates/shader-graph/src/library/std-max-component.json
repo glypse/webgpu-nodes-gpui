@@ -13,8 +13,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 421,
-					"y": 469
+					"x": 382,
+					"y": 461
 				},
 				"group": {
 					"definitionRef": "std-pad-vector@3e9980b37bd13b87",
@@ -29,7 +29,7 @@
 				},
 				"position": {
 					"x": 0,
-					"y": 71
+					"y": 67
 				}
 			},
 			{
@@ -37,8 +37,8 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 721,
-					"y": 349
+					"x": 642,
+					"y": 379
 				}
 			},
 			{
@@ -46,8 +46,8 @@
 				"type": "max",
 				"data": {},
 				"position": {
-					"x": 1131,
-					"y": 137
+					"x": 1013,
+					"y": 147
 				}
 			},
 			{
@@ -55,8 +55,8 @@
 				"type": "max",
 				"data": {},
 				"position": {
-					"x": 1131,
-					"y": 299
+					"x": 1013,
+					"y": 329
 				}
 			},
 			{
@@ -64,8 +64,8 @@
 				"type": "max",
 				"data": {},
 				"position": {
-					"x": 1131,
-					"y": 461
+					"x": 1013,
+					"y": 511
 				}
 			},
 			{
@@ -73,7 +73,7 @@
 				"type": "width-switch",
 				"data": {},
 				"position": {
-					"x": 1446,
+					"x": 1291,
 					"y": 0
 				}
 			},
@@ -84,8 +84,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 1746,
-					"y": 30
+					"x": 1551,
+					"y": 28
 				}
 			},
 			{
@@ -93,8 +93,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 300,
-					"y": 117
+					"x": 260,
+					"y": 127
 				}
 			},
 			{
@@ -102,8 +102,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1022,
-					"y": 405
+					"x": 903,
+					"y": 445
 				}
 			},
 			{
@@ -111,8 +111,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1022,
-					"y": 455
+					"x": 903,
+					"y": 495
 				}
 			},
 			{
@@ -120,8 +120,8 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 1022,
-					"y": 505
+					"x": 903,
+					"y": 545
 				}
 			}
 		],

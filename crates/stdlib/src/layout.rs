@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use shader_graph::graph::{GraphDocument, GraphModel, GraphProject, Point, ROOT_ID};
+use shader_graph::graph::{
+    GraphDocument, GraphModel, GraphNode, GraphProject, GroupRef, NODE_GROUP, Point, ROOT_ID,
+};
 use shader_graph::layout::LayoutOptions;
 use thiserror::Error;
 
@@ -117,6 +119,20 @@ fn editor_command(app: Option<&Path>) -> Command {
     }
 }
 
+/// A root holding a node of each group: the editor measures only the documents a group node leads to.
+fn root_leading_to(groups: &[BuiltGroup]) -> GraphDocument {
+    let mut root = GraphProject::default().root().clone();
+    for group in groups {
+        let mut node = GraphNode::new(NODE_GROUP, Point::default());
+        node.group = Some(GroupRef {
+            definition_ref: alias(group),
+            locked: false,
+        });
+        root.nodes.push(node);
+    }
+    root
+}
+
 /// Lay out the groups named in `ids` as the editor measures its nodes: write
 /// them as groups of a temporary project, have the editor lay the project
 /// out and read the positions back. `app` is a built editor, else it's run
@@ -133,7 +149,7 @@ pub fn layout_measured(
     let dir = tempfile::tempdir().map_err(io("making a temporary folder"))?;
     let (input, output): (PathBuf, PathBuf) =
         (dir.path().join("in.json"), dir.path().join("out.json"));
-    let project = project_of(groups, None);
+    let project = project_of(groups, Some(root_leading_to(groups)));
     std::fs::write(&input, serde_json::to_string(&project)?).map_err(io("writing the project"))?;
     let status = editor_command(app)
         .arg("--layout-project")
