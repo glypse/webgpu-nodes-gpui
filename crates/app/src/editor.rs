@@ -17,6 +17,7 @@ use gpui_flow::{
     FlowEvent, Id, Layers, Node, Viewport, Xy,
 };
 use handle::{ModelHandle, ModelMut};
+pub(crate) use measure::measure_documents;
 use shader_graph::UniformValue;
 use shader_graph::catalog::{
     self, AddMenuEntry, Pending, add_entry, add_entry_connected, add_menu_entries_with,
@@ -49,6 +50,7 @@ use crate::preferences;
 use crate::project::AssetFiles;
 
 mod handle;
+mod measure;
 mod widget_edits;
 
 gpui::actions!(
@@ -1311,7 +1313,9 @@ impl Editor {
 
     /// Edit › Layout selected nodes.
     pub(crate) fn layout_selected(&mut self, cx: &mut Context<Self>) {
-        self.layout(cx, false, |m, options| m.layout_selection(options));
+        self.layout(cx, false, Vec::new(), |m, options| {
+            m.layout_selection(options)
+        });
     }
 
     /// Edit › Layout document.
@@ -1319,7 +1323,7 @@ impl Editor {
         if self.model.borrow().is_locked() {
             return;
         }
-        self.layout(cx, true, |m, options| {
+        self.layout(cx, true, Vec::new(), |m, options| {
             let key = m.active_definition_ref();
             m.layout_document(&key, None, options)
         });
@@ -1327,26 +1331,41 @@ impl Editor {
 
     /// Edit › Layout graph.
     pub(crate) fn layout_graph(&mut self, cx: &mut Context<Self>) {
-        self.layout(cx, true, |m, options| m.layout_project(options));
+        let active = self.model.borrow().active_definition_ref();
+        let others: Vec<String> = self
+            .model
+            .borrow()
+            .layout_definitions()
+            .into_iter()
+            .filter(|key| *key != active)
+            .collect();
+        self.layout(cx, true, others, |m, options| m.layout_project(options));
     }
 
-    /// Runs a layout as one undo step, using what the flow drew of the active
-    /// document's nodes. Other documents are estimated.
+    /// Runs a layout as one undo step. The active document's nodes are measured as
+    /// the flow draws them; `others` are measured offscreen. A node that can't be
+    /// measured is estimated.
     fn layout(
         &mut self,
         cx: &mut Context<Self>,
         fit: bool,
+        others: Vec<String>,
         run: impl FnOnce(&mut GraphModel, &LayoutOptions<'_>) -> Result<bool, LayoutError>,
     ) {
         let active = self.model.borrow().active_definition_ref();
-        let drawn = self.drawn_geometry(cx);
-        let measure = |doc: &str, node: &GraphNode| {
-            if doc == active {
-                drawn.get(&node.id).cloned()
-            } else {
-                None
+        let mut measured = HashMap::new();
+        if !others.is_empty() {
+            let project = self.model.borrow().project().clone();
+            match measure_documents(&project, &others, cx) {
+                Ok(mut found) => {
+                    measured = std::mem::take(&mut found.geometry);
+                    found.close(cx);
+                }
+                Err(error) => log::error!("measuring the other documents failed: {error:#}"),
             }
-        };
+        }
+        measured.insert(active, self.drawn_geometry(cx));
+        let measure = |doc: &str, node: &GraphNode| measured.get(doc)?.get(&node.id).cloned();
         let options = LayoutOptions {
             measure: Some(&measure),
             ..Default::default()
@@ -1367,7 +1386,7 @@ impl Editor {
     }
 
     /// Each node of the flow's active document as drawn: its size and the
-    /// vertical offset of each handle's centre from its top.
+    /// vertical offset of each handle's centre from its top, handles top to bottom.
     fn drawn_geometry(&self, cx: &App) -> HashMap<String, NodeGeometry> {
         let flow = self.flow.read(cx);
         flow.nodes()
@@ -1381,6 +1400,11 @@ impl Editor {
                         gpui_flow::HandleType::Target => inputs.push(entry),
                         gpui_flow::HandleType::Source => outputs.push(entry),
                     }
+                }
+                // The flow keeps handles in a hash map, so their drawn order changes between
+                // runs; top to bottom is the order a layout's ports need, and the estimate's.
+                for handles in [&mut inputs, &mut outputs] {
+                    handles.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
                 }
                 Some((
                     n.id.to_string(),
