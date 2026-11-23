@@ -37,11 +37,9 @@ fn lattice_gradient_body(g: &GroupBuilder<'_>) {
     let plane = g.frame(
         Frame::new("2D").note("A direction at a random angle."),
         || {
-            g.vec(
-                WgslType::Vec2f,
-                (g.op("cos", turn(x)), g.op("sin", turn(x))),
-            )
-            .first()
+            let angle = turn(x);
+            g.vec(WgslType::Vec2f, (g.op("cos", angle), g.op("sin", angle)))
+                .first()
         },
     );
     let space = g.frame(
@@ -93,15 +91,17 @@ fn lattice_gradient_body(g: &GroupBuilder<'_>) {
             "A direction spread evenly over the 4D sphere: two circles\nwhose radii share the length (r₁² + r₂² = 1) at random.",
         ),
         || {
+            let phi = turn(y);
+            let psi = turn(z);
             let r1 = g.op("sqrt", x).first();
             let r2 = g.op("sqrt", g.op("sub", (1.0, x))).first();
             g.vec(
                 WgslType::Vec4f,
                 (
-                    g.op("mul", (r1, g.op("cos", turn(y)))),
-                    g.op("mul", (r1, g.op("sin", turn(y)))),
-                    g.op("mul", (r2, g.op("cos", turn(z)))),
-                    g.op("mul", (r2, g.op("sin", turn(z)))),
+                    g.op("mul", (r1, g.op("cos", phi))),
+                    g.op("mul", (r1, g.op("sin", phi))),
+                    g.op("mul", (r2, g.op("cos", psi))),
+                    g.op("mul", (r2, g.op("sin", psi))),
                 ),
             )
             .first()
@@ -170,6 +170,8 @@ pub enum LatticeCopy {
 /// `seed` offset for the lattice copy `copy`.
 pub fn copy_seed(g: &GroupBuilder<'_>, seed: Ref, copy: LatticeCopy) -> Ref {
     let salt = match copy {
+        // Adding zero leaves the seed as it is.
+        LatticeCopy::Index(0) => return seed,
         LatticeCopy::Index(index) => g
             .constant(WgslType::I32, index as f64 * LATTICE_SALT)
             .first(),

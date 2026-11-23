@@ -5,7 +5,7 @@
 	"category": "texture",
 	"section": ["Helpers", "OpenSimplex"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-pad-vector@3e9980b37bd13b87", "std-opensimplex-noise@e5e358270e353340"],
+	"dependencies": ["std-pad-vector@3e9980b37bd13b87", "std-opensimplex-noise@1ee2b64d27ed4296"],
 	"definition": {
 		"nodes": [
 			{
@@ -190,7 +190,7 @@
 					"y": 971
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-noise@e5e358270e353340",
+					"definitionRef": "std-opensimplex-noise@1ee2b64d27ed4296",
 					"locked": true
 				},
 				"frame": "214a6600-4129-4a97-8dc7-87b0361938a3"
@@ -238,7 +238,7 @@
 					"y": 1374
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-noise@e5e358270e353340",
+					"definitionRef": "std-opensimplex-noise@1ee2b64d27ed4296",
 					"locked": true
 				},
 				"frame": "214a6600-4129-4a97-8dc7-87b0361938a3"
@@ -286,7 +286,7 @@
 					"y": 1681
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-noise@e5e358270e353340",
+					"definitionRef": "std-opensimplex-noise@1ee2b64d27ed4296",
 					"locked": true
 				},
 				"frame": "214a6600-4129-4a97-8dc7-87b0361938a3"
@@ -334,7 +334,7 @@
 					"y": 1987
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-noise@e5e358270e353340",
+					"definitionRef": "std-opensimplex-noise@1ee2b64d27ed4296",
 					"locked": true
 				},
 				"frame": "214a6600-4129-4a97-8dc7-87b0361938a3"

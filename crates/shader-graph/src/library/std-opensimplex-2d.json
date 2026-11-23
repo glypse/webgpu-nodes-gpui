@@ -5,7 +5,7 @@
 	"category": "texture",
 	"section": ["Helpers", "OpenSimplex"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-simplex-kernel@20cd4f2ddd32139c"],
+	"dependencies": ["std-simplex-kernel@b8cde54060c8bc39"],
 	"definition": {
 		"nodes": [
 			{
@@ -294,7 +294,7 @@
 					"y": 1094
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "8113ffb3-06f2-4ffc-9ea5-2b3e06156634"
@@ -386,7 +386,7 @@
 					"y": 1828
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "8113ffb3-06f2-4ffc-9ea5-2b3e06156634"
@@ -478,7 +478,7 @@
 					"y": 1528
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "8113ffb3-06f2-4ffc-9ea5-2b3e06156634"
@@ -1006,7 +1006,7 @@
 					"y": 6321
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "73f63dc2-ccbc-4015-8279-201438f14ca9"
@@ -1098,7 +1098,7 @@
 					"y": 4276
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "73f63dc2-ccbc-4015-8279-201438f14ca9"
@@ -1190,7 +1190,7 @@
 					"y": 3791
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "73f63dc2-ccbc-4015-8279-201438f14ca9"
@@ -1282,7 +1282,7 @@
 					"y": 2995
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "73f63dc2-ccbc-4015-8279-201438f14ca9"

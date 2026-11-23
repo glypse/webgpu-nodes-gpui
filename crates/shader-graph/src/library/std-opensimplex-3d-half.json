@@ -5,7 +5,7 @@
 	"category": "texture",
 	"section": ["Helpers", "OpenSimplex"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-simplex-kernel@20cd4f2ddd32139c"],
+	"dependencies": ["std-simplex-kernel@b8cde54060c8bc39"],
 	"definition": {
 		"nodes": [
 			{
@@ -169,7 +169,7 @@
 					"y": 1045
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "ef1b6007-817f-4366-8d7f-e6f076489c21"
@@ -197,7 +197,7 @@
 					"y": 303
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "ef1b6007-817f-4366-8d7f-e6f076489c21"
@@ -787,7 +787,7 @@
 					"y": 4152
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "276f7e1e-7581-4535-8d5e-ae4f6c2968ba"
@@ -815,7 +815,7 @@
 					"y": 1911
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "276f7e1e-7581-4535-8d5e-ae4f6c2968ba"
@@ -843,7 +843,7 @@
 					"y": 3181
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "276f7e1e-7581-4535-8d5e-ae4f6c2968ba"
@@ -871,7 +871,7 @@
 					"y": 2791
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "276f7e1e-7581-4535-8d5e-ae4f6c2968ba"

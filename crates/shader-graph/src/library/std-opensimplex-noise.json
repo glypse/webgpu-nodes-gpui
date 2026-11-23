@@ -5,7 +5,7 @@
 	"category": "texture",
 	"section": ["Helpers", "OpenSimplex"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-noise-coordinates@e40ba35d8573e4af", "std-opensimplex-orientation@deec5f8b23f973f7", "std-gradient-noise-1d@3a0ecf1c1661561d", "std-opensimplex-2d@0936b4b07c6260b0", "std-opensimplex-3d@41462e40e859b0f9", "std-opensimplex-4d@a5c2d02295015e74"],
+	"dependencies": ["std-noise-coordinates@e40ba35d8573e4af", "std-opensimplex-orientation@deec5f8b23f973f7", "std-gradient-noise-1d@972c9e7aa1ecdbee", "std-opensimplex-2d@1193ff85f92e5933", "std-opensimplex-3d@39b9a3bc63557e13", "std-opensimplex-4d@7e3194b84551e34c"],
 	"definition": {
 		"nodes": [
 			{
@@ -66,7 +66,7 @@
 					"y": 216
 				},
 				"group": {
-					"definitionRef": "std-gradient-noise-1d@3a0ecf1c1661561d",
+					"definitionRef": "std-gradient-noise-1d@972c9e7aa1ecdbee",
 					"locked": true
 				},
 				"frame": "83126a1a-7be9-4ccf-8ec0-3addbcbab9d6"
@@ -92,7 +92,7 @@
 					"y": 416
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-2d@0936b4b07c6260b0",
+					"definitionRef": "std-opensimplex-2d@1193ff85f92e5933",
 					"locked": true
 				},
 				"frame": "83126a1a-7be9-4ccf-8ec0-3addbcbab9d6"
@@ -106,7 +106,7 @@
 					"y": 643
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-3d@41462e40e859b0f9",
+					"definitionRef": "std-opensimplex-3d@39b9a3bc63557e13",
 					"locked": true
 				},
 				"frame": "83126a1a-7be9-4ccf-8ec0-3addbcbab9d6"
@@ -120,7 +120,7 @@
 					"y": 871
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-4d@a5c2d02295015e74",
+					"definitionRef": "std-opensimplex-4d@7e3194b84551e34c",
 					"locked": true
 				},
 				"frame": "83126a1a-7be9-4ccf-8ec0-3addbcbab9d6"

@@ -5,7 +5,7 @@
 	"category": "texture",
 	"section": ["Helpers", "OpenSimplex"],
 	"searchSection": "Helpers",
-	"dependencies": ["std-simplex-kernel@20cd4f2ddd32139c"],
+	"dependencies": ["std-simplex-kernel@b8cde54060c8bc39"],
 	"definition": {
 		"nodes": [
 			{
@@ -756,7 +756,7 @@
 					"y": 2314
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "8f4ca3c1-8837-49e8-8364-46dfa541ebf4"
@@ -2184,7 +2184,7 @@
 					"y": 6929
 				},
 				"group": {
-					"definitionRef": "std-simplex-kernel@20cd4f2ddd32139c",
+					"definitionRef": "std-simplex-kernel@b8cde54060c8bc39",
 					"locked": true
 				},
 				"frame": "dae877f0-a599-4630-8426-f13d560391f1"
