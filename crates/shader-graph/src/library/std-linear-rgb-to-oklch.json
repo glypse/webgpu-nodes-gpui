@@ -3,11 +3,11 @@
 	"name": "Linear RGB to OKLch",
 	"aliases": ["sRGB to OKLch", "RGB to OKLch", "Color Space Conversion", "Perceptual Color"],
 	"category": "color",
-	"dependencies": ["std-linear-rgb-to-oklab@636cf4f0750f30a2", "std-oklab-to-oklch@cbeb1fb5399b8f61"],
+	"dependencies": ["std-linear-rgb-to-oklab@0612089d70f2b0cd", "std-oklab-to-oklch@9c7e13d35be9ae51"],
 	"definition": {
 		"nodes": [
 			{
-				"id": "d0a7aec5-07d7-4660-ab0c-e58f73019080",
+				"id": "e8aaba6d-1252-4f17-85a1-d8c8e2275a88",
 				"type": "node-group",
 				"data": {},
 				"position": {
@@ -15,12 +15,12 @@
 					"y": 5
 				},
 				"group": {
-					"definitionRef": "std-linear-rgb-to-oklab@636cf4f0750f30a2",
+					"definitionRef": "std-linear-rgb-to-oklab@0612089d70f2b0cd",
 					"locked": true
 				}
 			},
 			{
-				"id": "b0589d9d-3605-45d6-89d7-77fdb1972e31",
+				"id": "67c31010-cf8f-41de-82f6-156693356fdb",
 				"type": "group-input",
 				"data": {
 					"hideUnlinked": true
@@ -31,7 +31,7 @@
 				}
 			},
 			{
-				"id": "daf764b9-4895-4875-893c-974165062166",
+				"id": "0776a9b6-dc0e-4f38-9b0f-afb9972331ab",
 				"type": "node-group",
 				"data": {},
 				"position": {
@@ -39,12 +39,12 @@
 					"y": 0
 				},
 				"group": {
-					"definitionRef": "std-oklab-to-oklch@cbeb1fb5399b8f61",
+					"definitionRef": "std-oklab-to-oklch@9c7e13d35be9ae51",
 					"locked": true
 				}
 			},
 			{
-				"id": "943a3ec6-c157-464a-8b18-630ca2b8f680",
+				"id": "fb4b0cc4-0df1-47ca-b657-3454a8bb1a7d",
 				"type": "group-output",
 				"data": {
 					"hideUnlinked": true
@@ -57,24 +57,24 @@
 		],
 		"edges": [
 			{
-				"id": "e2317d65-1fd7-4e94-b73f-993ad980d834",
-				"source": "b0589d9d-3605-45d6-89d7-77fdb1972e31",
+				"id": "243e8a9f-7a93-42a9-a84a-5d7fcf026f52",
+				"source": "67c31010-cf8f-41de-82f6-156693356fdb",
 				"sourceHandle": "4851c251-c5dc-437f-b893-3f74b45a0bc6",
-				"target": "d0a7aec5-07d7-4660-ab0c-e58f73019080",
+				"target": "e8aaba6d-1252-4f17-85a1-d8c8e2275a88",
 				"targetHandle": "d7b2dae9-fcef-448f-bd82-8cb5f3618935"
 			},
 			{
-				"id": "7c43676d-f4da-471d-bb2c-a3c63e7564c8",
-				"source": "d0a7aec5-07d7-4660-ab0c-e58f73019080",
+				"id": "98d15756-b063-441a-a684-9840459625e3",
+				"source": "e8aaba6d-1252-4f17-85a1-d8c8e2275a88",
 				"sourceHandle": "07db88f1-80a9-46c3-bd64-921156f680d9",
-				"target": "daf764b9-4895-4875-893c-974165062166",
+				"target": "0776a9b6-dc0e-4f38-9b0f-afb9972331ab",
 				"targetHandle": "446c8e7f-3e64-4ffa-993c-83fc29b57f9e"
 			},
 			{
-				"id": "ed7b888e-84f7-4fe6-885b-4e71cc084caf",
-				"source": "daf764b9-4895-4875-893c-974165062166",
+				"id": "a2dac931-236c-4005-970d-96a3f3768dc6",
+				"source": "0776a9b6-dc0e-4f38-9b0f-afb9972331ab",
 				"sourceHandle": "9b9ee7ac-a072-4fc6-8244-1b1cca2d5bff",
-				"target": "943a3ec6-c157-464a-8b18-630ca2b8f680",
+				"target": "fb4b0cc4-0df1-47ca-b657-3454a8bb1a7d",
 				"targetHandle": "ed9b839d-0cac-4d4f-9330-e3ede6b84cdf"
 			}
 		],

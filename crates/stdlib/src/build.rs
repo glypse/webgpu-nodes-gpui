@@ -72,9 +72,17 @@ impl<'a> Builder<'a> {
     fn build(&self, spec: &'a GroupSpec) -> Result<ResolvedGroup, ErrorKind> {
         self.stack.borrow_mut().push(spec.id);
         let resolver = |id: &str| self.resolve(id);
-        let g = GroupBuilder::new(spec.id, &resolver);
-        (spec.build)(&g);
-        let result = g.finish(spec.inputs, spec.outputs);
+        let run = |salt: &str| {
+            let g = GroupBuilder::new(spec.id, salt, &resolver);
+            (spec.build)(&g);
+            g.finish(spec.inputs, spec.outputs)
+        };
+        // Ids salted with what the group holds: any change to it renews them all.
+        let result = run("").and_then(|unsalted| {
+            let fingerprint =
+                shader_graph::library::version_of(&json::definition_value(&unsalted.document));
+            run(&fingerprint)
+        });
         self.stack.borrow_mut().pop();
         let finished = match result {
             Ok(finished) => finished,

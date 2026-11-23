@@ -31,7 +31,7 @@ GroupSpec::new("std-component-sum", "Component Sum", "vector", &["vector"], &["s
 - Nodes: `g.op(type, operands)` feeds inputs in the descriptor's order (a variadic last input takes the rest; a number becomes a stored value, a number for a variadic input a Declare node). `g.node(type)` adds `.input(name, ..)`, `.setting(key, option)`, `.typed(family, ty)`, `.label(..)`. A `Node` converts to its first output; `node.out("handle")` picks another.
 - Own methods for node types needing more than operands: `vec`, `constant`, `width_switch(_as)`, `match_on` + `.case`, `index_switch` + `.case`, `custom_wgsl`, `repeat`, `frame`, `reroute`, `wireless`, `call`, `enum_input` (`Input::enumeration`/`toggle`).
 - Everything is checked against the registry when added (node type, input and output ids, settings and options, type families, operand counts); mistakes are collected and reported together by the build, never panics.
-- Ids are hashed from the group id and the order things are added, so building twice gives identical files; reordering statements changes ids and so versions.
+- Node and link ids are hashed from the group id, the order things are added and a fingerprint of the group's content, so building twice gives identical files and any change to a group renews them all: a project indexes nodes by id across its documents and may hold several versions of one group. Interface handle ids depend on the group id and key only, so callers' links survive a change.
 - Each output linked to several inputs is split at a reroute, as the editor's layout does.
 
 ## Running

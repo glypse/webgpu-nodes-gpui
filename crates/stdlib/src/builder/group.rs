@@ -691,14 +691,19 @@ pub(crate) struct Finished {
 /// reported together when the group is built, never panicking.
 pub struct GroupBuilder<'r> {
     id: String,
+    /// What node and link ids are derived from: the group id, salted so that
+    /// two versions of a group share none. A project indexes nodes by id
+    /// across all its documents, and may hold several versions of a group.
+    scope: String,
     resolver: Resolver<'r>,
     state: RefCell<State>,
 }
 
 impl<'r> GroupBuilder<'r> {
-    pub(crate) fn new(id: &str, resolver: Resolver<'r>) -> Self {
+    pub(crate) fn new(id: &str, salt: &str, resolver: Resolver<'r>) -> Self {
         Self {
             id: id.to_owned(),
+            scope: format!("{id}#{salt}"),
             resolver,
             state: RefCell::new(State::default()),
         }
@@ -804,8 +809,8 @@ impl<'r> GroupBuilder<'r> {
             output.label.unwrap_or_else(|| key.to_owned()),
             output.ty,
         ));
-        let boundary = state.boundary(&self.id, false);
-        state.feed(&self.id, boundary, &id, source);
+        let boundary = state.boundary(&self.scope, false);
+        state.feed(&self.scope, boundary, &id, source);
     }
 
     // ── Nodes ────────────────────────────────────────────────────────────
@@ -829,7 +834,7 @@ impl<'r> GroupBuilder<'r> {
 
     /// A Declare node holding `value` as a `ty` (a scalar fills every component).
     pub fn constant(&self, ty: WgslType, value: impl Into<InputValue>) -> Node<'_> {
-        let r = self.state.borrow_mut().constant(&self.id, ty, value.into());
+        let r = self.state.borrow_mut().constant(&self.scope, ty, value.into());
         let index = r.node;
         Node { g: self, index }
     }
@@ -870,7 +875,7 @@ impl<'r> GroupBuilder<'r> {
         };
         let frame = state.frames.last().cloned();
         let index = state.add_node(
-            &self.id,
+            &self.scope,
             REROUTE,
             data,
             None,
@@ -881,7 +886,7 @@ impl<'r> GroupBuilder<'r> {
                 Vec::new(),
             ),
         );
-        state.feed(&self.id, index, "in", source);
+        state.feed(&self.scope, index, "in", source);
         Node { g: self, index }
     }
 
@@ -982,9 +987,9 @@ impl<'r> GroupBuilder<'r> {
         let sockets = (named(&sockets.inputs), named(&sockets.outputs), Vec::new());
         let mut state = self.state.borrow_mut();
         let frame = state.frames.last().cloned();
-        let index = state.add_node(&self.id, CUSTOM_WGSL, data, None, frame, sockets);
+        let index = state.add_node(&self.scope, CUSTOM_WGSL, data, None, frame, sockets);
         for (name, operand) in inputs {
-            state.feed(&self.id, index, name, operand);
+            state.feed(&self.scope, index, name, operand);
         }
         Node { g: self, index }
     }
@@ -1006,7 +1011,7 @@ impl<'r> GroupBuilder<'r> {
             set_frame_tint(&mut data, frame.tint);
             let parent = state.frames.last().cloned();
             let index = state.add_node(
-                &self.id,
+                &self.scope,
                 LAYOUT_FRAME,
                 data,
                 None,
@@ -1050,7 +1055,7 @@ impl<'r> GroupBuilder<'r> {
                 zone_items.iter().map(|i| Socket::plain(&i.id)).collect();
             let frame = state.frames.last().cloned();
             let output = state.add_node(
-                &self.id,
+                &self.scope,
                 REPEAT_OUTPUT,
                 NodeData::default(),
                 None,
@@ -1067,16 +1072,16 @@ impl<'r> GroupBuilder<'r> {
             let mut state_outputs = vec![Socket::plain(ITERATION_HANDLE)];
             state_outputs.extend(item_sockets);
             let input = state.add_node(
-                &self.id,
+                &self.scope,
                 REPEAT_INPUT,
                 input_data,
                 None,
                 frame,
                 (input_sockets, state_outputs, Vec::new()),
             );
-            state.feed(&self.id, input, ITERATIONS_HANDLE, iterations);
+            state.feed(&self.scope, input, ITERATIONS_HANDLE, iterations);
             for (item, def) in items.iter().zip(&zone_items) {
-                state.feed(&self.id, input, &def.id, item.initial);
+                state.feed(&self.scope, input, &def.id, item.initial);
             }
             if let Some(rec) = state.nodes.get_mut(output as usize) {
                 rec.node.data.items = Some(zone_items.clone());
@@ -1120,7 +1125,7 @@ impl<'r> GroupBuilder<'r> {
                 .map(|(_, o)| *o)
                 .collect();
             match operands.as_slice() {
-                [operand] => state.feed(&self.id, output, &def.id, *operand),
+                [operand] => state.feed(&self.scope, output, &def.id, *operand),
                 other => state.errors.push(ErrorKind::Invalid(format!(
                     "repeat item \"{}\" is given {} next values, not one",
                     def.label,
@@ -1218,9 +1223,9 @@ impl<'r> GroupBuilder<'r> {
         }
         let feeds = Self::feeds(node_type, &descriptor, b.positional, b.named)?;
         let mut state = self.state.borrow_mut();
-        let index = state.add_registered(&self.id, node_type, data)?;
+        let index = state.add_registered(&self.scope, node_type, data)?;
         for (name, operand) in feeds {
-            state.feed(&self.id, index, &name, operand);
+            state.feed(&self.scope, index, &name, operand);
         }
         Ok(index)
     }
@@ -1301,7 +1306,7 @@ impl<'r> GroupBuilder<'r> {
             ..Default::default()
         };
         let index = state.add_node(
-            &self.id,
+            &self.scope,
             NODE_GROUP,
             data,
             Some(GroupRef {
@@ -1313,7 +1318,7 @@ impl<'r> GroupBuilder<'r> {
         );
         for (name, operands) in b.named {
             if let [operand] = operands.as_slice() {
-                state.feed(&self.id, index, &name, *operand);
+                state.feed(&self.scope, index, &name, *operand);
             } else {
                 state.errors.push(ErrorKind::NotVariadic {
                     node: b.node_type.clone(),
@@ -1393,16 +1398,16 @@ impl<'r> GroupBuilder<'r> {
         let mut state = self.state.borrow_mut();
         let frame = state.frames.last().cloned();
         let index = state.add_node(
-            &self.id,
+            &self.scope,
             node_type,
             data,
             None,
             frame,
             sockets_of(&descriptor),
         );
-        state.feed(&self.id, index, &selector.0, selector.1);
+        state.feed(&self.scope, index, &selector.0, selector.1);
         for (handle, operand) in cases {
-            state.feed(&self.id, index, &handle, operand);
+            state.feed(&self.scope, index, &handle, operand);
         }
         Ok(index)
     }
@@ -1454,7 +1459,7 @@ impl<'r> GroupBuilder<'r> {
         }
         let nodes: Vec<GraphNode> = nodes.into_iter().map(|r| r.node).collect();
         let mut branch = 0;
-        let id = self.id;
+        let id = self.scope;
         let branches = reroute_branches(
             &nodes,
             &edges,

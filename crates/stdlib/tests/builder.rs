@@ -422,3 +422,40 @@ fn a_section_is_listed_without_the_helpers_section() {
     assert_eq!(spec.section, vec!["Blur"]);
     assert_eq!(spec.search_section, None);
 }
+
+/// A version of a one-input group, `extra` adding a node before the rest.
+fn versioned(extra: bool) -> GroupSpec {
+    let build: fn(&GroupBuilder<'_>) = if extra {
+        |g| {
+            let x = g.input("x", Input::new(WgslType::F32));
+            let doubled = g.op("mul", (x, 2.0)).first();
+            g.output("y", g.op("add", (doubled, 1.0)), Output::new(WgslType::F32));
+        }
+    } else {
+        |g| {
+            let x = g.input("x", Input::new(WgslType::F32));
+            g.output("y", g.op("add", (x, 1.0)), Output::new(WgslType::F32));
+        }
+    };
+    GroupSpec::new("test-versioned", "Versioned", "math", &["x"], &["y"], build)
+}
+
+// A project indexes nodes by id across its documents and may hold two versions
+// of one group: ids derived from the order nodes are added alone would repeat.
+#[test]
+fn two_versions_of_a_group_share_no_node_or_link_id() {
+    let build = |extra| {
+        build_groups(&[versioned(extra)])
+            .expect("the group builds")
+            .remove(0)
+    };
+    let (old, new) = (build(false), build(true));
+    let ids = |g: &BuiltGroup| -> std::collections::HashSet<String> {
+        let d = &g.definition;
+        d.nodes.iter().map(|n| n.id.clone()).chain(d.edges.iter().map(|e| e.id.clone())).collect()
+    };
+    assert!(ids(&old).is_disjoint(&ids(&new)));
+    assert_eq!(old.definition.inputs, new.definition.inputs);
+    assert_eq!(old.definition.outputs, new.definition.outputs);
+    assert_eq!(build(true).definition, new.definition);
+}
