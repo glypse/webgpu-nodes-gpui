@@ -118,7 +118,7 @@ impl Player {
     }
 
     /// Draws the current frame right away rather than on the next animation frame.
-    pub fn draw_now(&mut self, draw: impl FnOnce(FrameInputs) -> bool) {
+    fn draw_now(&mut self, draw: impl FnOnce(FrameInputs) -> bool) {
         self.dirty = false;
         if draw(self.clock.inputs()) {
             self.frames_in_flight += 1;

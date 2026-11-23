@@ -17,15 +17,6 @@ pub struct Timing {
     pub realtime: bool,
 }
 
-impl Default for Timing {
-    fn default() -> Self {
-        Self {
-            fps: 60.0,
-            realtime: true,
-        }
-    }
-}
-
 /// Longest step real-time playback takes, so a stall (e.g. a hidden window) doesn't jump ahead.
 const MAX_REALTIME_DELTA: f64 = 0.1;
 /// Longest catch-up fixed-rate playback does after a stall.

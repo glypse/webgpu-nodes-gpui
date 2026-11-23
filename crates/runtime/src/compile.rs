@@ -42,13 +42,15 @@ impl CompileQueue {
         Self::with_compile(move |plan| compiler.compile(plan), wake)
     }
 
-    pub fn with_compile(
+    fn with_compile(
         compile: impl Fn(&RenderPlan) -> Result<Program, ProgramError> + Send + 'static,
         wake: impl Fn() + Send + 'static,
     ) -> Self {
         let shared: Arc<Shared> = Arc::default();
         let (sender, done) = channel();
         let worker = shared.clone();
+        // If the thread doesn't start or stops, its sender is dropped and `done` disconnects; the
+        // queue then reports the plan it was left with as an error.
         let spawned = std::thread::Builder::new().name("shader compile".into()).spawn(move || {
             loop {
                 let job = {
@@ -108,7 +110,8 @@ impl CompileQueue {
                 self.received = done.id;
                 Some(done)
             }
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => self.busy().then(|| self.stopped()),
         }
     }
 
@@ -117,9 +120,25 @@ impl CompileQueue {
         if !self.busy() {
             return None;
         }
-        let done = self.done.recv().ok()?;
-        self.received = done.id;
-        Some(done)
+        match self.done.recv() {
+            Ok(done) => {
+                self.received = done.id;
+                Some(done)
+            }
+            Err(_) => Some(self.stopped()),
+        }
+    }
+
+    /// The result of the plan still waiting once the compile thread is gone: it can't come out.
+    fn stopped(&mut self) -> Compiled {
+        self.received = self.sent;
+        Compiled {
+            id: self.sent,
+            result: Err(ProgramError {
+                diagnostics: vec![ProgramDiagnostic { message: "the shader compile thread stopped".to_owned(), location: None }],
+                code: String::new(),
+            }),
+        }
     }
 }
 
@@ -138,6 +157,7 @@ mod tests {
 
     use super::*;
     use crate::renderer::Renderer;
+    use crate::renderer::tests::{CODE, plan};
 
     fn empty_plan() -> RenderPlan {
         RenderPlan { resources: Vec::new(), passes: Vec::new(), uniforms: Vec::new(), frame: Default::default() }
@@ -224,11 +244,23 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_left_behind_by_a_stopped_thread_comes_out_as_an_error() {
+        let mut queue = CompileQueue::with_compile(failing, || panic!("the waker panics"));
+        queue.submit(plan_marked(1));
+        assert_eq!(queue.wait_next().expect("the first").id, 1);
+        queue.submit(plan_marked(2));
+        let stopped = queue.wait_next().expect("a result for the second");
+        assert_eq!(stopped.id, 2);
+        assert!(stopped.result.is_err());
+        assert!(!queue.busy());
+    }
+
+    #[test]
     fn the_device_compiles_off_thread() {
         let renderer = Renderer::new().unwrap();
         let mut queue = CompileQueue::new(renderer.compiler(), || {});
-        queue.submit(empty_plan());
+        queue.submit(plan(CODE));
         let done = queue.wait_next().expect("a result");
-        assert!(done.result.is_err(), "a plan with no passes draws nothing");
+        assert!(done.result.is_ok(), "{:?}", done.result.err());
     }
 }

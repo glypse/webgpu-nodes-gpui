@@ -7,12 +7,6 @@ pub struct RefreshRateMeter {
     stamps: Vec<f64>,
 }
 
-impl Default for RefreshRateMeter {
-    fn default() -> Self {
-        Self::new(20)
-    }
-}
-
 impl RefreshRateMeter {
     /// Measures over `frames` intervals.
     pub fn new(frames: usize) -> Self {

@@ -16,8 +16,6 @@ use super::video::{DecodedFrame, VideoDecoder};
 use super::MediaError;
 use crate::Size;
 
-/// Packets read to estimate a video's frame rate.
-const PACKETS_FOR_FRAME_RATE: usize = 600;
 /// The spacing assumed for a frame when the video's frame rate isn't known.
 const FALLBACK_FRAME_SECONDS: f64 = 1.0 / 30.0;
 
@@ -46,18 +44,13 @@ impl FfmpegDecoder {
     pub fn open(path: &Path) -> Result<Self, MediaError> {
         ffmpeg::init().map_err(ff)?;
         let input = ffmpeg::format::input(path).map_err(ff)?;
-        let (stream, time_base, turn, duration) = {
+        let (stream, time_base, turn, duration, frame_rate, parameters) = {
             let stream = input.streams().best(ffmpeg::media::Type::Video).ok_or_else(|| video_error("the file has no video track"))?;
             let time_base = f64::from(stream.time_base());
             let duration = duration_seconds(&input, &stream, time_base).ok_or_else(|| video_error("the file's duration isn't known"))?;
-            (stream.index(), time_base, clockwise_degrees(&stream), duration)
+            (stream.index(), time_base, clockwise_degrees(&stream), duration, frame_rate(&stream), stream.parameters())
         };
-        let frame_rate = frame_rate(path, stream)?;
-        let decoder = {
-            let input = ffmpeg::format::input(path).map_err(ff)?;
-            let stream = input.stream(stream).ok_or_else(|| video_error("the video track is gone"))?;
-            ffmpeg::codec::context::Context::from_parameters(stream.parameters()).map_err(ff)?.decoder().video().map_err(ff)?
-        };
+        let decoder = ffmpeg::codec::context::Context::from_parameters(parameters).map_err(ff)?.decoder().video().map_err(ff)?;
         let (width, height) = (decoder.width(), decoder.height());
         let (width, height) = if turn_swaps_sides(turn) { (height, width) } else { (width, height) };
         let info = VideoInfo { width, height, duration, frame_rate };
@@ -94,8 +87,7 @@ impl FfmpegDecoder {
         let converted = scaler.context.run(frame, &mut bgra);
         self.scaler = Some(scaler);
         converted.map_err(ff)?;
-        let tight = tight_rows(&bgra, Size::new(width, height))?;
-        let (bgra, size) = turn_clockwise(tight, Size::new(width, height), self.turn);
+        let (bgra, size) = turned_pixels(bgra.data(0), bgra.stride(0), Size::new(width, height), self.turn)?;
 
         let time = match frame.timestamp() {
             Some(timestamp) => timestamp as f64 * self.time_base,
@@ -161,36 +153,13 @@ fn duration_seconds(input: &Input, stream: &Stream, time_base: f64) -> Option<f6
     (own != ffmpeg::ffi::AV_NOPTS_VALUE && own > 0).then_some(own as f64 * time_base)
 }
 
-/// The average frame rate of the stream's first packets: their count over
-/// their span. Zero when there are too few to tell.
-fn frame_rate(path: &Path, stream: usize) -> Result<f64, MediaError> {
-    let mut input = ffmpeg::format::input(path).map_err(ff)?;
-    let time_base = input.stream(stream).map(|s| f64::from(s.time_base())).ok_or_else(|| video_error("the video track is gone"))?;
-    let (mut first, mut end, mut count, mut read) = (f64::INFINITY, f64::NEG_INFINITY, 0usize, 0usize);
-    while read < PACKETS_FOR_FRAME_RATE {
-        let mut packet = ffmpeg::Packet::empty();
-        match packet.read(&mut input) {
-            Ok(()) => {}
-            Err(ffmpeg::Error::Eof) => break,
-            Err(error) => {
-                log::warn!("[media] the video ends early: {error}");
-                break;
-            }
-        }
-        if packet.stream() != stream {
-            continue;
-        }
-        read += 1;
-        // Containers can carry empty packets (priming, an end marker) that aren't frames.
-        if let Some(pts) = packet.pts().filter(|_| packet.duration() > 0) {
-            let start = pts as f64 * time_base;
-            first = first.min(start);
-            end = end.max(start + packet.duration() as f64 * time_base);
-            count += 1;
-        }
-    }
-    let span = end - first;
-    Ok(if count < 2 || span.is_nan() || span <= 0.0 { 0.0 } else { count as f64 / span })
+/// The stream's average frame rate, else its nominal one; zero when neither is known.
+fn frame_rate(stream: &Stream) -> f64 {
+    [stream.avg_frame_rate(), stream.rate()]
+        .into_iter()
+        .map(f64::from)
+        .find(|rate| rate.is_finite() && *rate > 0.0)
+        .unwrap_or(0.0)
 }
 
 /// The stream's display rotation as clockwise degrees, in quarter turns.
@@ -213,44 +182,38 @@ fn turn_swaps_sides(degrees: u32) -> bool {
     degrees == 90 || degrees == 270
 }
 
-/// The frame's pixels as BGRA, rows tight and top first; the frame may pad its rows.
-fn tight_rows(frame: &ffmpeg::util::frame::Video, size: Size) -> Result<Vec<u8>, MediaError> {
-    let row = size.width as usize * 4;
-    let stride = frame.stride(0);
-    let data = frame.data(0);
-    if stride < row || data.len() < stride * (size.height as usize).saturating_sub(1) + row {
+/// A frame's BGRA pixels (`data` with rows `stride` bytes apart, `size` of
+/// them) turned `degrees` clockwise, a multiple of 90, into one tight buffer,
+/// rows top first.
+fn turned_pixels(data: &[u8], stride: usize, size: Size, degrees: u32) -> Result<(Vec<u8>, Size), MediaError> {
+    let (w, h) = (size.width as usize, size.height as usize);
+    let row = w * 4;
+    if stride < row || data.len() < stride * h.saturating_sub(1) + row {
         return Err(video_error("a frame has no usable pixels"));
     }
-    let mut out = Vec::with_capacity(row * size.height as usize);
-    for y in 0..size.height as usize {
-        out.extend_from_slice(&data[y * stride..y * stride + row]);
-    }
-    Ok(out)
-}
-
-/// `bgra` (of `size`) turned `degrees` clockwise, a multiple of 90.
-fn turn_clockwise(bgra: Vec<u8>, size: Size, degrees: u32) -> (Vec<u8>, Size) {
     if degrees.is_multiple_of(360) {
-        return (bgra, size);
-    }
-    let (w, h) = (size.width as usize, size.height as usize);
-    let (out_w, out_h) = if turn_swaps_sides(degrees) { (h, w) } else { (w, h) };
-    let mut out = vec![0u8; bgra.len()];
-    for oy in 0..out_h {
-        for ox in 0..out_w {
-            let (sx, sy) = match degrees % 360 {
-                90 => (oy, h - 1 - ox),
-                180 => (w - 1 - ox, h - 1 - oy),
-                _ => (w - 1 - oy, ox),
-            };
-            let from = (sy * w + sx) * 4;
-            let to = (oy * out_w + ox) * 4;
-            if let (Some(source), Some(target)) = (bgra.get(from..from + 4), out.get_mut(to..to + 4)) {
-                target.copy_from_slice(source);
+        let mut out = Vec::with_capacity(row * h);
+        for line in data.chunks(stride).take(h) {
+            if let Some(pixels) = line.get(..row) {
+                out.extend_from_slice(pixels);
             }
         }
+        return Ok((out, size));
     }
-    (out, Size::new(out_w as u32, out_h as u32))
+    let (out_w, out_h) = if turn_swaps_sides(degrees) { (h, w) } else { (w, h) };
+    let mut out = vec![0u8; row * h];
+    for (index, pixel) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (ox, oy) = (index % out_w, index / out_w);
+        let (sx, sy) = match degrees % 360 {
+            90 => (oy, h - 1 - ox),
+            180 => (w - 1 - ox, h - 1 - oy),
+            _ => (w - 1 - oy, ox),
+        };
+        if let Some(source) = data.get(sy * stride + sx * 4..sy * stride + sx * 4 + 4) {
+            pixel.copy_from_slice(source);
+        }
+    }
+    Ok((out, Size::new(out_w as u32, out_h as u32)))
 }
 
 #[cfg(test)]
@@ -264,19 +227,31 @@ mod tests {
         let size = Size::new(2, 3);
         let column = |bgra: &[u8]| bgra.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<_>>();
 
-        let (quarter, quarter_size) = turn_clockwise(pixels.clone(), size, 90);
+        let (quarter, quarter_size) = turned_pixels(&pixels, 8, size, 90).expect("turns");
         assert_eq!((quarter_size.width, quarter_size.height), (3, 2));
         assert_eq!(column(&quarter), vec![4, 2, 0, 5, 3, 1]);
 
-        let (half, half_size) = turn_clockwise(pixels.clone(), size, 180);
+        let (half, half_size) = turned_pixels(&pixels, 8, size, 180).expect("turns");
         assert_eq!((half_size.width, half_size.height), (2, 3));
         assert_eq!(column(&half), vec![5, 4, 3, 2, 1, 0]);
 
-        let (three_quarters, _) = turn_clockwise(pixels.clone(), size, 270);
+        let (three_quarters, _) = turned_pixels(&pixels, 8, size, 270).expect("turns");
         assert_eq!(column(&three_quarters), vec![1, 3, 5, 0, 2, 4]);
 
-        let (unturned, unturned_size) = turn_clockwise(pixels.clone(), size, 0);
+        let (unturned, unturned_size) = turned_pixels(&pixels, 8, size, 0).expect("turns");
         assert_eq!((unturned_size.width, unturned_size.height), (2, 3));
         assert_eq!(unturned, pixels);
+    }
+
+    #[test]
+    fn reads_rows_padded_to_a_stride() {
+        // Each 2-pixel row is followed by 4 bytes of padding that must not reach the output.
+        let padded: Vec<u8> = (0..3u8).flat_map(|row| (0..2u8).flat_map(move |x| [row * 2 + x, 0, 0, 255]).chain([9, 9, 9, 9])).collect();
+        let size = Size::new(2, 3);
+        let (tight, _) = turned_pixels(&padded, 12, size, 0).expect("turns");
+        assert_eq!(tight.len(), 24);
+        assert!(tight.as_chunks::<4>().0.iter().enumerate().all(|(i, p)| p[0] == i as u8));
+        let (quarter, _) = turned_pixels(&padded, 12, size, 90).expect("turns");
+        assert_eq!(quarter.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<_>>(), vec![4, 2, 0, 5, 3, 1]);
     }
 }

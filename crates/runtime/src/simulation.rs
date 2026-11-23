@@ -131,12 +131,6 @@ impl SimulationState {
         let pair = self.pairs.get(texture)?;
         pair.textures.get(if read == StateRead::Current { pair.current } else { 1 - pair.current })
     }
-
-    /// Forgets every simulation's state: they all start over on the next frame.
-    pub fn reset(&mut self) {
-        self.pairs.clear();
-        self.steps.clear();
-    }
 }
 
 fn create_texture(device: &wgpu::Device, format: TextureFormat, size: Size) -> wgpu::Texture {

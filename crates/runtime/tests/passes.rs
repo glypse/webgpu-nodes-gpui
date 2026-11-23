@@ -2,15 +2,17 @@
 //! and simulations kept between frames. Frames are read back sRGB-encoded.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use runtime::{FrameInputs, MediaSource, MediaStatus, PixelFormat, Program, RenderOptions, Renderer, Size};
-use shader_graph::assets::{Asset, AssetFile, AssetKind, asset_hash};
+use runtime::{FrameInputs, MediaStatus, PixelFormat, Program, RenderOptions, Renderer, Size};
+use shader_graph::assets::{Asset, AssetFile, AssetKind};
 use shader_graph::graph::{Connection, FRAG_OUTPUT, GraphModel, Point};
 use shader_graph::types::{InputValue, WgslType};
 use shader_graph::zones::ZoneKind;
+
+mod common;
+use common::source;
 
 fn srgb(linear: f64) -> u8 {
     let v = if linear <= 0.003_130_8 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
@@ -505,7 +507,8 @@ fn a_frame_value_is_computed_on_the_cpu_and_read_by_the_shader() {
     let out = scene.output();
     scene.link((&declare, "value"), (&out, "color"));
     let program = scene.compile();
-    assert!(!program.source().code.contains("runtime_frame.time"), "the shader reads the hoisted value");
+    let source = program.source().expect("a program draws a frame");
+    assert!(!source.code.contains("runtime_frame.time"), "the shader reads the hoisted value");
     for (frame, expected) in [(0, 0.0), (60, 0.5), (90, 0.75)] {
         let pixels = scene.draw(&program, Size::new(2, 2), frame);
         assert_eq!(pixel(&pixels, 2, 0, 0)[0], srgb(expected), "frame {frame}");
@@ -612,10 +615,6 @@ fn a_video_that_cant_be_decoded_fails_when_it_opens() {
             other => panic!("a video that isn't a video: {other:?}"),
         }
     }
-}
-
-fn source(kind: AssetKind, bytes: &[u8]) -> MediaSource {
-    MediaSource { kind, hash: asset_hash(bytes), bytes: Arc::new(bytes.to_vec()) }
 }
 
 /// Gives the renderer an asset's file and waits for its image to decode, returning its size.

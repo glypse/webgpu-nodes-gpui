@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use runtime::{FrameInputs, MediaSource, MediaStatus, PixelFormat, RenderOptions, Renderer, Size};
+use runtime::{FrameInputs, MediaSource, MediaStatus, PixelFormat, Presented, RenderOptions, Renderer, Size};
 use shader_graph::codegen::Program;
 
 use crate::encode::Encoder;
@@ -15,6 +15,9 @@ use crate::{ExportError, Scene, Settings, Shared, first_frame, frame_count, vide
 const SIMULATE_BATCH: u64 = 64;
 /// How long to wait between checks on images still decoding.
 const MEDIA_POLL: Duration = Duration::from_millis(2);
+/// Frames submitted before the oldest is read back and encoded, so the GPU draws
+/// one while the previous is encoded. Must not exceed the renderer's readback depth.
+const FRAMES_IN_FLIGHT: usize = 2;
 
 pub fn run(scene: Scene, settings: Settings, path: PathBuf, shared: &Shared) -> Result<PathBuf, ExportError> {
     let outcome = encode(scene, settings, &path, shared);
@@ -98,14 +101,46 @@ fn draw_frames(
         format: PixelFormat::Bgra8,
         premultiply: false,
     };
+    let mut in_flight = 0;
+    let mut written = 0;
     for index in 0..total {
         check_cancel(shared)?;
-        let frame = renderer
-            .render(compiled, inputs(first + index), options)
+        if in_flight == FRAMES_IN_FLIGHT {
+            write_oldest(renderer, encoder, shared, &mut written)?;
+            in_flight -= 1;
+        }
+        renderer
+            .submit(compiled, inputs(first + index), options)
             .map_err(ExportError::Render)?;
-        encoder.push(&frame.pixels)?;
-        shared.done.store(index + 1, Ordering::Relaxed);
+        in_flight += 1;
     }
+    while in_flight > 0 {
+        check_cancel(shared)?;
+        write_oldest(renderer, encoder, shared, &mut written)?;
+        in_flight -= 1;
+    }
+    Ok(())
+}
+
+fn write_oldest(
+    renderer: &mut Renderer,
+    encoder: &mut Encoder,
+    shared: &Shared,
+    written: &mut u64,
+) -> Result<(), ExportError> {
+    let frame = renderer
+        .wait_frame()
+        .ok_or_else(|| ExportError::Render(anyhow::anyhow!("no frame was in flight")))?
+        .map_err(ExportError::Render)?;
+    match frame {
+        Presented::Pixels(frame) => encoder.push(&frame.pixels)?,
+        #[cfg(target_os = "macos")]
+        Presented::Surfaces { .. } => {
+            return Err(ExportError::Render(anyhow::anyhow!("a readback came out as a surface")));
+        }
+    }
+    *written += 1;
+    shared.done.store(*written, Ordering::Relaxed);
     Ok(())
 }
 

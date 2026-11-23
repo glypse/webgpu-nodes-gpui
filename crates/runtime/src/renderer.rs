@@ -1,15 +1,17 @@
+use std::borrow::Cow;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use anyhow::{Context as _, Result};
-use shader_graph::ShaderProgram;
 use shader_graph::codegen::{
     PLAN_TARGET, PassDecl, RenderPlan, ResourceDecl, SimulationStage, UniformValue,
 };
 use shader_graph::frame::{FrameEnv, FrameRef, FrameValues, evaluate_frame};
 use shader_graph::passes::{SizeEnv, mip_level_count, resolve_size};
 use shader_graph::types::{SamplerAddress, SamplerFilter};
+use shader_graph::{ShaderProgram, UniformBlock};
 
 use crate::clock::FrameInputs;
 use crate::formats::{wgpu_format, wgpu_sample_type};
@@ -19,9 +21,9 @@ use crate::mips::MipGenerator;
 use crate::present::{PresentOptions, Presenter};
 use crate::simulation::{Step, StepKind};
 use crate::target::{Target, render_target};
-use crate::uniforms::{UniformBlock, pack_block};
+use crate::uniforms::pack_block;
 #[cfg(target_os = "macos")]
-use crate::surface::{Surface, SurfacePool, wrap};
+use crate::surface::{Surface, SurfacePool};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use shader_graph::passes::Size;
@@ -65,14 +67,15 @@ pub struct Program {
     pub(crate) id: u64,
     pub(crate) passes: Vec<CompiledPass>,
     plan: RenderPlan,
-    /// The values of the uniform inputs, which the frame values read.
-    uniforms: std::sync::Mutex<Vec<(String, UniformValue)>>,
+    /// The values of the uniform inputs, which the frame values read. Shared so that each frame
+    /// drawn can read them without copying the list.
+    uniforms: std::sync::Mutex<Arc<Vec<(String, UniformValue)>>>,
 }
 
 impl Program {
     /// The program of the pass drawing the frame.
-    pub fn source(&self) -> &ShaderProgram {
-        self.passes.last().map_or_else(|| &self.plan.passes[0].program, |p| &p.decl.program)
+    pub fn source(&self) -> Option<&ShaderProgram> {
+        self.passes.last().map(|p| &p.decl.program)
     }
 
     pub fn plan(&self) -> &RenderPlan {
@@ -173,6 +176,7 @@ struct Submitted {
     /// Done when the output can be read: its copy is mapped, or the GPU has finished drawing it.
     ready: Ready,
     timing: Option<Timing>,
+    submission: wgpu::SubmissionIndex,
 }
 
 impl Submitted {
@@ -221,6 +225,14 @@ fn poll_ready(ready: &mut Ready) -> Result<bool> {
         Err(TryRecvError::Empty) => Ok(false),
         Err(TryRecvError::Disconnected) => anyhow::bail!("a frame was dropped before it finished"),
     }
+}
+
+/// Bytes per row of a readback `width` pixels wide, padded as the copy requires.
+fn padded_row_bytes(width: u32) -> Result<u32> {
+    width
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_next_multiple_of(ROW_ALIGNMENT))
+        .context("the canvas is too wide to read back")
 }
 
 /// What a frame is drawn with: its inputs, and the canvas' size.
@@ -308,7 +320,9 @@ impl Sizes<'_> {
                 self.resolving.borrow_mut().remove(id);
                 resolved
             }
-            Some(ResourceDecl::Media { id, .. }) => self.media.get(id).copied().unwrap_or(Size::new(1, 1)),
+            Some(ResourceDecl::Media { id: media_id, .. }) => {
+                self.media.get(media_id).copied().unwrap_or(Size::new(1, 1))
+            }
             Some(ResourceDecl::Empty { .. }) | None => Size::new(1, 1),
         };
         self.known.borrow_mut().insert(id.to_owned(), size);
@@ -335,6 +349,8 @@ pub struct Renderer {
     free_pixels: Vec<(Size, wgpu::Buffer)>,
     free_timing: Vec<wgpu::Buffer>,
     in_flight: VecDeque<Submitted>,
+    /// Uniform block bytes are packed here before upload, so drawing a frame doesn't allocate them.
+    scratch: Vec<u8>,
 }
 
 /// Compiles plans on a renderer's device. The programs it makes are drawn by that renderer.
@@ -366,7 +382,7 @@ impl Compiler {
                 code: String::new(),
             });
         }
-        Ok(Program { id: NEXT_PROGRAM.fetch_add(1, Ordering::Relaxed), passes, plan: plan.clone(), uniforms: std::sync::Mutex::new(plan.uniforms.clone()) })
+        Ok(Program { id: NEXT_PROGRAM.fetch_add(1, Ordering::Relaxed), passes, plan: plan.clone(), uniforms: std::sync::Mutex::new(Arc::new(plan.uniforms.clone())) })
     }
 
     fn compile_pass(
@@ -538,11 +554,12 @@ impl Renderer {
             free_pixels: Vec::new(),
             free_timing: Vec::new(),
             in_flight: VecDeque::new(),
+            scratch: Vec::new(),
         })
     }
 
     /// Compiles a plan's programs; their uniform blocks stay zero until `set_uniforms`.
-    pub fn compile(&mut self, plan: &RenderPlan) -> Result<Program, ProgramError> {
+    pub fn compile(&self, plan: &RenderPlan) -> Result<Program, ProgramError> {
         self.compiler().compile(plan)
     }
 
@@ -555,11 +572,12 @@ impl Renderer {
     pub fn set_uniforms(&self, program: &Program, values: &BTreeMap<String, Vec<f64>>) {
         {
             let mut held = program.uniforms.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let list = Arc::make_mut(&mut held);
             for (name, value) in values {
                 let value = UniformValue(value.iter().map(|c| *c as f32).collect());
-                match held.iter_mut().find(|(n, _)| n == name) {
+                match list.iter_mut().find(|(n, _)| n == name) {
                     Some((_, existing)) => *existing = value,
-                    None => held.push((name.clone(), value)),
+                    None => list.push((name.clone(), value)),
                 }
             }
         }
@@ -569,7 +587,7 @@ impl Renderer {
                 continue;
             }
             let mut bytes = vec![0u8; block.size as usize];
-            pack_block(block, values, &mut bytes);
+            pack_block(block, |name| values.get(name).map(|v| Cow::Borrowed(v.as_slice())), &mut bytes);
             self.queue.write_buffer(&pass.uniform_buffer, 0, &bytes);
         }
     }
@@ -592,13 +610,6 @@ impl Renderer {
 
     pub fn media_status(&self, asset: &str) -> MediaStatus {
         self.media.status(asset)
-    }
-
-    /// Forgets every simulation's state: they all start over on the next frame.
-    pub fn reset_simulations(&mut self) {
-        for target in self.targets.values_mut() {
-            target.simulation.reset();
-        }
     }
 
     /// How many canvas sizes frames are kept for.
@@ -694,7 +705,7 @@ impl Renderer {
             .collect();
         let sizes = Sizes {
             plan: &program.plan,
-            context: FrameContext { inputs, canvas, uniforms: &uniforms },
+            context: FrameContext { inputs, canvas, uniforms: uniforms.as_slice() },
             max_dimension: self.device.limits().max_texture_dimension_2d,
             media,
             known: RefCell::default(),
@@ -823,25 +834,26 @@ impl Renderer {
     }
 
     /// Writes the frame values a pass's program reads, computed for its size.
-    fn write_frame_values(&self, pass: &CompiledPass, buffer: &wgpu::Buffer, sizes: &Sizes<'_>, first: Option<&wgpu::Texture>) {
+    fn write_frame_values(&mut self, pass: &CompiledPass, buffer: &wgpu::Buffer, sizes: &Sizes<'_>, first: Option<&wgpu::Texture>) {
         let program = &pass.decl.program;
         if program.frame_value_refs.is_empty() {
             return;
         }
         let (width, height) = first.map_or((0, 0), |t| (t.width(), t.height()));
         let computed = sizes.frame_values(Size::new(width, height));
-        let values: BTreeMap<String, Vec<f64>> = program
-            .frame_value_refs
-            .iter()
-            .map(|(name, reference)| (name.clone(), computed.value(reference)))
-            .collect();
-        let mut bytes = vec![0u8; program.frame_values.size as usize];
-        pack_block(&program.frame_values, &values, &mut bytes);
-        self.queue.write_buffer(buffer, 0, &bytes);
+        let refs = &program.frame_value_refs;
+        self.scratch.clear();
+        self.scratch.resize(program.frame_values.size as usize, 0);
+        pack_block(
+            &program.frame_values,
+            |name| refs.get(name).map(|reference| Cow::Owned(computed.value(reference))),
+            &mut self.scratch,
+        );
+        self.queue.write_buffer(buffer, 0, &self.scratch);
     }
 
     fn write_frame_block(
-        &self,
+        &mut self,
         pass: &CompiledPass,
         buffer: &wgpu::Buffer,
         inputs: FrameInputs,
@@ -852,17 +864,24 @@ impl Renderer {
         if block.size == 0 {
             return;
         }
-        let mut bytes = vec![0u8; block.size as usize];
         let (width, height) = first.map_or((0, 0), |t| (t.width(), t.height()));
-        let values = BTreeMap::from([
-            ("time".to_string(), vec![inputs.time]),
-            ("delta".to_string(), vec![inputs.delta]),
-            ("frame".to_string(), vec![inputs.frame as f64]),
-            ("resolution".to_string(), vec![f64::from(width), f64::from(height)]),
-            ("simulation_delta".to_string(), vec![simulation_delta]),
-        ]);
-        pack_block(block, &values, &mut bytes);
-        self.queue.write_buffer(buffer, 0, &bytes);
+        let frame = inputs.frame as f64;
+        let resolution = [f64::from(width), f64::from(height)];
+        let lookup = |name: &str| {
+            let value: &[f64] = match name {
+                "time" => std::slice::from_ref(&inputs.time),
+                "delta" => std::slice::from_ref(&inputs.delta),
+                "frame" => std::slice::from_ref(&frame),
+                "resolution" => &resolution,
+                "simulation_delta" => std::slice::from_ref(&simulation_delta),
+                _ => return None,
+            };
+            Some(Cow::Borrowed(value))
+        };
+        self.scratch.clear();
+        self.scratch.resize(block.size as usize, 0);
+        pack_block(block, lookup, &mut self.scratch);
+        self.queue.write_buffer(buffer, 0, &self.scratch);
     }
 
     /// Draws `frames` at `size` without reading them back, only to step the
@@ -873,7 +892,7 @@ impl Renderer {
         frames: impl IntoIterator<Item = FrameInputs>,
         size: Size,
     ) -> Result<()> {
-        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        self.check_canvas(size)?;
         let mut target = self.take_target(size);
         for inputs in frames {
             let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -952,12 +971,36 @@ impl Renderer {
         }
     }
 
+    /// The oldest submitted frame, waiting for its GPU work (not for frames submitted after it).
+    pub fn wait_frame(&mut self) -> Option<Result<Presented>> {
+        let submission = self.in_flight.front()?.submission.clone();
+        let wait = wgpu::PollType::Wait { submission_index: Some(submission), timeout: None };
+        if let Err(error) = self.device.poll(wait) {
+            self.in_flight.clear();
+            return Some(Err(error.into()));
+        }
+        self.take_frame()
+    }
+
     fn ensure_room(&self) -> Result<()> {
         anyhow::ensure!(
             self.in_flight.len() < READBACK_DEPTH,
             "frames are already waiting to be read back"
         );
         Ok(())
+    }
+
+    /// Rejects a canvas no texture or readback can be made for, before the sizes derived from it are computed.
+    fn check_canvas(&self, size: Size) -> Result<()> {
+        let max = self.device.limits().max_texture_dimension_2d;
+        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        anyhow::ensure!(
+            size.width <= max && size.height <= max,
+            "the canvas is {}x{}, larger than the GPU's limit of {max}",
+            size.width,
+            size.height
+        );
+        padded_row_bytes(size.width).map(|_| ())
     }
 
     fn start_pixels(
@@ -967,10 +1010,11 @@ impl Renderer {
         options: RenderOptions,
     ) -> Result<Submitted> {
         let size = options.size;
-        anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+        self.check_canvas(size)?;
+        let bytes_per_row = padded_row_bytes(size.width)?;
         self.ensure_output(size, options.format);
         let output = self.output.clone().context("no target")?;
-        let buffer = self.take_pixel_buffer(size);
+        let buffer = self.take_pixel_buffer(size)?;
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut target = self.take_target(size);
         self.encode_plan(&mut encoder, program, inputs, &mut target, (true, true));
@@ -992,25 +1036,22 @@ impl Renderer {
                 buffer: &buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some((size.width * 4).next_multiple_of(ROW_ALIGNMENT)),
+                    bytes_per_row: Some(bytes_per_row),
                     rows_per_image: None,
                 },
             },
             output.size(),
         );
-        let timing = self.start_timing(&mut encoder);
-        self.queue.submit([encoder.finish()]);
+        let (timing, submission) = self.submit_frame(encoder);
         Ok(Submitted {
+            submission,
             ready: map_for_read(&buffer),
             output: Output::Pixels {
                 size,
                 format: options.format,
                 buffer,
             },
-            timing: timing.map(|buffer| Timing {
-                ready: map_for_read(&buffer),
-                buffer,
-            }),
+            timing,
         })
     }
 
@@ -1020,7 +1061,7 @@ impl Renderer {
     fn start_surfaces(&mut self, program: &Program, inputs: FrameInputs, sizes: &[Size]) -> Result<Submitted> {
         let mut distinct: Vec<Size> = Vec::new();
         for size in sizes {
-            anyhow::ensure!(size.width > 0 && size.height > 0, "the canvas has no size");
+            self.check_canvas(*size)?;
             if !distinct.contains(size) {
                 distinct.push(*size);
             }
@@ -1044,15 +1085,12 @@ impl Renderer {
             self.targets.insert(size, target);
             surfaces.push((size, surface?));
         }
-        let timing = self.start_timing(&mut encoder);
-        self.queue.submit([encoder.finish()]);
+        let (timing, submission) = self.submit_frame(encoder);
         Ok(Submitted {
+            submission,
             ready: gpu_done(&self.queue),
             output: Output::Surfaces(surfaces),
-            timing: timing.map(|buffer| Timing {
-                ready: map_for_read(&buffer),
-                buffer,
-            }),
+            timing,
         })
     }
 
@@ -1068,8 +1106,8 @@ impl Renderer {
         if target.pool.is_none() {
             target.pool = Some(SurfacePool::new(target.size)?);
         }
-        let surface = target.pool.as_ref().context("no surface pool")?.next()?;
-        let drawn = wrap(&self.device, &surface)?;
+        let pool = target.pool.as_mut().context("no surface pool")?;
+        let (surface, drawn) = pool.next(&self.device)?;
         self.encode_plan(encoder, program, inputs, target, timed);
         let linear = target.linear.clone();
         self.presenter.encode(
@@ -1083,6 +1121,17 @@ impl Renderer {
             },
         );
         Ok(surface)
+    }
+
+    /// Submits a frame's commands; the timestamps it wrote are read once the frame is done.
+    fn submit_frame(&mut self, mut encoder: wgpu::CommandEncoder) -> (Option<Timing>, wgpu::SubmissionIndex) {
+        let buffer = self.start_timing(&mut encoder);
+        let submission = self.queue.submit([encoder.finish()]);
+        let timing = buffer.map(|buffer| Timing {
+            ready: map_for_read(&buffer),
+            buffer,
+        });
+        (timing, submission)
     }
 
     /// Copies a finished frame out, and recycles its buffers.
@@ -1108,18 +1157,18 @@ impl Renderer {
         })
     }
 
-    fn take_pixel_buffer(&mut self, size: Size) -> wgpu::Buffer {
+    fn take_pixel_buffer(&mut self, size: Size) -> Result<wgpu::Buffer> {
         self.free_pixels.retain(|(kept, _)| *kept == size);
         if let Some((_, buffer)) = self.free_pixels.pop() {
-            return buffer;
+            return Ok(buffer);
         }
-        let padded_row = u64::from((size.width * 4).next_multiple_of(ROW_ALIGNMENT));
-        self.device.create_buffer(&wgpu::BufferDescriptor {
+        let padded_row = u64::from(padded_row_bytes(size.width)?);
+        Ok(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame readback"),
             size: padded_row * u64::from(size.height),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
-        })
+        }))
     }
 
     /// Encodes the pass timestamps into a buffer, when the device can time passes.
@@ -1172,25 +1221,27 @@ fn fits(texture: &wgpu::Texture, size: Size, format: wgpu::TextureFormat) -> boo
 
 /// The rows of a mapped staging buffer, tightly packed, top first.
 fn read_pixels(buffer: &wgpu::Buffer, size: Size) -> Result<Vec<u8>> {
-    let row_bytes = (size.width * 4) as usize;
-    let padded_row = row_bytes.next_multiple_of(ROW_ALIGNMENT as usize);
+    let row_bytes = size.width as usize * 4;
+    let padded_row = padded_row_bytes(size.width)? as usize;
     let mapped = buffer.slice(..).get_mapped_range()?;
     let mut pixels = Vec::with_capacity(row_bytes * size.height as usize);
-    for row in mapped.chunks_exact(padded_row).take(size.height as usize) {
-        if let Some(bytes) = row.get(..row_bytes) {
-            pixels.extend_from_slice(bytes);
-        }
+    for y in 0..size.height as usize {
+        let row = mapped
+            .get(y * padded_row..)
+            .and_then(|rest| rest.get(..row_bytes))
+            .context("the readback is shorter than the frame")?;
+        pixels.extend_from_slice(row);
     }
     Ok(pixels)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::uniforms::{UniformField, UniformScalar};
+    use shader_graph::{UniformField, UniformScalar};
     use shader_graph::codegen::{PassDecl, RenderPlan};
 
-    const CODE: &str = r"
+    pub(crate) const CODE: &str = r"
 struct Frame { time: f32, delta: f32, resolution: vec2f, frame: u32 }
 @group(0) @binding(0) var<uniform> frame: Frame;
 
@@ -1206,7 +1257,8 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
 }
 ";
 
-    fn plan(code: &str) -> RenderPlan {
+    /// A plan drawing `code`, whose `Frame` block is laid out as `CODE` declares.
+    pub(crate) fn plan(code: &str) -> RenderPlan {
         let field = |offset, components| UniformField {
             offset,
             scalar: UniformScalar::F32,
@@ -1308,24 +1360,44 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         }
     }
 
+    /// Holds a surface's base address locked for reading, so it is unlocked however the test exits.
+    #[cfg(target_os = "macos")]
+    struct ReadLock<'a>(&'a Surface);
+
+    #[cfg(target_os = "macos")]
+    impl<'a> ReadLock<'a> {
+        fn new(surface: &'a Surface) -> Self {
+            use objc2_core_video::{CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, kCVReturnSuccess};
+            // SAFETY: the buffer is one the test holds, and the lock is released by `Drop`.
+            let status = unsafe { CVPixelBufferLockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly) };
+            assert_eq!(status, kCVReturnSuccess);
+            Self(surface)
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for ReadLock<'_> {
+        fn drop(&mut self) {
+            use objc2_core_video::{CVPixelBufferUnlockBaseAddress, CVPixelBufferLockFlags};
+            // SAFETY: balances the successful lock taken in `new`.
+            unsafe { CVPixelBufferUnlockBaseAddress(self.0, CVPixelBufferLockFlags::ReadOnly) };
+        }
+    }
+
     /// The surface's rows, tightly packed.
     #[cfg(target_os = "macos")]
     fn surface_pixels(surface: &Surface, size: Size) -> Vec<u8> {
-        use objc2_core_video::{
-            CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress,
-            CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVReturnSuccess,
-        };
+        use objc2_core_video::{CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow};
 
+        let _lock = ReadLock::new(surface);
         let row_bytes = size.width as usize * 4;
-        let mut pixels = Vec::new();
-        unsafe {
-            assert_eq!(CVPixelBufferLockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly), kCVReturnSuccess);
-            let base = CVPixelBufferGetBaseAddress(surface).cast::<u8>();
-            let stride = CVPixelBufferGetBytesPerRow(surface);
-            for y in 0..size.height as usize {
-                pixels.extend_from_slice(std::slice::from_raw_parts(base.add(y * stride), row_bytes));
-            }
-            assert_eq!(CVPixelBufferUnlockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly), kCVReturnSuccess);
+        let base = CVPixelBufferGetBaseAddress(surface).cast::<u8>();
+        let stride = CVPixelBufferGetBytesPerRow(surface);
+        let mut pixels = Vec::with_capacity(row_bytes * size.height as usize);
+        for y in 0..size.height as usize {
+            // SAFETY: the buffer is locked for reading by `_lock`, and each row of `row_bytes` bytes starts
+            // at `y * stride` inside it.
+            pixels.extend_from_slice(unsafe { std::slice::from_raw_parts(base.add(y * stride), row_bytes) });
         }
         pixels
     }
@@ -1388,16 +1460,12 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         let mut renderer = Renderer::new().unwrap();
         let program = renderer.compile(&plan(CODE)).unwrap();
         let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
-        let mut worst = std::time::Duration::ZERO;
         for width in 300..360 {
             let size = Size::new(width, 200);
-            let started = std::time::Instant::now();
             let surfaces = draw_surfaces(&mut renderer, &program, inputs, &[size]);
-            worst = worst.max(started.elapsed());
             assert_eq!(surfaces[0].0, size);
             assert_eq!(renderer.target_count(), 1);
         }
-        eprintln!("worst of 60 resized frames: {worst:?}");
     }
 
     #[test]
@@ -1422,7 +1490,7 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
 
     #[test]
     fn reports_where_a_program_fails() {
-        let mut renderer = Renderer::new().unwrap();
+        let renderer = Renderer::new().unwrap();
         let error = renderer
             .compile(&plan(&CODE.replace("frame.time", "frame.nothing")))
             .err()

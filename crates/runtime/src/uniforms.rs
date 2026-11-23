@@ -1,13 +1,18 @@
-use std::collections::BTreeMap;
+use std::borrow::Cow;
 
-pub use shader_graph::{UniformBlock, UniformField, UniformScalar};
+use shader_graph::{UniformBlock, UniformScalar};
+#[cfg(test)]
+use shader_graph::UniformField;
 
-/// Writes `values` into `target` at the offsets `block` lays out. Fields
-/// without a value, and values for fields the block lacks, are left alone;
-/// a value shorter than its field pads with zeros.
-pub fn pack_block(block: &UniformBlock, values: &BTreeMap<String, Vec<f64>>, target: &mut [u8]) {
+/// Writes the values `lookup` gives for `block`'s fields, at the offsets it lays out. A field
+/// without a value is left alone; a value shorter than its field pads with zeros.
+pub fn pack_block<'a>(
+    block: &UniformBlock,
+    lookup: impl Fn(&str) -> Option<Cow<'a, [f64]>>,
+    target: &mut [u8],
+) {
     for (name, field) in &block.fields {
-        let Some(value) = values.get(name) else {
+        let Some(value) = lookup(name.as_str()) else {
             continue;
         };
         for i in 0..field.components as usize {
@@ -28,6 +33,8 @@ pub fn pack_block(block: &UniformBlock, values: &BTreeMap<String, Vec<f64>>, tar
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
@@ -56,7 +63,7 @@ mod tests {
         };
         let values = BTreeMap::from([("a".to_string(), vec![1.5]), ("b".to_string(), vec![7.0])]);
         let mut bytes = [0u8; 32];
-        pack_block(&block, &values, &mut bytes);
+        pack_block(&block, |name| values.get(name).map(|v| Cow::Borrowed(v.as_slice())), &mut bytes);
         assert_eq!(&bytes[0..4], &1.5f32.to_le_bytes());
         assert_eq!(&bytes[16..20], &7u32.to_le_bytes());
         assert_eq!(&bytes[20..24], &0u32.to_le_bytes());

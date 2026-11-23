@@ -1,24 +1,22 @@
-//! The media library on the real device: images decode off the main thread,
+//! The media library on the real device: images decode,
 //! are uploaded when polled, and are dropped once no asset reads them.
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
-use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use runtime::{MediaSource, MediaStatus, Renderer, Size};
-use shader_graph::assets::{AssetKind, asset_hash};
+use shader_graph::assets::AssetKind;
+
+mod common;
+use common::source;
 
 fn png(width: u32, height: u32) -> Vec<u8> {
     let image = image::RgbaImage::from_pixel(width, height, image::Rgba([200, 10, 10, 255]));
     let mut out = Cursor::new(Vec::new());
     image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
     out.into_inner()
-}
-
-fn source(kind: AssetKind, bytes: &[u8]) -> MediaSource {
-    MediaSource { kind, hash: asset_hash(bytes), bytes: Arc::new(bytes.to_vec()) }
 }
 
 /// Syncs `sources` and waits until none of the assets is still decoding.
@@ -38,7 +36,7 @@ fn settle(renderer: &mut Renderer, sources: &BTreeMap<String, MediaSource>) {
 }
 
 #[test]
-fn decodes_an_image_to_its_size_off_the_main_thread() {
+fn decodes_an_image_to_its_size() {
     let mut renderer = Renderer::new().expect("a GPU");
     let sources = BTreeMap::from([("photo".to_owned(), source(AssetKind::Image, &png(5, 3)))]);
     assert_eq!(renderer.media_status("photo"), MediaStatus::Missing);

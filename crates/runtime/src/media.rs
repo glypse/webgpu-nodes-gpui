@@ -4,7 +4,7 @@
 use std::io::Cursor;
 
 use half::f16;
-use image::{DynamicImage, ImageDecoder as _, ImageReader};
+use image::{DynamicImage, ImageDecoder as _, ImageReader, Limits};
 use thiserror::Error;
 
 use crate::Size;
@@ -14,7 +14,14 @@ mod library;
 mod video;
 
 pub use library::{MediaLibrary, MediaSource, MediaStatus};
-pub use video::{DecodedFrame, SystemVideoProbe, VideoDecoder, open_decoder};
+pub use video::SystemVideoProbe;
+
+/// Pixels an image may have, whatever the GPU's side limit: bounds the memory
+/// a decode takes, since a small file can declare a huge image.
+const MAX_PIXELS: u64 = 8192 * 8192;
+/// Bytes the decoder may allocate for one image: its own pixels plus RGBA8 and
+/// the f16 texels built from them.
+const MAX_DECODE_BYTES: u64 = MAX_PIXELS * 16;
 
 #[derive(Debug, Error)]
 pub enum MediaError {
@@ -22,6 +29,8 @@ pub enum MediaError {
     Decode(String),
     #[error("the image is {width} by {height} pixels, more than the GPU takes ({max})")]
     TooLarge { width: u32, height: u32, max: u32 },
+    #[error("the image is {width} by {height} pixels, more than can be decoded")]
+    TooManyPixels { width: u32, height: u32 },
     #[error("the image's pixels don't match its size")]
     Size,
     #[error("the video can't be decoded: {0}")]
@@ -46,15 +55,15 @@ pub fn texels_of_srgb8(size: Size, rgba: &[u8]) -> Result<DecodedImage, MediaErr
         return Err(MediaError::Size);
     }
     let table: Vec<f16> = (0..=255u8).map(|v| f16::from_f32(linear(f32::from(v) / 255.0))).collect();
-    let mut texels = Vec::with_capacity(rgba.len() * 2);
-    for pixel in rgba.as_chunks::<4>().0 {
-        for (channel, value) in pixel.iter().enumerate() {
+    let mut texels = vec![0u8; rgba.len() * 2];
+    for (pixel, texel) in rgba.as_chunks::<4>().0.iter().zip(texels.as_chunks_mut::<8>().0.iter_mut()) {
+        for (channel, (value, bytes)) in pixel.iter().zip(texel.as_chunks_mut::<2>().0.iter_mut()).enumerate() {
             let half = if channel < 3 {
                 table[usize::from(*value)]
             } else {
                 f16::from_f32(f32::from(*value) / 255.0)
             };
-            texels.extend_from_slice(&half.to_le_bytes());
+            *bytes = half.to_le_bytes();
         }
     }
     Ok(DecodedImage { size, texels })
@@ -63,11 +72,17 @@ pub fn texels_of_srgb8(size: Size, rgba: &[u8]) -> Result<DecodedImage, MediaErr
 /// Decodes an image file, rotated upright by its orientation.
 pub fn decode_image(file: &[u8], max_dimension: u32) -> Result<DecodedImage, MediaError> {
     let describe = |e: image::ImageError| MediaError::Decode(e.to_string());
-    let reader = ImageReader::new(Cursor::new(file)).with_guessed_format().map_err(|e| MediaError::Decode(e.to_string()))?;
+    let mut reader = ImageReader::new(Cursor::new(file)).with_guessed_format().map_err(|e| MediaError::Decode(e.to_string()))?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    reader.limits(limits);
     let mut decoder = reader.into_decoder().map_err(describe)?;
     let (width, height) = decoder.dimensions();
     if width > max_dimension || height > max_dimension {
         return Err(MediaError::TooLarge { width, height, max: max_dimension });
+    }
+    if u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return Err(MediaError::TooManyPixels { width, height });
     }
     let orientation = decoder.orientation().map_err(describe)?;
     let mut image = DynamicImage::from_decoder(decoder).map_err(describe)?;

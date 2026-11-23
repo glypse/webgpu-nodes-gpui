@@ -272,11 +272,12 @@ impl Export {
         let shared = Arc::new(Shared::default());
         shared.total.store(total, Ordering::Relaxed);
         let thread_shared = shared.clone();
+        let failed_path = path.clone();
         let thread = std::thread::Builder::new()
             .name("video-export".into())
             .spawn(move || run::run(scene, settings, path, &thread_shared))
             .map_err(|source| ExportError::Io {
-                path: PathBuf::new(),
+                path: failed_path,
                 source,
             })?;
         Ok(Self { shared, thread })
@@ -315,9 +316,12 @@ fn validate(settings: &Settings) -> Result<(), ExportError> {
     if !(settings.fps.is_finite() && settings.fps > 0.0) {
         return invalid("the frame rate must be above zero");
     }
-    // A zero duration still exports one frame.
-    if !(settings.duration.is_finite() && settings.duration >= 0.0) {
-        return invalid("the duration can't be negative");
+    // The time base has 1/1000 s ticks, so a rate under 0.0005 would need a zero denominator.
+    if (settings.fps * 1000.0).round() < 1.0 {
+        return invalid("the frame rate is too low");
+    }
+    if !(settings.duration.is_finite() && settings.duration > 0.0) {
+        return invalid("the duration must be above zero");
     }
     if !(settings.start.is_finite() && settings.start >= 0.0) {
         return invalid("the start can't be negative");
@@ -377,7 +381,9 @@ mod tests {
     #[test]
     fn bad_settings_are_refused() {
         assert!(validate(&settings(0.0, -1.0, 30.0)).is_err());
-        assert!(validate(&settings(0.0, 0.0, 30.0)).is_ok());
+        assert!(validate(&settings(0.0, 0.0, 30.0)).is_err());
+        assert!(validate(&settings(0.0, 1.0, 0.0004)).is_err());
+        assert!(validate(&settings(0.0, 1.0, 0.001)).is_ok());
         assert!(validate(&settings(-1.0, 1.0, 30.0)).is_err());
         assert!(validate(&settings(0.0, 1.0, f64::NAN)).is_err());
         assert!(validate(&settings(0.0, 1.0, 30.0)).is_ok());

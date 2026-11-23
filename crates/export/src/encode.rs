@@ -74,6 +74,8 @@ pub struct Encoder {
     encoder_time_base: ffmpeg::Rational,
     stream_time_base: ffmpeg::Rational,
     scaler: Scaler,
+    /// The BGRA frame each push copies into; reused because the scaler reads it only during `push`.
+    source: Frame,
     format: Format,
     size: Size,
     next_pts: i64,
@@ -98,9 +100,10 @@ impl Encoder {
         context.set_height(size.height);
         context.set_format(format.pixel);
         // Frame n is at n / fps: the time base is 1 / fps, with fractional rates kept exact in thousandths.
-        let frame_rate = ffmpeg::Rational::new((settings.fps * 1000.0).round() as i32, 1000);
-        context.set_frame_rate(Some(frame_rate));
-        context.set_time_base(ffmpeg::Rational::new(1000, (settings.fps * 1000.0).round() as i32));
+        let ticks_per_second = (settings.fps * 1000.0).round() as i32;
+        let encoder_time_base = ffmpeg::Rational::new(1000, ticks_per_second);
+        context.set_frame_rate(Some(ffmpeg::Rational::new(ticks_per_second, 1000)));
+        context.set_time_base(encoder_time_base);
         if global_header {
             context.set_flags(codec::Flags::GLOBAL_HEADER);
         }
@@ -150,9 +153,10 @@ impl Encoder {
             output,
             encoder,
             stream: index,
-            encoder_time_base: ffmpeg::Rational::new(1000, (settings.fps * 1000.0).round() as i32),
+            encoder_time_base,
             stream_time_base,
             scaler,
+            source: Frame::new(Pixel::BGRA, size.width, size.height),
             format,
             size,
             next_pts: 0,
@@ -165,16 +169,15 @@ impl Encoder {
         if bgra.len() != row_bytes * height as usize {
             return Err(ExportError::Encode("a frame's pixels don't match the export's size".into()));
         }
-        let mut source = Frame::new(Pixel::BGRA, width, height);
-        let stride = source.stride(0);
-        for (line, destination) in bgra.chunks_exact(row_bytes).zip(source.data_mut(0).chunks_mut(stride)) {
+        let stride = self.source.stride(0);
+        for (line, destination) in bgra.chunks_exact(row_bytes).zip(self.source.data_mut(0).chunks_mut(stride)) {
             if let Some(destination) = destination.get_mut(..row_bytes) {
                 destination.copy_from_slice(line);
             }
         }
         // A new frame each time: the encoder may still hold the last one.
         let mut converted = Frame::new(self.format.pixel, width, height);
-        self.scaler.run(&source, &mut converted).map_err(ff)?;
+        self.scaler.run(&self.source, &mut converted).map_err(ff)?;
         converted.set_pts(Some(self.next_pts));
         self.next_pts += 1;
         self.encoder.send_frame(&converted).map_err(ff)?;

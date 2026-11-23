@@ -29,10 +29,6 @@ fn present_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
     }
     return vec4f(rgb, alpha);
 }
-
-fn premultiplied_display(color: vec4f) -> vec3f {
-    return encode(color.rgb) * clamp(color.a, 0.0, 1.0);
-}
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -10,8 +10,9 @@ Renders a shader graph frame by frame at a fixed timestep and encodes it to MOV 
 
 ## Data flow and threading
 - `Export::start` (UI thread) validates settings, checks the DNxHR minimum size, then spawns thread `video-export` running `run::run`.
-- Thread: `Renderer::new` (GPU) → compile → `sync_media` + `wait_for_media` → `Encoder::open` → per frame: `renderer.render` (BGRA8, top row first) → `Encoder::push` → `encoder.finish`.
-- Frame n is at time `n / fps`; `first_frame` = `round(start * fps)`; `frame_count` = `round(duration * fps)`, at least 1.
+- Thread: `Renderer::new` (GPU) → compile → `sync_media` + `wait_for_media` → `Encoder::open` → per frame: `renderer.submit` (BGRA8, top row first), and once `FRAMES_IN_FLIGHT` are pending, `take_frame` the oldest → `Encoder::push` → `encoder.finish`. The GPU draws the next frame while the previous one is encoded.
+- Frame n is at time `n / fps`; `first_frame` = `round(start * fps)`; `frame_count` = `round(duration * fps)`, at least 1 (so a positive duration under half a frame still exports one).
+- `validate` refuses a zero duration and a frame rate under 0.001 (the time base is in thousandths of a second).
 - Progress and cancel are atomics in `Shared`. Cancel is checked per frame and per 64-frame simulate batch; a cancelled export returns `ExportError::Cancelled`.
 - `Export::wait` maps a thread panic to `ExportError::Panicked`. Dropping `Export` does not stop the thread: call `cancel` first.
 - The UI consumers are `crates/app/src/{video_export,properties,shell}.rs`.
@@ -23,6 +24,7 @@ Renders a shader graph frame by frame at a fixed timestep and encodes it to MOV 
 - ProRes always uses `prores_ks` (no `prores_aw` fallback). DNxHR uses the `dnxhd` encoder with a profile option; min frame 256×120.
 - Container rules live in `Codec::supports_container` and `supports_alpha`; `validate` enforces them. QTRLE is MOV-only.
 - Timebase: `fps*1000` is rounded to an integer, so fractional rates are approximate in thousandths.
+- Frames are copied into one reusable BGRA `Frame` per encoder; each `push` converts into a fresh frame because the encoder may hold the last one.
 - Each packet gets `set_duration(1)`: the MOV muxer drops a final packet without a duration.
 - `run::run` deletes the output file on any error or cancel. A dropped `Encoder` leaves an unfinished file; always call `finish`.
 - Errors: `ExportError` (thiserror); FFmpeg errors become `Encode(String)` via `ff()`. No `unwrap` in non-test code, except `Export::wait`'s `unwrap_or`, which is not a panic.

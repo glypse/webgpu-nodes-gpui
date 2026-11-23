@@ -18,9 +18,8 @@ mod target;
 mod surface;
 mod uniforms;
 
-pub use clock::{Clock, FrameInputs, Timing};
-pub use frame_meter::{FrameMeter, FrameRate};
-pub use media::{DecodedFrame, MediaError, MediaLibrary, MediaSource, MediaStatus, SystemVideoProbe, VideoDecoder, open_decoder};
+pub use clock::{FrameInputs, Timing};
+pub use media::{MediaLibrary, MediaSource, MediaStatus, SystemVideoProbe};
 pub use player::Player;
 pub use refresh_rate::RefreshRateMeter;
 pub use compile::{CompileQueue, Compiled};
@@ -30,5 +29,3 @@ pub use renderer::{
 };
 #[cfg(target_os = "macos")]
 pub use surface::Surface;
-pub use simulation::{Step, StepKind, StepRecord, next_step};
-pub use uniforms::{UniformBlock, UniformField, UniformScalar, pack_block};

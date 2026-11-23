@@ -3,11 +3,12 @@
 //! decoding itself is behind `VideoDecoder`, so another platform can add one.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::io::Write as _;
+use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 use shader_graph::assets::VideoInfo;
+use tempfile::{NamedTempFile, TempPath};
 
 use super::MediaError;
 use crate::Size;
@@ -247,25 +248,28 @@ fn read_to(
 }
 
 /// A video's bytes written to a file a decoder can open, removed when dropped.
-struct TempVideo(PathBuf);
+struct TempVideo(Option<TempPath>);
 
 impl TempVideo {
     fn write(bytes: &[u8]) -> Result<Self, MediaError> {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let name = format!("webgpu-nodes-video-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
-        let file = Self(std::env::temp_dir().join(name));
-        std::fs::write(&file.0, bytes)
-            .map_err(|error| MediaError::Video(format!("it couldn't be copied to a file: {error}")))?;
-        Ok(file)
+        let copy = |error: std::io::Error| MediaError::Video(format!("it couldn't be copied to a file: {error}"));
+        let mut file = NamedTempFile::new().map_err(copy)?;
+        file.write_all(bytes).map_err(copy)?;
+        file.flush().map_err(copy)?;
+        Ok(Self(Some(file.into_temp_path())))
     }
 
     fn path(&self) -> &Path {
-        &self.0
+        self.0.as_deref().unwrap_or(Path::new(""))
     }
 }
 
 impl Drop for TempVideo {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        if let Some(path) = self.0.take()
+            && let Err(error) = path.close()
+        {
+            log::error!("[media] the video's temporary file couldn't be removed: {error}");
+        }
     }
 }
