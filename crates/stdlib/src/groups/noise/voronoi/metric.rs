@@ -5,7 +5,7 @@ use shader_graph::types::WgslType;
 
 use crate::builder::{EnumRef, Frame, GroupBuilder, GroupSpec, Input, Output, Ref, RepeatItem};
 use crate::groups::helpers::{compare, component_sum};
-use crate::groups::noise::coordinates::{coordinates_input, coordinates_type};
+use crate::groups::noise::coordinates::coordinates_type;
 use crate::groups::vector::{MAX_COMPONENT, PAD_VECTOR};
 
 pub const VORONOI_DISTANCE: &str = "std-voronoi-distance";

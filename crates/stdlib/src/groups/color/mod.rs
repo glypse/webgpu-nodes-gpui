@@ -21,8 +21,8 @@ pub fn all() -> Vec<GroupSpec> {
     groups
 }
 
-/// Sum of the three components' distances around the hue circle, mixed in
-/// by saturation and scaled by value, then linearised.
+/// HSV to linear sRGB: each channel's distance around the hue circle, mixed
+/// in by saturation and scaled by value, then linearised.
 fn hsv_to_linear(g: &GroupBuilder<'_>, hue: Ref, saturation: Ref, value: Ref) -> Ref {
     let split = g.op(
         "separate-vector",

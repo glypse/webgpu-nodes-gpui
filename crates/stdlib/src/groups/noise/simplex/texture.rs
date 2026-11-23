@@ -3,9 +3,7 @@
 
 use shader_graph::types::WgslType;
 
-use super::lattices::{
-    GRADIENT_NOISE_1D, OPENSIMPLEX_2D, OPENSIMPLEX_3D, OPENSIMPLEX_3D_HALF, OPENSIMPLEX_4D,
-};
+use super::lattices::{GRADIENT_NOISE_1D, OPENSIMPLEX_2D, OPENSIMPLEX_3D, OPENSIMPLEX_4D};
 use super::orientation::{SIMPLEX_ORIENTATION, orientation_input, variant_input};
 use crate::builder::{
     EnumRef, Frame, GroupBuilder, GroupSpec, Input, NodeBuilder, Operand, Output, Ref, RepeatBody,
@@ -152,8 +150,7 @@ fn noise_distortion_body(g: &GroupBuilder<'_>) {
                 ),
                 || {
                     let axis = |i: i64| {
-                        // Wrapping to i32 matches the salt product's `| 0` in the WGSL the
-                        // seed is computed in.
+                        // The salted seed is an i32, so the product wraps to its width.
                         let salt = (DISTORTION_SALT * (i + 1)) as i32;
                         let seed = g
                             .node("bitwise")

@@ -24,7 +24,7 @@ const MAX_REACH: f64 = ((DEFAULT_MAX_ITERATIONS - 1) / 2) as f64;
 /// before the browser takes it for hung.
 const MAX_REACH_2D: f64 = 64.0;
 
-/// The edge modes of Sample Texture, which blurs pass on.
+/// The edge modes a blur reads its taps with.
 pub fn edges(g: &GroupBuilder<'_>) -> EnumRef {
     g.enum_input(
         "edges",
@@ -125,7 +125,6 @@ fn tap_spacing(g: &GroupBuilder<'_>, radius: Ref, reach: f64) -> Spacing {
 /// `texture`'s colour at `at`, premultiplied by its alpha: else transparent
 /// pixels would darken their neighbours.
 fn premultiplied_tap(g: &GroupBuilder<'_>, texture: Ref, at: Ref, edges: Ref) -> Ref {
-    // Sample Texture's inputs in order: texture, uv, interpolation, extension, level.
     let color = g
         .op("sample-texture", (texture, at, 0, edges, 0))
         .out("color");

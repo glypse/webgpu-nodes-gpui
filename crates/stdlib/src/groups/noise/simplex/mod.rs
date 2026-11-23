@@ -5,9 +5,6 @@ mod lattices;
 mod orientation;
 mod texture;
 
-pub use kernel::{LatticeCopy, copy_seed, kernel};
-pub use orientation::{FAST, SMOOTH, orientation_input, variant_input};
-
 use crate::builder::GroupSpec;
 
 pub fn all() -> Vec<GroupSpec> {

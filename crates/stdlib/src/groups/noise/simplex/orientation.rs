@@ -60,7 +60,7 @@ pub fn orientation_input(g: &GroupBuilder<'_>, t: &TypeVar) -> EnumRef {
 }
 
 const SKEW_2D: f64 = 0.366025403784439;
-const ROOT2OVER2: f64 = 0.7071067811865476;
+const ROOT2OVER2: f64 = std::f64::consts::FRAC_1_SQRT_2;
 const ROOT3OVER3: f64 = 0.577350269189626;
 const ORTHOGONALIZER: f64 = -0.21132486540518713;
 
