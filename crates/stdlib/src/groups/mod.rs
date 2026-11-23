@@ -2,9 +2,12 @@
 
 use crate::builder::GroupSpec;
 
+mod math;
 mod vector;
 
 /// Every described group.
 pub fn all() -> Vec<GroupSpec> {
-    vector::all()
+    let mut groups = vector::all();
+    groups.extend(math::all());
+    groups
 }
