@@ -12,6 +12,7 @@ Describes the standard library's groups in Rust and generates `crates/shader-gra
 - `src/layout.rs`: `layout_headless` (estimated node sizes, `GraphModel::layout_document`) and `layout_measured` (runs the editor's `--layout-project`).
 - `src/main.rs`: the `stdlib` command.
 - `tests/builder.rs`: the builder, with throwaway groups; `tests/descriptions.rs`: fails when a file drifted from its description (node positions aside).
+- `tests/cpu.rs`: evaluates the CPU-capable groups on fixed samples and compares every output bit with `tests/golden/<id>.txt`. Rewrite the golden files (`STDLIB_WRITE_GOLDEN=1 cargo test -p stdlib --test cpu`) only for an output change that is meant.
 
 ## Describing a group
 ```rust
