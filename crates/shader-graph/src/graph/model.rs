@@ -58,6 +58,9 @@ pub struct GraphModel {
     history: History,
     /// Nesting depth of `batched` calls; history steps wait for the outermost.
     batch_depth: u32,
+    /// A gesture changed the project since the history last recorded it; the
+    /// snapshot is taken once, when the gesture ends or something else needs it.
+    gesture_pending: bool,
     saved: String,
 }
 
@@ -81,6 +84,7 @@ impl GraphModel {
             selected: Vec::new(),
             history,
             batch_depth: 0,
+            gesture_pending: false,
             saved: snapshot,
         }
     }
@@ -107,6 +111,7 @@ impl GraphModel {
         self.path.clear();
         self.selected.clear();
         self.resolver.clear();
+        self.gesture_pending = false;
         let snapshot = Self::snapshot_of(&self.project);
         self.history.reset(snapshot.clone());
         self.saved = snapshot;
@@ -127,6 +132,7 @@ impl GraphModel {
     /// Edit the project through `f`: indexes are rebuilt, types forgotten and
     /// the result recorded as an undo step.
     pub fn edit<R>(&mut self, f: impl FnOnce(&mut GraphProject) -> R) -> R {
+        self.end_gesture();
         let result = f(&mut self.project);
         self.changed();
         result
@@ -143,12 +149,19 @@ impl GraphModel {
         self.path = valid;
         if self.batch_depth == 0 {
             let snapshot = Self::snapshot_of(&self.project);
-            self.history.record(snapshot);
+            // A pending gesture whose end wasn't signalled absorbs this edit rather
+            // than leaving its own last step unrecorded.
+            if std::mem::take(&mut self.gesture_pending) {
+                self.history.replace_current(snapshot);
+            } else {
+                self.history.record(snapshot);
+            }
         }
     }
 
     /// Runs `f`, whose edits make one undo step together.
     pub fn batched<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        self.end_gesture();
         self.batch_depth += 1;
         let result = f(self);
         self.batch_depth -= 1;
@@ -158,9 +171,13 @@ impl GraphModel {
         result
     }
 
-    /// Like `edit`, but a gesture's steps (`first` false) replace the step
-    /// the gesture began with instead of adding their own.
+    /// Like `edit`, but a gesture's steps (`first` false) only mark the gesture
+    /// pending; `end_gesture` (or any later edit, undo, redo or saved marker)
+    /// records them as the step the gesture began with.
     pub fn edit_gesture(&mut self, first: bool, f: impl FnOnce(&mut GraphProject)) {
+        if first {
+            self.end_gesture();
+        }
         f(&mut self.project);
         if first {
             self.changed();
@@ -168,8 +185,16 @@ impl GraphModel {
         }
         self.project.reindex();
         self.resolver.clear();
-        let snapshot = Self::snapshot_of(&self.project);
-        self.history.replace_current(snapshot);
+        self.gesture_pending = true;
+    }
+
+    /// Ends a gesture: its steps become the one undo step it began. A no-op
+    /// when no gesture step is pending.
+    pub fn end_gesture(&mut self) {
+        if std::mem::take(&mut self.gesture_pending) {
+            let snapshot = Self::snapshot_of(&self.project);
+            self.history.replace_current(snapshot);
+        }
     }
 
     // ── History ──────────────────────────────────────────────────────────────
@@ -183,6 +208,7 @@ impl GraphModel {
     }
 
     pub fn undo(&mut self) -> bool {
+        self.end_gesture();
         match self.history.undo() {
             Some(snapshot) => self.restore(&snapshot),
             None => false,
@@ -190,6 +216,7 @@ impl GraphModel {
     }
 
     pub fn redo(&mut self) -> bool {
+        self.end_gesture();
         match self.history.redo() {
             Some(snapshot) => self.restore(&snapshot),
             None => false,
@@ -217,6 +244,11 @@ impl GraphModel {
 
     /// Whether the project differs from how it was last marked saved.
     pub fn has_unsaved_changes(&self) -> bool {
+        // A gesture in progress counts as a change: snapshotting it here would bring back the
+        // per-step serialisation that ending gestures avoids, and this is asked often.
+        if self.gesture_pending {
+            return true;
+        }
         // The history holds the project's snapshot as of its last change, so no new one is needed
         // except in the middle of a batch, whose edits aren't recorded yet.
         match self.history.current() {
@@ -226,7 +258,20 @@ impl GraphModel {
     }
 
     pub fn mark_saved(&mut self) {
-        self.saved = Self::snapshot_of(&self.project);
+        self.saved = self.saved_marker();
+    }
+
+    /// The project's current content, to mark as saved later with `mark_saved_as`.
+    pub fn saved_marker(&mut self) -> String {
+        self.end_gesture();
+        match self.history.current() {
+            Some(current) if self.batch_depth == 0 => current.to_owned(),
+            _ => Self::snapshot_of(&self.project),
+        }
+    }
+
+    pub fn mark_saved_as(&mut self, marker: String) {
+        self.saved = marker;
     }
 
     // ── Navigation ───────────────────────────────────────────────────────────

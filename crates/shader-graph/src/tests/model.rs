@@ -192,3 +192,68 @@ fn rejects_projects_with_unknown_nodes() {
     let json = r#"{"definitions":{"__root__":{"nodes":[{"id":"a","type":"nope","data":{},"position":{"x":0,"y":0}}],"edges":[]}}}"#;
     assert!(crate::graph::GraphProject::from_json(json).is_err());
 }
+
+fn drag_node(g: &mut TestGraph, node: &str, steps: usize) {
+    for i in 0..steps {
+        let id = node.to_owned();
+        g.model.edit_gesture(i == 0, |project| {
+            if let Some(n) = project.root_mut().node_mut(&id) {
+                n.position.x = (i + 1) as f32;
+            }
+        });
+    }
+}
+
+#[test]
+fn a_gesture_is_one_undo_step_with_its_final_state() {
+    let mut g = TestGraph::new();
+    let node = g.add("sin");
+    drag_node(&mut g, &node, 100);
+    g.model.end_gesture();
+    assert_eq!(
+        g.model.root().node(&node).map(|n| n.position.x),
+        Some(100.0_f32)
+    );
+    assert!(g.model.undo());
+    assert_eq!(
+        g.model.root().node(&node).map(|n| n.position.x),
+        Some(0.0_f32)
+    );
+    assert!(g.model.redo());
+    assert_eq!(
+        g.model.root().node(&node).map(|n| n.position.x),
+        Some(100.0_f32)
+    );
+}
+
+#[test]
+fn unsaved_changes_are_seen_mid_gesture() {
+    let mut g = TestGraph::new();
+    let node = g.add("sin");
+    g.model.mark_saved();
+    drag_node(&mut g, &node, 1);
+    g.model.end_gesture();
+    g.model.mark_saved();
+    drag_node(&mut g, &node, 5);
+    assert!(g.model.has_unsaved_changes());
+    let marker = g.model.saved_marker();
+    g.model.mark_saved_as(marker);
+    assert!(!g.model.has_unsaved_changes());
+}
+
+#[test]
+fn undo_mid_gesture_keeps_the_gesture_as_one_step() {
+    let mut g = TestGraph::new();
+    let node = g.add("sin");
+    drag_node(&mut g, &node, 10);
+    assert!(g.model.undo());
+    assert_eq!(
+        g.model.root().node(&node).map(|n| n.position.x),
+        Some(0.0_f32)
+    );
+    assert!(g.model.redo());
+    assert_eq!(
+        g.model.root().node(&node).map(|n| n.position.x),
+        Some(10.0_f32)
+    );
+}

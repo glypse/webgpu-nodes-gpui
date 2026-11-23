@@ -202,6 +202,8 @@ pub struct Shell {
     path: Option<PathBuf>,
     /// Whether a discard prompt is open, so repeated close or quit requests don't stack prompts.
     confirming: bool,
+    /// Whether a save is writing in the background; a second save request is ignored meanwhile.
+    saving: bool,
 }
 
 /// What a new window opens with.
@@ -334,6 +336,7 @@ impl Shell {
             views,
             path,
             confirming: false,
+            saving: false,
         };
         shell.refresh_title(window, cx);
         cx.on_release(move |_, cx| {
@@ -731,6 +734,9 @@ impl Shell {
     }
 
     fn save_to(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
         let editor = self.editor.read(cx);
         let mut project = editor.project(cx);
         {
@@ -747,18 +753,34 @@ impl Shell {
         let output = self.properties.read(cx).output();
         video_export::store(&mut project, &output);
         let files = self.playback.read(cx).asset_files().clone();
-        let result: Result<()> = project::write(&path, &project, &files);
-        match result {
-            Ok(()) => {
-                self.editor.read(cx).mark_saved();
-                self.saved_output = output;
-                self.adopt(Some(path), window, cx);
-            }
-            Err(e) => {
-                let message = format!("Couldn't save {}", project::file_name(&path));
-                Self::report(window, &message, &e, cx);
-            }
-        }
+        // The marker is taken now so edits made while the write runs stay unsaved.
+        let marker = self.editor.read(cx).saved_marker();
+        self.saving = true;
+        let target = path.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result: Result<()> = cx
+                .background_executor()
+                .spawn(async move { project::write(&target, &project, &files) })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                guard::guard("finish save", || {
+                    this.saving = false;
+                    match result {
+                        Ok(()) => {
+                            this.editor.read(cx).mark_saved_as(marker);
+                            this.saved_output = output;
+                            this.adopt(Some(path), window, cx);
+                        }
+                        Err(e) => {
+                            let message = format!("Couldn't save {}", project::file_name(&path));
+                            Self::report(window, &message, &e, cx);
+                        }
+                    }
+                });
+            })
+            .ok();
+        })
+        .detach();
     }
 }
 
@@ -1159,6 +1181,8 @@ mod tests {
             preferences::init(cx);
             init(cx);
         });
+        // Shells compile their shader on a thread of its own, which the test scheduler must allow.
+        cx.executor().allow_parking();
         let (shell, cx) =
             cx.add_window_view(|window, cx| Shell::start(Start::Blank, None, window, cx));
         cx.run_until_parked();
@@ -1330,6 +1354,7 @@ mod tests {
             preferences::init(cx);
             init(cx);
         });
+        cx.executor().allow_parking();
         let (_, cx) = cx.add_window_view(|window, cx| Shell::new(Some(path), None, window, cx));
         cx.run_until_parked();
         let (title, detail) = cx.pending_prompt().expect("the problems are reported");
@@ -1499,6 +1524,7 @@ mod tests {
             init(cx);
         });
         let opened = path.clone();
+        cx.executor().allow_parking();
         let (shell, cx) =
             cx.add_window_view(|window, cx| Shell::new(Some(opened), None, window, cx));
         cx.run_until_parked();
@@ -1519,6 +1545,7 @@ mod tests {
             "a changed output is unsaved"
         );
         shell.update_in(cx, |s, window, cx| s.save_to(path.clone(), window, cx));
+        cx.run_until_parked();
         assert!(
             !shell.read_with(cx, |s, cx| s.has_unsaved_changes(cx)),
             "saving keeps the output"

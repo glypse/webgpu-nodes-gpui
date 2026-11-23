@@ -560,8 +560,12 @@ impl Editor {
         self.model.borrow().has_unsaved_changes()
     }
 
-    pub fn mark_saved(&self) {
-        self.model_mut().mark_saved();
+    pub fn saved_marker(&self) -> String {
+        self.model_mut().saved_marker()
+    }
+
+    pub fn mark_saved_as(&self, marker: String) {
+        self.model_mut().mark_saved_as(marker);
     }
 
     // --- Syncing the model into the flow and the shader ---
@@ -1056,6 +1060,9 @@ impl Editor {
         self.model_mut()
             .set_video_playback_step(node, change, first);
         self.gesture = edit == Edit::Preview;
+        if !self.gesture {
+            self.model_mut().end_gesture();
+        }
         self.sync(cx);
         self.regenerate(cx);
     }
@@ -1138,6 +1145,9 @@ impl Editor {
             });
         }
         self.gesture = edit == Edit::Preview;
+        if !self.gesture {
+            self.model_mut().end_gesture();
+        }
         self.sync(cx);
         self.regenerate(cx);
     }
