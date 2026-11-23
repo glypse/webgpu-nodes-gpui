@@ -24,11 +24,7 @@ pub fn all() -> Vec<GroupSpec> {
 /// HSV to linear sRGB: each channel's distance around the hue circle, mixed
 /// in by saturation and scaled by value, then linearised.
 fn hsv_to_linear(g: &GroupBuilder<'_>, hue: Ref, saturation: Ref, value: Ref) -> Ref {
-    let split = g.op(
-        "separate-vector",
-        g.vec(WgslType::Vec3f, (hue, saturation, value)).first(),
-    );
-    let (h, s, v) = (split.out("x"), split.out("y"), split.out("z"));
+    let (h, s, v) = (hue, saturation, value);
     let srgb = g.frame(
         Frame::new("To sRGB").note(
             "Each channel's distance around the hue circle,\nmixed in by saturation and scaled by value.",

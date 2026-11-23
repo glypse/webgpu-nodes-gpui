@@ -14,6 +14,9 @@ pub const OKLCH_GAMUT_MAP: &str = "std-oklch-gamut-map";
 /// In OKLab units: a clip that moves a colour less than this is not visible.
 const JUST_NOTICEABLE: f64 = 0.02;
 
+/// In linear RGB: a colour this close to its clip is inside the display.
+const IN_GAMUT_TOLERANCE: f64 = 0.00001;
+
 /// The OKLab and linear RGB a colour in OKLch converts to.
 fn to_rgb(g: &GroupBuilder<'_>, oklch: Ref) -> (Ref, Ref) {
     let oklab = call_one(g, OKLCH_TO_OKLAB, "oklch", oklch, "oklab");
@@ -28,13 +31,22 @@ struct Fit {
 
 /// Clips `rgb` to the display, and whether that keeps it within notice of `oklab`.
 fn clip_unnoticed(g: &GroupBuilder<'_>, oklab: Ref, rgb: Ref) -> Fit {
-    let clipped = g.op("display-gamut-clip", rgb).first();
-    let back = call_one(g, LINEAR_RGB_TO_OKLAB, "rgb", clipped, "oklab");
-    let moved = g.op("distance", (back, oklab)).first();
+    let clipped = clip(g, rgb);
     Fit {
         clipped,
-        close: compare(g, moved, JUST_NOTICEABLE, "<"),
+        close: unnoticed(g, oklab, clipped),
     }
+}
+
+fn clip(g: &GroupBuilder<'_>, rgb: Ref) -> Ref {
+    g.op("display-gamut-clip", rgb).first()
+}
+
+/// Whether `clipped`, a colour clipped to the display, is within notice of `oklab`.
+fn unnoticed(g: &GroupBuilder<'_>, oklab: Ref, clipped: Ref) -> Ref {
+    let back = call_one(g, LINEAR_RGB_TO_OKLAB, "rgb", clipped, "oklab");
+    let moved = g.op("distance", (back, oklab)).first();
+    compare(g, moved, JUST_NOTICEABLE, "<")
 }
 
 pub fn all() -> Vec<GroupSpec> {
@@ -49,7 +61,7 @@ pub fn all() -> Vec<GroupSpec> {
                 let rgb = vec3_in(g, "rgb", "Linear RGB");
                 let clipped = g.op("display-gamut-clip", rgb).first();
                 let moved = g.op("distance", (rgb, clipped)).first();
-                let in_gamut = compare(g, moved, 0.00001, "<=");
+                let in_gamut = compare(g, moved, IN_GAMUT_TOLERANCE, "<=");
                 g.output("in-gamut", in_gamut, Output::new(WgslType::Bool).label("In Gamut"));
             },
         )
@@ -100,8 +112,12 @@ pub fn all() -> Vec<GroupSpec> {
                                 let middle = g.op("mul", (g.op("add", (low, high)), 0.5)).first();
                                 let lch = g.vec(WgslType::Vec3f, (lightness, middle, hue)).first();
                                 let (oklab, rgb) = to_rgb(g, lch);
-                                let in_gamut = call_one(g, IN_DISPLAY_GAMUT, "rgb", rgb, "in-gamut");
-                                let close = clip_unnoticed(g, oklab, rgb).close;
+                                // The same clip serves the in-gamut check (IN_DISPLAY_GAMUT's
+                                // computation) and the close check.
+                                let clipped = clip(g, rgb);
+                                let moved = g.op("distance", (rgb, clipped)).first();
+                                let in_gamut = compare(g, moved, IN_GAMUT_TOLERANCE, "<=");
+                                let close = unnoticed(g, oklab, clipped);
                                 let raise = boolean(
                                     g,
                                     boolean(g, low_in_gamut, in_gamut, "and"),
