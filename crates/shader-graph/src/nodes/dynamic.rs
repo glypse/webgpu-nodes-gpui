@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::enums::{CASES_FAMILY, MATCH, MATCH_SELECTOR, WIDTH_SWITCH, WIDTH_SWITCH_VALUE, case_handle, widths};
-use crate::graph::{GraphDocument, GraphNode, GraphProject, MAX_CASES};
+use crate::graph::{GROUP_INPUT, GraphDocument, GraphNode, GraphProject, MAX_CASES, REROUTE};
 use crate::types::{
     EnumVariant, GroupHandleDef, HandleType, InputControl, InputValue,
     NodeCategory, NodeData, TypeFamily, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
@@ -31,15 +31,15 @@ pub fn clamp_cases(count: i64) -> u32 {
 /// case is computed.
 pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
     let cases: Vec<(String, i64)> =
-        variants.iter().map(|v| (case_handle(v.int()), v.int())).collect();
+        variants.iter().map(|v| (case_handle(v.value), v.value)).collect();
     let mut inputs = vec![NodeInputDef::new(MATCH_SELECTOR, "enum", &[WgslType::U32])];
     inputs.extend(
         variants
             .iter()
-            .map(|v| NodeInputDef::new(case_handle(v.int()), v.label.clone(), &SOCKET_TYPES).family(CASES_FAMILY)),
+            .map(|v| NodeInputDef::new(case_handle(v.value), v.label.clone(), &SOCKET_TYPES).family(CASES_FAMILY)),
     );
     let case_values: Vec<EnumVariant> =
-        variants.iter().map(|v| EnumVariant::new(v.int(), "")).collect();
+        variants.iter().map(|v| EnumVariant::new(v.value, "")).collect();
     let mut d = NodeDescriptor::new(MATCH, "Match", NodeCategory::Logic)
         .aliases(&["Menu Switch", "Switch Case", "Case", "Enum Switch", "Index Switch"])
         .inputs(inputs)
@@ -69,7 +69,7 @@ pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
             }
             vec![format!("let {} = {chosen};", ctx.var_name)]
         });
-    d.primary_input = variants.first().map(|v| case_handle(v.int()));
+    d.primary_input = variants.first().map(|v| case_handle(v.value));
     // Without cases nothing infers its type: it's picked, under the key the
     // cases' type is forced with once an enum is linked.
     if variants.is_empty() {
@@ -86,7 +86,7 @@ pub fn width_switch_node() -> NodeDescriptor {
     inputs.extend(
         widths()
             .iter()
-            .map(|w| NodeInputDef::new(case_handle(w.int()), w.label.clone(), &WgslType::ALL).family(case_handle(w.int()))),
+            .map(|w| NodeInputDef::new(case_handle(w.value), w.label.clone(), &WgslType::ALL).family(case_handle(w.value))),
     );
     NodeDescriptor::new(WIDTH_SWITCH, "Width Switch", NodeCategory::Logic)
         .aliases(&["Type Switch", "Dimension Switch", "Switch by Width", "Component Count Switch"])
@@ -130,7 +130,7 @@ pub fn build_index_switch_descriptor(data: &NodeData) -> NodeDescriptor {
         .defaults(defaults)
         .cpu(move |ctx| {
             let index = ctx.input(INDEX_SWITCH_INDEX).first().copied().unwrap_or(0.0);
-            let picked = super::cpu::js_min(super::cpu::js_max(index, 0.0), f64::from(count - 1));
+            let picked = index.max(0.0).min(f64::from(count - 1));
             super::cpu::result(ctx.input(&case_handle(picked as i64)))
         })
         .wgsl(move |ctx| {
@@ -253,7 +253,7 @@ pub fn fallback_handle_ids(
 ) -> BTreeSet<String> {
     visiting.push(definition);
     let input_nodes: BTreeSet<&str> =
-        definition.nodes.iter().filter(|n| n.is("group-input")).map(|n| n.id.as_str()).collect();
+        definition.nodes.iter().filter(|n| n.is(GROUP_INPUT)).map(|n| n.id.as_str()).collect();
     fn is_fallback(
         definition: &GraphDocument,
         project: &GraphProject,
@@ -263,18 +263,18 @@ pub fn fallback_handle_ids(
         depth: usize,
     ) -> bool {
         let Some(node) = definition.node(target) else { return false };
-        if node.is("fallback") {
-            return handle == "value";
+        if node.is(super::FALLBACK) {
+            return handle == super::FALLBACK_VALUE;
         }
         if node.is(super::SAMPLE_TEXTURE) {
             return handle == super::SAMPLE_TEXTURE_UV;
         }
-        if node.is("reroute") && depth < 64 {
+        if node.is(REROUTE) && depth < 64 {
             return definition.edges_from(target).any(|e| {
                 is_fallback(definition, project, visiting, &e.target, &e.target_handle, depth + 1)
             });
         }
-        let Some((reference, inner)) = node.definition_ref().and_then(|r| Some((r, project.document(r)?))) else {
+        let Some((reference, inner)) = node.definition_ref().and_then(|r| project.document(r).map(|d| (r, d))) else {
             return false;
         };
         if let Some(known) = project.cached_fallbacks(reference) {

@@ -1,7 +1,7 @@
 //! A simulation zone's state: the textures keeping its items between frames.
 
-use super::sources::TextureSource;
-use super::textures::{TextureFormat, TextureSize, same_size};
+use super::sources::{TextureSource, path_key};
+use super::textures::{TextureFormat, TextureSize};
 use crate::types::{WgslType, ZoneItem, convert_var, make_type};
 
 /// A simulation zone as computed at `path` (the group nodes it's computed
@@ -15,7 +15,7 @@ pub struct SimulationRef {
 
 impl SimulationRef {
     pub fn id(&self) -> String {
-        self.path.iter().chain([&self.zone]).cloned().collect::<Vec<_>>().join("/")
+        path_key(self.path.iter().chain([&self.zone]))
     }
 }
 
@@ -130,11 +130,13 @@ pub fn attachment_groups<T: Attachment + Clone>(items: &[T]) -> Vec<Vec<T>> {
     for item in items {
         let size = item.format().texel_bytes();
         let differs = match (current.first().and_then(Attachment::size), item.size()) {
-            (Some(a), Some(b)) => !same_size(a, b),
+            (Some(a), Some(b)) => a != b,
             _ => false,
         };
         if !current.is_empty()
-            && (current.len() == MAX_COLOR_ATTACHMENTS || bytes + size > MAX_COLOR_ATTACHMENT_BYTES || differs)
+            && (current.len() == MAX_COLOR_ATTACHMENTS
+                || bytes + size > MAX_COLOR_ATTACHMENT_BYTES
+                || differs)
         {
             groups.push(std::mem::take(&mut current));
             bytes = 0;
@@ -176,17 +178,36 @@ mod tests {
 
     #[test]
     fn states_pack_into_texels() {
-        assert_eq!(pack_state("x", WgslType::F32, TextureFormat::R32Float), "vec4f(x)");
-        assert_eq!(unpack_state("t", WgslType::Vec2f, TextureFormat::Rg32Float), "t.xy");
-        assert_eq!(pack_state("b", WgslType::Bool, TextureFormat::R32Uint), "vec4u(u32(b))");
+        assert_eq!(
+            pack_state("x", WgslType::F32, TextureFormat::R32Float),
+            "vec4f(x)"
+        );
+        assert_eq!(
+            unpack_state("t", WgslType::Vec2f, TextureFormat::Rg32Float),
+            "t.xy"
+        );
+        assert_eq!(
+            pack_state("b", WgslType::Bool, TextureFormat::R32Uint),
+            "vec4u(u32(b))"
+        );
     }
 
     #[test]
     fn runs_stay_within_what_a_pass_writes() {
         let items = vec![Item(TextureFormat::Rgba32Float); 3];
         let runs = attachment_groups(&items);
-        assert_eq!(runs.iter().map(Vec::len).collect::<Vec<_>>(), [2, 1], "16 bytes each, 32 at most");
+        assert_eq!(
+            runs.iter().map(Vec::len).collect::<Vec<_>>(),
+            [2, 1],
+            "16 bytes each, 32 at most"
+        );
         let many = vec![Item(TextureFormat::R32Float); 9];
-        assert_eq!(attachment_groups(&many).iter().map(Vec::len).collect::<Vec<_>>(), [8, 1]);
+        assert_eq!(
+            attachment_groups(&many)
+                .iter()
+                .map(Vec::len)
+                .collect::<Vec<_>>(),
+            [8, 1]
+        );
     }
 }

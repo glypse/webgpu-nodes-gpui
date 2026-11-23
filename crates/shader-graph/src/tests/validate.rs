@@ -212,15 +212,15 @@ fn rejects_a_camera_without_a_zoom() {
 #[test]
 fn rejects_ids_labels_notes_and_code_past_their_limits() {
     let long_id = "i".repeat(MAX_ID_LENGTH + 1);
-    assert!(schema_error(&root(vec![node(&long_id, "sin")], vec![])).contains("Invalid length"));
+    assert!(schema_error(&root(vec![node(&long_id, "sin")], vec![])).contains("too long"));
 
     let mut note = node("a", "sin");
     note["data"] = json!({ "note": "n".repeat(MAX_NOTE_LENGTH + 1) });
-    assert!(schema_error(&root(vec![note], vec![])).contains("note: Invalid length"));
+    assert!(schema_error(&root(vec![note], vec![])).contains("note: too long"));
 
     let mut code = node("a", "custom-wgsl");
     code["data"] = json!({ "code": "c".repeat(MAX_CODE_LENGTH + 1) });
-    assert!(schema_error(&root(vec![code], vec![])).contains("code: Invalid length"));
+    assert!(schema_error(&root(vec![code], vec![])).contains("code: too long"));
 }
 
 #[test]
@@ -279,4 +279,26 @@ fn keeps_the_values_a_node_saved_over_the_defaults() {
     let loaded = GraphProject::from_json(&root(vec![saved], vec![])).expect("loads");
     let data = &loaded.resolve_node("s").expect("kept").data;
     assert_eq!(data.values.get("e"), Some(&InputValue::from(2.5)));
+}
+
+#[test]
+fn one_node_id_in_two_definitions_is_refused() {
+    let project = json!({ "definitions": {
+        ROOT_ID: { "nodes": [node("a", "sin")], "edges": [] },
+        "other": { "nodes": [node("a", "sin")], "edges": [] },
+    } });
+    assert!(matches!(
+        issues_of(&project.to_string()).as_slice(),
+        [GraphIssue::NodeIdInTwoDefinitions { id, .. }] if id == "a"
+    ));
+}
+
+#[test]
+fn rejects_an_asset_that_isnt_what_an_import_makes() {
+    let asset = json!({
+        "kind": "image", "id": "a1", "name": "Photo", "file": "project.json",
+        "mime": "image/png", "bytes": 1, "hash": "0".repeat(64), "width": 1, "height": 1,
+    });
+    let project = json!({ "definitions": { ROOT_ID: { "nodes": [], "edges": [] } }, "assets": [asset] });
+    assert!(schema_error(&project.to_string()).contains("isn't a valid asset"));
 }

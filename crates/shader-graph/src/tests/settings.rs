@@ -1,18 +1,17 @@
 use crate::graph::{ColorSpace, GraphModel, GraphProject, ProjectSettings};
 
 #[test]
-fn default_when_a_project_has_none() {
-    assert_eq!(GraphModel::default().settings(), ProjectSettings::default());
-}
-
-#[test]
 fn are_saved_and_loaded_with_the_project() {
+    assert_eq!(GraphModel::default().settings(), ProjectSettings::default());
     let mut model = GraphModel::default();
     let mut settings = model.settings();
     settings.color_space = ColorSpace::DisplayP3;
     assert!(model.update_settings(settings));
     let loaded = GraphProject::from_json(&model.project().to_json()).expect("loads");
-    assert_eq!(GraphModel::new(loaded).settings().color_space, ColorSpace::DisplayP3);
+    assert_eq!(
+        GraphModel::new(loaded).settings().color_space,
+        ColorSpace::DisplayP3
+    );
 }
 
 #[test]
@@ -44,6 +43,11 @@ fn are_part_of_the_undo_history_and_unsaved_changes() {
 #[test]
 fn unreadable_settings_fall_back_to_the_defaults() {
     let mut project = GraphProject::default();
-    project.extra.insert("settings".to_owned(), serde_json::json!({ "canvas": 3 }));
-    assert_eq!(GraphModel::new(project).settings(), ProjectSettings::default());
+    project
+        .extra
+        .insert("settings".to_owned(), serde_json::json!({ "canvas": 3 }));
+    assert_eq!(
+        GraphModel::new(project).settings(),
+        ProjectSettings::default()
+    );
 }

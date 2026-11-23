@@ -7,6 +7,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::f64::consts::TAU;
 
+use super::builders::{enum_input, known_enum};
+use crate::codegen::number;
 use crate::color::{LINEAR_RGB_TO_LMS, LMS_TO_LINEAR_RGB, LMS_TO_OKLAB, OKLAB_TO_LMS, wgsl_mat3};
 use crate::graph::{GraphModel, GraphProject};
 use crate::ramp::{
@@ -17,7 +19,7 @@ use crate::ramp::{
 };
 use crate::types::{
     EnumVariant, InputControl, InputValue, NodeCategory, NodeData, NodeDescriptor, NodeInputDef,
-    NodeOutputDef, NodeWidget, WgslCtx, WgslType, enum_value,
+    NodeOutputDef, NodeWidget, WgslCtx, WgslType,
 };
 
 pub const COLOR_RAMP: &str = "color-ramp";
@@ -173,15 +175,6 @@ fn slope_source() -> String {
     )
 }
 
-/// A float as a WGSL literal.
-fn f(n: f64) -> String {
-    if n.fract() == 0.0 {
-        format!("{n:.1}")
-    } else {
-        n.to_string()
-    }
-}
-
 /// Statements setting `r` to the segment's colour, interpolated as `interpolation` picks.
 fn interpolation_lines(ctx: &mut WgslCtx, interpolation: i64) -> Vec<String> {
     match interpolation {
@@ -194,16 +187,16 @@ fn interpolation_lines(ctx: &mut WgslCtx, interpolation: i64) -> Vec<String> {
                 "let t3 = t2 * t;".into(),
                 format!(
                     "r = ({} * t3 + {} * t2 - {} * t) * q0 + ({} * t3 + {} * t2 + 1.0) * q1 + ({} * t3 + {} * t2 + {} * t) * q2 + ({} * t3 - {} * t2) * q3;",
-                    f(-fc),
-                    f(2.0 * fc),
-                    f(fc),
-                    f(2.0 - fc),
-                    f(fc - 3.0),
-                    f(fc - 2.0),
-                    f(3.0 - 2.0 * fc),
-                    f(fc),
-                    f(fc),
-                    f(fc),
+                    number(-fc),
+                    number(2.0 * fc),
+                    number(fc),
+                    number(2.0 - fc),
+                    number(fc - 3.0),
+                    number(fc - 2.0),
+                    number(3.0 - 2.0 * fc),
+                    number(fc),
+                    number(fc),
+                    number(fc),
                 ),
             ]
         }
@@ -374,22 +367,6 @@ fn ramp_function(
     ctx.define_fn(&name, &source)
 }
 
-/// An enum input's value while compiling: set by the calling group node, or
-/// stored on the node while unlinked. `None` when it's only known per pixel.
-fn known_enum(ctx: &WgslCtx, id: &str, variants: &[EnumVariant]) -> Option<i64> {
-    if let Some(constant) = ctx.constant(id) {
-        return enum_value(Some(&InputValue::from(constant as f64)), variants);
-    }
-    if !ctx.operands(id).is_empty() {
-        return None;
-    }
-    enum_value(ctx.data.values.get(id), variants)
-}
-
-fn enum_input(id: &str, label: &str, variants: Vec<EnumVariant>) -> NodeInputDef {
-    NodeInputDef::new(id, label, &[WgslType::U32]).control(InputControl::Enum { variants })
-}
-
 pub fn build_color_ramp_descriptor(data: &NodeData) -> NodeDescriptor {
     let stops = color_ramp_stops(data);
     let stop_inputs = stops.iter().enumerate().map(|(i, stop)| {
@@ -489,11 +466,10 @@ fn ramp_statements(ctx: &mut WgslCtx, stops: &[RampStop]) -> Vec<String> {
     let v = ctx.var_name.clone();
     let count = stops.len();
     let rgba = ctx.output_type == WgslType::Vec4f;
-    let Some(only) = stops.first().filter(|_| count >= 2) else {
-        let id = stops.first().map_or("", |s| s.id.as_str());
-        return vec![format!("let {v} = {};", ctx.promote_input(id))];
-    };
-    let _ = only;
+    if count < 2 {
+        let Some(only) = stops.first() else { return vec![format!("let {v} = {};", ctx.output_type.zero())] };
+        return vec![format!("let {v} = {};", ctx.promote_input(&only.id))];
+    }
 
     let known = |ctx: &mut WgslCtx, id: &str, variants: Vec<EnumVariant>| {
         let value = known_enum(ctx, id, &variants);

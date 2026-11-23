@@ -12,7 +12,7 @@
 		"OKLch"
 	],
 	"category": "color",
-	"dependencies": ["std-oklch-gamut-map@1acc14cbea7282"],
+	"dependencies": ["std-oklch-gamut-map@01168dc4852ee292"],
 	"definition": {
 		"nodes": [
 			{
@@ -448,7 +448,7 @@
 					"y": 1817
 				},
 				"group": {
-					"definitionRef": "std-oklch-gamut-map@1acc14cbea7282",
+					"definitionRef": "std-oklch-gamut-map@01168dc4852ee292",
 					"locked": true
 				},
 				"frame": "84432c5b-5071-4ad8-a220-a001d165cdbb"

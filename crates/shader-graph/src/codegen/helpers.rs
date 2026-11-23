@@ -57,7 +57,9 @@ impl HelperRegistry {
 
     /// Declare a function by name; the first source declared under it stays.
     pub fn define(&mut self, name: &str, source: &str) -> String {
-        self.functions.entry(name.to_owned()).or_insert_with(|| source.to_owned());
+        self.functions
+            .entry(name.to_owned())
+            .or_insert_with(|| source.to_owned());
         name.to_owned()
     }
 

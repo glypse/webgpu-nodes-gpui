@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 
-use super::sources::{SocketRef, TextureResolution, TextureSource, TextureSources};
+use super::sources::{SocketRef, TextureResolution, TextureSource, TextureSources, path_key};
 use crate::codegen::CodegenGraph;
-use crate::graph::GraphEdge;
+use crate::graph::{FRAG_OUTPUT, GROUP_OUTPUT, GraphEdge};
 
 /// What a link does with a texture, at a group instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,7 +28,11 @@ pub struct PassAnalysis<'g> {
 
 impl<'g> PassAnalysis<'g> {
     pub fn new(graph: CodegenGraph<'g>) -> Self {
-        Self { sources: TextureSources::new(graph), graph, renders: RefCell::new(None) }
+        Self {
+            sources: TextureSources::new(graph),
+            graph,
+            renders: RefCell::new(None),
+        }
     }
 
     /// What `edge`, of the document computed at `path`, does with a texture, if anything.
@@ -46,13 +50,19 @@ impl<'g> PassAnalysis<'g> {
             &instance.bindings,
         );
         if target_type.is_some_and(|t| t.is_texture()) {
-            if self.sources.feed(path, &edge.target, &edge.target_handle)?.id != edge.id {
+            if self
+                .sources
+                .feed(path, &edge.target, &edge.target_handle)?
+                .id
+                != edge.id
+            {
                 return None;
             }
             return match self.sources.input(path, &edge.target, &edge.target_handle) {
-                TextureResolution::Invalid { reason, edge: found } if found == edge.id => {
-                    Some(TextureLink::Invalid { reason })
-                }
+                TextureResolution::Invalid {
+                    reason,
+                    edge: found,
+                } if found == edge.id => Some(TextureLink::Invalid { reason }),
                 TextureResolution::Source(TextureSource::Render { id, .. }) => {
                     Some(TextureLink::Render { id })
                 }
@@ -62,10 +72,12 @@ impl<'g> PassAnalysis<'g> {
         if !source_type.is_texture() {
             return None;
         }
-        Some(match self.sources.output(path, &edge.source, &edge.source_handle) {
-            TextureResolution::Invalid { reason, .. } => TextureLink::Invalid { reason },
-            TextureResolution::Source(_) => TextureLink::Sample,
-        })
+        Some(
+            match self.sources.output(path, &edge.source, &edge.source_handle) {
+                TextureResolution::Invalid { reason, .. } => TextureLink::Invalid { reason },
+                TextureResolution::Source(_) => TextureLink::Sample,
+            },
+        )
     }
 
     /// The values the frame renders to textures, by texture id: a pass each.
@@ -75,7 +87,15 @@ impl<'g> PassAnalysis<'g> {
         }
         let mut renders = BTreeMap::new();
         let mut seen = HashSet::new();
-        let outputs = self.graph.project.root().nodes.iter().filter(|n| n.is("frag-output")).map(|n| n.id.clone()).collect();
+        let outputs = self
+            .graph
+            .project
+            .root()
+            .nodes
+            .iter()
+            .filter(|n| n.is(FRAG_OUTPUT))
+            .map(|n| n.id.clone())
+            .collect();
         self.walk(&[], outputs, &mut seen, &mut renders);
         *self.renders.borrow_mut() = Some(renders.clone());
         renders
@@ -88,12 +108,14 @@ impl<'g> PassAnalysis<'g> {
         seen: &mut HashSet<String>,
         renders: &mut BTreeMap<String, SocketRef>,
     ) {
-        let Some(instance) = self.sources.instance(path) else { return };
+        let Some(instance) = self.sources.instance(path) else {
+            return;
+        };
         let mut queue = seeds;
         let mut next = 0;
         while let Some(id) = queue.get(next).cloned() {
             next += 1;
-            if !seen.insert(format!("{}|{id}", path.join("/"))) {
+            if !seen.insert(format!("{}|{id}", path_key(path))) {
                 continue;
             }
             for edge in instance.edges_into(&id) {
@@ -105,9 +127,18 @@ impl<'g> PassAnalysis<'g> {
                 }
                 queue.push(edge.source.clone());
             }
-            let def = instance.doc.node(&id).and_then(|n| n.definition_ref()).and_then(|r| self.graph.project.document(r));
+            let def = instance
+                .doc
+                .node(&id)
+                .and_then(|n| n.definition_ref())
+                .and_then(|r| self.graph.project.document(r));
             if let Some(def) = def {
-                let outputs = def.nodes.iter().filter(|n| n.is("group-output")).map(|n| n.id.clone()).collect();
+                let outputs = def
+                    .nodes
+                    .iter()
+                    .filter(|n| n.is(GROUP_OUTPUT))
+                    .map(|n| n.id.clone())
+                    .collect();
                 let inner: Vec<String> = path.iter().cloned().chain([id.clone()]).collect();
                 self.walk(&inner, outputs, seen, renders);
             }

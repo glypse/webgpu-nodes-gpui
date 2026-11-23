@@ -383,7 +383,7 @@ impl GraphModel {
         }
         let removed: HashSet<String> = incoming.iter().chain(&outgoing).map(|e| e.id.clone()).collect();
         let ids = nodes.iter().map(|n| n.id.clone()).collect();
-        let doc = self.project.definitions.get_mut(&key).expect("active");
+        let Some(doc) = self.project.definitions.get_mut(&key) else { return Vec::new() };
         doc.nodes.retain(|n| n.id != group_node.id);
         doc.nodes.extend(nodes);
         doc.edges.retain(|e| !removed.contains(&e.id));
@@ -728,7 +728,7 @@ impl GraphModel {
         } else {
             handle.variants_by = None;
         }
-        let kept: Vec<f64> = variants.iter().flatten().map(|v| v.value).collect();
+        let kept: Vec<i64> = variants.iter().flatten().map(|v| v.value).collect();
         let orphans: Vec<String> = handles
             .iter()
             .filter(|h| owner_chain(&handles, h).iter().any(|o| o.enum_id == handle_id && !kept.contains(&o.value)))

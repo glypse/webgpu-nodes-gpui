@@ -67,7 +67,7 @@ pub struct GroupImport {
 }
 
 /// A groups bundle as read: its groups, without the assets whose files aren't
-/// what they say, and the bundle's files by path.
+/// what they say, and the files of the assets it kept, by path.
 #[derive(Debug)]
 pub struct GroupsBundle {
     pub file: GroupsFile,
@@ -93,15 +93,12 @@ pub fn parse_groups(text: &str) -> Result<GroupsFile, LoadError> {
         serde_json::from_value(value).map_err(|e| LoadError::InvalidSchema(e.to_string()))?;
     let mut problems = Vec::new();
     if file.groups.len() > MAX_DEFINITIONS {
-        problems.push(format!("groups: Expected <={MAX_DEFINITIONS} but received {}", file.groups.len()));
+        problems.push(format!("groups: too many: {}, at most {MAX_DEFINITIONS}", file.groups.len()));
     }
     for group in &file.groups {
         if group.dependencies.len() > MAX_DEFINITIONS {
             problems.push(format!("{}.dependencies: too many", group.id));
         }
-    }
-    if let Some(asset) = file.assets.iter().find(|asset| !asset.is_valid()) {
-        problems.push(format!("assets: \"{}\" isn't a valid asset", asset.name()));
     }
     let mut probe = GraphProject::from_definitions(
         file.groups.iter().map(|g| (g.id.clone(), g.definition.clone())).collect(),
@@ -115,9 +112,13 @@ pub fn parse_groups(text: &str) -> Result<GroupsFile, LoadError> {
 pub fn read_groups(bytes: &[u8]) -> Result<GroupsBundle, GroupsReadError> {
     let bundle = unpack_bundle(bytes, BundleKind::Groups)?;
     let mut file = parse_groups(&bundle.json)?;
-    let altered = verified_files(&bundle, &file.assets).altered;
-    file.assets.retain(|asset| !altered.contains(asset));
-    Ok(GroupsBundle { file, altered, files: bundle.files })
+    let verified = verified_files(bundle, &file.assets);
+    let mut paths: HashMap<String, String> =
+        file.assets.iter().map(|a| (a.id().to_owned(), a.file().to_owned())).collect();
+    let files = verified.files.into_iter().filter_map(|(id, data)| Some((paths.remove(&id)?, data))).collect();
+    let altered_ids: HashSet<&str> = verified.altered.iter().map(Asset::id).collect();
+    file.assets.retain(|asset| !altered_ids.contains(asset.id()));
+    Ok(GroupsBundle { file, altered: verified.altered, files })
 }
 
 /// The groups of a bundle's definitions, as one document each for import checks.

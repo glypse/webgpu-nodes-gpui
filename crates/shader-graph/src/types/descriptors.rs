@@ -469,7 +469,9 @@ pub struct NodeDescriptor {
     pub type_family: Option<TypeFamily>,
     pub widget: Option<NodeWidget>,
     /// The node's outputs computed on the CPU, one value per output id.
-    /// f32 results are rounded and integers wrap as in WGSL, so both agree.
+    /// Each result is computed in f64 and rounded to the output's type: f32
+    /// rounds, float to integer conversions saturate (NaN gives 0), integer
+    /// arithmetic wraps. That matches the GPU to f32 precision, not bit for bit.
     /// Nodes with no meaning on the CPU (they read a pixel, a texture or
     /// custom code) have none.
     pub cpu: Option<CpuFn>,
@@ -548,11 +550,6 @@ impl NodeDescriptor {
         f: impl Fn(&CpuCtx<'_>) -> BTreeMap<String, Value> + Send + Sync + 'static,
     ) -> Self {
         self.cpu = Some(Arc::new(f));
-        self
-    }
-
-    pub fn cpu_fn(mut self, f: CpuFn) -> Self {
-        self.cpu = Some(f);
         self
     }
 

@@ -16,6 +16,9 @@ type D = NodeDescriptor;
 const COMPONENTS: [&str; 4] = ["x", "y", "z", "w"];
 pub const COMPONENT_COUNT: &str = "component-count";
 pub const COMPONENT_COUNT_INPUT: &str = "value";
+pub const FALLBACK: &str = "fallback";
+pub const FALLBACK_VALUE: &str = "value";
+pub const FALLBACK_DEFAULT: &str = "default";
 /// Measurable as WGSL's `length` and `distance` measure them.
 const MEASURED_TYPES: &[WgslType] = &[WgslType::Vec2f, WgslType::Vec3f, WgslType::Vec4f, WgslType::F32];
 
@@ -114,17 +117,16 @@ fn float_unary(ty: &str, label: &str, f: &'static str, aliases: &[&str]) -> D {
 
 pub(super) fn math_nodes() -> Vec<D> {
     let cat = NodeCategory::Math;
-    let safe = |name: &'static str, helper: HelperName| {
+    let safe = |helper: HelperName| {
         move |a: &str, b: &str, ctx: &mut crate::types::WgslCtx<'_>| {
-            let _ = name;
             format!("{}({a}, {b})", ctx.helper(helper, ctx.output_type))
         }
     };
     let float_pair = |ty: &str, label: &str, f: &'static str, labels: [&'static str; 2]| {
-        binary_node(
+        binary_fn(
             ty,
             label,
-            move |a, b, _| format!("{f}({a}, {b})"),
+            f,
             BinaryOptions {
                 types: FLOAT_TYPES,
                 ids: ["e1", "e2"],
@@ -156,15 +158,15 @@ pub(super) fn math_nodes() -> Vec<D> {
         ),
         math(variadic_op("mul", "Multiply", " * "), &["Times", "Product", "Scale", "Vector Math"]),
         math(
-            binary_node("div", "Divide", safe("div", HelperName::SafeDiv), BinaryOptions::default()),
+            binary_node("div", "Divide", safe(HelperName::SafeDiv), BinaryOptions::default()),
             &["Quotient", "Vector Math"],
         ),
         math(
-            binary_node("mod", "Modulo", safe("mod", HelperName::SafeMod), BinaryOptions::default()),
+            binary_node("mod", "Modulo", safe(HelperName::SafeMod), BinaryOptions::default()),
             &["Remainder", "fmod", "Truncated Modulo", "Vector Math"],
         ),
         math(
-            unary_fn("negate", "Negate", "", SIGNED_TYPES, cat).wgsl(|ctx| {
+            unary_node("negate", "Negate", SIGNED_TYPES, cat).wgsl(|ctx| {
                 let e = ctx.promote_input("e");
                 vec![format!("let {} = -({e});", ctx.var_name)]
             }),
@@ -182,17 +184,7 @@ pub(super) fn math_nodes() -> Vec<D> {
         math(variadic_fn("min", "Minimum", "min"), &["Darken", "Vector Math"]),
         math(variadic_fn("max", "Maximum", "max"), &["Lighten", "Vector Math"]),
         math(
-            binary_node(
-                "step",
-                "Step",
-                |a, b, _| format!("step({a}, {b})"),
-                BinaryOptions {
-                    types: FLOAT_TYPES,
-                    ids: ["e1", "e2"],
-                    labels: Some(["edge", "x"]),
-                    ..BinaryOptions::default()
-                },
-            ),
+            float_pair("step", "Step", "step", ["edge", "x"]),
             &["Threshold", "Greater Than", "Heaviside"],
         ),
         math(number3(), &["Saturate", "Limit", "Clip"]),
@@ -200,7 +192,7 @@ pub(super) fn math_nodes() -> Vec<D> {
             binary_node(
                 "pow",
                 "Power",
-                safe("pow", HelperName::SafePow),
+                safe(HelperName::SafePow),
                 op_options(FLOAT_TYPES, ["e1", "e2"]),
             ),
             &["Exponent", "Gamma"],
@@ -224,12 +216,7 @@ pub(super) fn math_nodes() -> Vec<D> {
 pub(super) fn vector_nodes() -> Vec<D> {
     let cat = NodeCategory::Vector;
     let pair = |ty: &str, label: &str, f: &'static str, types: &'static [WgslType], labels| {
-        binary_node(
-            ty,
-            label,
-            move |a, b, _| format!("{f}({a}, {b})"),
-            BinaryOptions { types, ids: ["e1", "e2"], labels, category: cat },
-        )
+        binary_fn(ty, label, f, BinaryOptions { types, ids: ["e1", "e2"], labels, category: cat })
     };
     let length = D::new("length", "Length", cat)
         .aliases(&["Magnitude", "Norm", "Vector Math"])
@@ -346,7 +333,7 @@ pub(super) fn integer_nodes() -> Vec<D> {
             })
     };
     let not = math(
-        unary_fn("bitwise-not", "Bitwise Not", "", INTEGER_TYPES, cat).wgsl(|ctx| {
+        unary_node("bitwise-not", "Bitwise Not", INTEGER_TYPES, cat).wgsl(|ctx| {
             let e = ctx.promote_input("e");
             vec![format!("let {} = ~({e});", ctx.var_name)]
         }),
@@ -453,7 +440,7 @@ pub(super) fn logic_nodes() -> Vec<D> {
         d.values.insert("e".to_owned(), false.into());
         d
     };
-    let not = unary_fn("not", "Not", "", BOOL_TYPES, cat)
+    let not = unary_node("not", "Not", BOOL_TYPES, cat)
         .aliases(&["Logical Not", "Boolean Not", "Invert Boolean"])
         .defaults(bool_default())
         .wgsl(|ctx| {
@@ -463,7 +450,7 @@ pub(super) fn logic_nodes() -> Vec<D> {
     let reduce_setting = NodeSetting::new("op", "Operation", &[("any", "Any"), ("all", "All")]);
     let reduce = {
         let setting = reduce_setting.clone();
-        unary_fn("reduce-boolean", "Any / All", "", BOOL_TYPES, cat)
+        unary_node("reduce-boolean", "Any / All", BOOL_TYPES, cat)
             .aliases(&["Reduce"])
             .defaults(bool_default().setting("op", "any"))
             .settings(vec![reduce_setting])
@@ -476,16 +463,16 @@ pub(super) fn logic_nodes() -> Vec<D> {
     // Presence is known while compiling (never a runtime "null"): `value` is
     // absent when nothing feeds it, or when it comes from a group input whose
     // socket the calling group node left unlinked.
-    let fallback = D::new("fallback", "Fallback", cat)
+    let fallback = D::new(FALLBACK, "Fallback", cat)
         .aliases(&["Default Value", "Coalesce", "Optional"])
         .inputs(vec![
-            NodeInputDef::new("value", "value", &WgslType::ALL),
-            NodeInputDef::new("default", "default", &WgslType::ALL),
+            NodeInputDef::new(FALLBACK_VALUE, "value", &WgslType::ALL),
+            NodeInputDef::new(FALLBACK_DEFAULT, "default", &WgslType::ALL),
         ])
         .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
-        .defaults(float_values([("default", 0.0)]))
+        .defaults(float_values([(FALLBACK_DEFAULT, 0.0)]))
         .wgsl(|ctx| {
-            let chosen = if ctx.is_present("value") { "value" } else { "default" };
+            let chosen = if ctx.is_present(FALLBACK_VALUE) { FALLBACK_VALUE } else { FALLBACK_DEFAULT };
             let e = ctx.promote_input(chosen);
             vec![format!("let {} = {e};", ctx.var_name)]
         });

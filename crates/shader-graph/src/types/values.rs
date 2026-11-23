@@ -1,13 +1,14 @@
 //! WGSL value types: a scalar kind and a component count.
 //!
 //! Scalar kinds always convert implicitly (int to float is exact, float to int
-//! truncates toward zero, number to bool is `!= 0`); component counts may only
+//! saturates and NaN gives 0, number to bool is `!= 0`); component counts may only
 //! grow when linking, and the missing components are zero.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+/// Ordered for picking a common kind: float absorbs ints, ints absorb bools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScalarKind {
     Bool,
@@ -17,7 +18,6 @@ pub enum ScalarKind {
 }
 
 impl ScalarKind {
-
     /// The scalar type's WGSL spelling.
     pub fn name(self) -> &'static str {
         match self {
@@ -26,11 +26,6 @@ impl ScalarKind {
             ScalarKind::U32 => "u32",
             ScalarKind::Bool => "bool",
         }
-    }
-
-    /// Orders kinds for picking a common one: float absorbs ints, ints absorb bools.
-    fn rank(self) -> u8 {
-        self as u8
     }
 
     fn zero(self) -> &'static str {
@@ -130,7 +125,6 @@ pub const NUMERIC_TYPES: &[WgslType] = &[
 ];
 pub const SIGNED_TYPES: &[WgslType] = &[F32, Vec2f, Vec3f, Vec4f, I32, Vec2i, Vec3i, Vec4i];
 pub const INTEGER_TYPES: &[WgslType] = &[I32, Vec2i, Vec3i, Vec4i, U32, Vec2u, Vec3u, Vec4u];
-pub const SCALAR_TYPES: &[WgslType] = &[F32, I32, U32, Bool];
 
 /// Named sets of types, e.g. for what a group's type variable may take.
 pub struct TypeSet {
@@ -201,10 +195,6 @@ impl WgslType {
     pub fn zero(self) -> String {
         format!("{}()", self.wgsl_name())
     }
-
-    pub fn is_scalar(self) -> bool {
-        self.components() == 1
-    }
 }
 
 /// Whether `source` may be linked to an input of `target` type. Component
@@ -264,7 +254,7 @@ pub fn convert_var(expr: &str, source: WgslType, target: WgslType) -> String {
 
 /// The smallest type able to hold both: the widest kind, the most components.
 pub fn join_types(a: WgslType, b: WgslType) -> WgslType {
-    let kind = if a.kind().rank() >= b.kind().rank() { a.kind() } else { b.kind() };
+    let kind = a.kind().max(b.kind());
     make_type(kind, a.components().max(b.components()))
 }
 

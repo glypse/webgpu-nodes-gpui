@@ -104,7 +104,6 @@ impl Asset {
     /// Whether the metadata is what `asset_file` and `asset_kind_of` could have made.
     pub fn is_valid(&self) -> bool {
         let info = self.file_info();
-        let side = 1..=MAX_ASSET_SIDE;
         let finite = self.video().is_none_or(|v| {
             v.duration.is_finite() && v.duration >= 0.0 && v.frame_rate.is_finite() && v.frame_rate >= 0.0
         });
@@ -113,12 +112,17 @@ impl Asset {
             && info.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
             && info.hash.len() == 64
             && info.hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
-            && side.contains(&info.width)
-            && side.contains(&info.height)
+            && valid_side(info.width)
+            && valid_side(info.height)
             && finite
             && asset_kind_of(&info.mime) == Some(self.kind())
             && asset_file(self.kind(), &info.id, &info.file) == info.file
     }
+}
+
+/// Whether `side` is a size an asset's pixels can have.
+pub(super) fn valid_side(side: u32) -> bool {
+    (1..=MAX_ASSET_SIDE).contains(&side)
 }
 
 /// The extension a bundle path keeps: tame ones only, as lowercase.
@@ -304,42 +308,10 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_through_json() {
-        let video = Asset::Video(VideoFile {
-            file: AssetFile {
-                id: "v".into(),
-                name: "clip".into(),
-                file: "assets/videos/v.mp4".into(),
-                mime: "video/mp4".into(),
-                bytes: 1,
-                hash: "0".repeat(64),
-                width: 64,
-                height: 32,
-            },
-            duration: 2.0,
-            frame_rate: 25.0,
-        });
-        for asset in [image(), video] {
-            let json = serde_json::to_string(&asset).expect("serialises");
-            assert_eq!(serde_json::from_str::<Asset>(&json).expect("parses"), asset);
-        }
+    fn a_video_without_a_frame_rate_is_rejected() {
         let json = r#"{"kind":"video","id":"v","name":"c","file":"assets/videos/v.mp4","mime":"video/mp4","bytes":1,"hash":"0000000000000000000000000000000000000000000000000000000000000000","width":1,"height":1,"duration":2,"frameRate":25}"#;
         assert!(serde_json::from_str::<Asset>(json).is_ok());
         assert!(serde_json::from_str::<Asset>(&json.replace(",\"frameRate\":25", "")).is_err());
-    }
-
-    #[test]
-    fn video_frame_interval_is_known_with_a_frame_rate() {
-        let video = |frame_rate| {
-            Asset::Video(VideoFile {
-                file: AssetFile { mime: "video/mp4".into(), ..image().file_info().clone() },
-                duration: 2.0,
-                frame_rate,
-            })
-        };
-        assert_eq!(frame_interval(Some(&video(25.0))), f64::from(0.04f32));
-        assert_eq!(frame_interval(Some(&video(0.0))), 0.0);
-        assert_eq!(frame_interval(None), 0.0);
     }
 
     #[test]

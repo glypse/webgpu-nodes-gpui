@@ -108,17 +108,6 @@ impl GraphModel {
         self.edit_render_item(node_id, item_id, |i| i.ty = HandleType::Fixed(ty));
     }
 
-    /// Moves an item up (-1) or down (+1) among the node's.
-    pub fn move_render_item(&mut self, node_id: &str, item_id: &str, offset: isize) {
-        let mut items = self.render_items_of(node_id);
-        let Some(index) = items.iter().position(|i| i.id == item_id) else { return };
-        let Some(other) = index.checked_add_signed(offset).filter(|o| *o < items.len()) else {
-            return;
-        };
-        items.swap(index, other);
-        self.set_render_items(node_id, items);
-    }
-
     fn edit_render_item(&mut self, node_id: &str, item_id: &str, edit: impl FnOnce(&mut ZoneItem)) {
         let mut items = self.render_items_of(node_id);
         let Some(item) = items.iter_mut().find(|i| i.id == item_id) else { return };

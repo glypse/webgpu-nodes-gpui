@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::codegen::CodegenGraph;
-use crate::enums::MATCH;
-use crate::graph::{GROUP_INPUT, GROUP_OUTPUT, GraphEdge, GraphNode, NODE_GROUP};
+use crate::enums::{MATCH, WIDTH_SWITCH};
+use crate::graph::{GROUP_INPUT, GraphEdge, GraphNode, NODE_GROUP};
 use crate::nodes::{
-    COMPONENT_COUNT, TEXTURE_SIZE, TEXTURE_SIZE_LEVEL, VIDEO, WIDTH_SWITCH_TYPE, is_video_metadata,
+    COMPONENT_COUNT, FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE, TEXTURE_SIZE, TEXTURE_SIZE_LEVEL, VIDEO, is_video_metadata,
     resolve_descriptor,
 };
 use crate::passes::TextureSources;
@@ -16,6 +16,7 @@ use crate::zones::{ITERATIONS_HANDLE, REPEAT_INPUT, ZoneKind, zone_items, zone_k
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FrameResult {
     Frame,
+    Texture,
     PerPixel(String),
 }
 
@@ -37,6 +38,7 @@ pub enum FrameLink {
     Invalid { reason: String },
 }
 
+#[cfg(test)]
 const TEXTURE_REASON: &str = "A texture isn't a value.";
 
 /// Nodes whose outputs the runtime knows before drawing, with no inputs of their own to check.
@@ -81,19 +83,17 @@ impl<'g> FrameValueAnalysis<'g> {
         Self::new(graph, Rc::new(TextureSources::new(graph)))
     }
 
-    pub fn sources(&self) -> &Rc<TextureSources<'g>> {
-        &self.sources
-    }
-
     /// Whether an output of a node of the document computed at `path` is a frame value.
     pub fn is_frame_value(&self, path: &[String], node: &str, handle: &str) -> bool {
         self.output(path, node, handle).is_frame()
     }
 
     /// Why an output isn't a frame value, if it isn't.
-    pub fn reason(&self, path: &[String], node: &str, handle: &str) -> Option<String> {
+    #[cfg(test)]
+    pub(crate) fn reason(&self, path: &[String], node: &str, handle: &str) -> Option<String> {
         match self.output(path, node, handle) {
             FrameResult::Frame => None,
+            FrameResult::Texture => Some(TEXTURE_REASON.to_owned()),
             FrameResult::PerPixel(reason) => Some(reason),
         }
     }
@@ -104,7 +104,7 @@ impl<'g> FrameValueAnalysis<'g> {
         let target = instance.doc.node(&edge.target)?;
         match self.output(path, &edge.source, &edge.source_handle) {
             FrameResult::Frame => Some(FrameLink::Frame),
-            FrameResult::PerPixel(reason) if reason == TEXTURE_REASON => None,
+            FrameResult::Texture => None,
             FrameResult::PerPixel(reason) => {
                 let descriptor = resolve_descriptor(target, self.graph.project);
                 let input = descriptor.inputs.iter().find(|i| i.id == edge.target_handle)?;
@@ -116,16 +116,9 @@ impl<'g> FrameValueAnalysis<'g> {
     }
 
     /// Whether what a node's input reads is a frame value: an unlinked one is.
-    pub fn is_frame_input(&self, path: &[String], node: &str, input: &str) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_frame_input(&self, path: &[String], node: &str, input: &str) -> bool {
         self.input(path, node, input).is_frame()
-    }
-
-    /// Why an input doesn't read a frame value, if it doesn't.
-    pub fn input_reason(&self, path: &[String], node: &str, input: &str) -> Option<String> {
-        match self.input(path, node, input) {
-            FrameResult::Frame => None,
-            FrameResult::PerPixel(reason) => Some(reason),
-        }
     }
 
     /// The inputs of a node of the document computed at `path` its value
@@ -148,14 +141,14 @@ impl<'g> FrameValueAnalysis<'g> {
                     self.sources.with_enums(&instance, |e| e.matched_case(node_id, &instance.constants));
                 picked.map_or(ids, |p| vec![p])
             }
-            WIDTH_SWITCH_TYPE => {
+            WIDTH_SWITCH => {
                 let picked = self.sources.with_enums(&instance, |e| e.width_case(node_id));
                 picked.map_or(ids, |p| vec![p])
             }
             COMPONENT_COUNT => Vec::new(),
-            "fallback" => {
-                let linked = instance.edges_into(node_id).any(|e| e.target_handle == "value");
-                vec![if linked { "value" } else { "default" }.to_owned()]
+            FALLBACK => {
+                let linked = instance.edges_into(node_id).any(|e| e.target_handle == FALLBACK_VALUE);
+                vec![if linked { FALLBACK_VALUE } else { FALLBACK_DEFAULT }.to_owned()]
             }
             _ => ids,
         }
@@ -196,9 +189,9 @@ impl<'g> FrameValueAnalysis<'g> {
         let Some(node) = instance.doc.node(node_id) else { return no("There's nothing to read.") };
         let types = self.graph.resolver.resolve(self.graph.project, node, &instance.bindings);
         if types.resolved_outputs.iter().find(|o| o.id == handle).is_some_and(|o| o.ty.is_texture()) {
-            return no(TEXTURE_REASON);
+            return FrameResult::Texture;
         }
-        let label = resolve_descriptor(node, self.graph.project).label.clone();
+        let label = || resolve_descriptor(node, self.graph.project).label.clone();
         let ty = node.node_type.as_str();
         if FRAME_SOURCES.contains(&ty) {
             return FrameResult::Frame;
@@ -211,7 +204,7 @@ impl<'g> FrameValueAnalysis<'g> {
             return if is_video_metadata(handle) {
                 FrameResult::Frame
             } else {
-                no(format!("{label}'s frame is read per pixel."))
+                no(format!("{}'s frame is read per pixel.", label()))
             };
         }
         if ty == GROUP_INPUT {
@@ -224,13 +217,13 @@ impl<'g> FrameValueAnalysis<'g> {
             return self.group_output(path, node, handle);
         }
         match zone_kind_of(ty) {
-            Some(ZoneKind::Simulation) => return no(format!("{label} keeps its state for each pixel.")),
+            Some(ZoneKind::Simulation) => return no(format!("{} keeps its state for each pixel.", label())),
             Some(ZoneKind::Repeat) => return self.zone_value(path, node_id),
-            Some(ZoneKind::Passes) => return no(format!("{label} repeats passes, not a computation.")),
+            Some(ZoneKind::Passes) => return no(format!("{} repeats passes, not a computation.", label())),
             None => {}
         }
         if resolve_descriptor(node, self.graph.project).cpu.is_none() {
-            return no(format!("{label} is computed for each pixel."));
+            return no(format!("{} is computed for each pixel.", label()));
         }
         for id in self.inputs_read(path, node_id) {
             let result = self.input(path, node_id, &id);
@@ -246,12 +239,7 @@ impl<'g> FrameValueAnalysis<'g> {
         let Some(definition) = node.definition_ref().and_then(|r| self.graph.project.document(r)) else {
             return FrameResult::Frame;
         };
-        let outputs: Vec<&GraphNode> = definition.nodes.iter().filter(|n| n.is(GROUP_OUTPUT)).collect();
-        let out = outputs
-            .iter()
-            .find(|n| definition.edges_into(&n.id).any(|e| e.target_handle == handle))
-            .or(outputs.first());
-        out.map_or(FrameResult::Frame, |o| self.input(&inner, &o.id, handle))
+        definition.output_node_of(handle).map_or(FrameResult::Frame, |o| self.input(&inner, &o.id, handle))
     }
 
     /// An output of a repeat zone's boundary. A zone whose inputs and next

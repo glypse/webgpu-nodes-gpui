@@ -66,14 +66,16 @@ impl ProjectSettings {
 }
 
 impl GraphModel {
-    /// The project's settings; the defaults when it has none, or unreadable ones.
+    /// The project's settings; the defaults when it has none, or ones that can't be used.
     pub fn settings(&self) -> ProjectSettings {
-        self.project
-            .extra
-            .get(KEY)
-            .and_then(|v| serde_json::from_value::<ProjectSettings>(v.clone()).ok())
-            .filter(ProjectSettings::is_valid)
-            .unwrap_or_default()
+        let Some(value) = self.project.extra.get(KEY) else { return ProjectSettings::default() };
+        match serde_json::from_value::<ProjectSettings>(value.clone()) {
+            Ok(settings) if settings.is_valid() => settings,
+            _ => {
+                log::warn!("the project's settings can't be used, so the defaults apply");
+                ProjectSettings::default()
+            }
+        }
     }
 
     /// Replaces the settings. Refused (`false`) when a value is out of range.

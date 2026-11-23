@@ -33,7 +33,7 @@ fn handle(id: &str, label: &str, outputs: bool) -> String {
         .expect("the handle exists")
 }
 
-fn render(model: &mut GraphModel, node: &str, output: &str) -> Rgb {
+fn render(renderer: &mut Renderer, model: &mut GraphModel, node: &str, output: &str) -> Rgb {
     let out = model
         .root()
         .nodes
@@ -46,7 +46,6 @@ fn render(model: &mut GraphModel, node: &str, output: &str) -> Rgb {
     let program = model
         .generate_with(&ShaderOptions::default())
         .expect("generates");
-    let mut renderer = Renderer::new().expect("a GPU");
     let compiled = renderer.compile(&program.plan).expect("compiles");
     let options = RenderOptions {
         size: Size::new(1, 1),
@@ -107,6 +106,7 @@ fn color_group(model: &mut GraphModel, mode: ColorMode, values: [f64; 3]) -> Str
 
 #[test]
 fn the_color_node_computes_each_mode() {
+    let mut renderer = Renderer::new().expect("a GPU");
     let output = handle("std-color", "Color", true);
     let cases = [
         (ColorMode::Rgb, [0.2, 0.4, 0.6]),
@@ -117,7 +117,7 @@ fn the_color_node_computes_each_mode() {
     for (mode, values) in cases {
         let mut model = GraphModel::default();
         let node = color_group(&mut model, mode, values);
-        let actual = render(&mut model, &node, &output);
+        let actual = render(&mut renderer, &mut model, &node, &output);
         expect_close(
             actual,
             color_to_linear(mode, values),
@@ -128,6 +128,7 @@ fn the_color_node_computes_each_mode() {
 
 #[test]
 fn gamut_mapping_matches_the_colour_pickers() {
+    let mut renderer = Renderer::new().expect("a GPU");
     let input = handle("std-oklch-gamut-map", "OKLch", false);
     let output = handle("std-oklch-gamut-map", "Linear RGB", true);
     for (l, c, h) in [
@@ -142,7 +143,7 @@ fn gamut_mapping_matches_the_colour_pickers() {
             .add_group_instance(&entry("std-oklch-gamut-map").reference, Point::default())
             .expect("adds");
         model.set_input_value(&node, &input, Some(InputValue::vector(&[l, c, h])));
-        let actual = render(&mut model, &node, &output);
+        let actual = render(&mut renderer, &mut model, &node, &output);
         expect_close(
             actual,
             oklch_to_linear(Lch { l, c, h }, ColorSpace::Srgb),
@@ -170,7 +171,7 @@ mod ramp {
     ];
     const POSITIONS: [f64; 3] = [0.0, 0.3, 1.0];
 
-    fn ramp_on_gpu(modes: RampModes, factor: f64) -> Rgb {
+    fn ramp_on_gpu(renderer: &mut Renderer, modes: RampModes, factor: f64) -> Rgb {
         let mut model = GraphModel::default();
         let node = model.add_node(COLOR_RAMP, Point::default()).expect("adds");
         let stops: Vec<RampStop> = POSITIONS
@@ -195,11 +196,12 @@ mod ramp {
         ] {
             model.set_input_value(&node, input, Some(value.into()));
         }
-        render(&mut model, &node, "color")
+        render(renderer, &mut model, &node, "color")
     }
 
     #[test]
     fn the_shader_computes_what_the_cpu_does() {
+        let mut renderer = Renderer::new().expect("a GPU");
         let stops: Vec<RampColorStop> = POSITIONS
             .iter()
             .zip(COLORS)
@@ -244,7 +246,7 @@ mod ramp {
             for factor in [0.0, 0.15, 0.3, 0.55, 0.9, 1.0] {
                 let [r, g, b, _] = evaluate_ramp(&stops, factor, modes);
                 expect_close(
-                    ramp_on_gpu(modes, factor),
+                    ramp_on_gpu(&mut renderer, modes, factor),
                     Rgb::new(r, g, b),
                     &format!("{modes:?} at {factor}"),
                 );

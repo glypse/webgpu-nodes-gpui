@@ -11,10 +11,10 @@
 	],
 	"category": "color",
 	"dependencies": [
-		"std-oklch-to-oklab@06de8acf481c99",
-		"std-oklab-to-linear-rgb@0deeb5e1a34c78",
-		"std-linear-rgb-to-oklab@162875a4513f88",
-		"std-in-display-gamut@0421a880f36e29"
+		"std-oklch-to-oklab@484eaf50ce66492a",
+		"std-oklab-to-linear-rgb@d2ebff3aab738e0b",
+		"std-linear-rgb-to-oklab@9812aae7fe1c2f2f",
+		"std-in-display-gamut@c4c7d58f5885c374"
 	],
 	"definition": {
 		"nodes": [
@@ -59,7 +59,7 @@
 					"y": 1135
 				},
 				"group": {
-					"definitionRef": "std-oklch-to-oklab@06de8acf481c99",
+					"definitionRef": "std-oklch-to-oklab@484eaf50ce66492a",
 					"locked": true
 				},
 				"frame": "03cd4484-7f9c-4620-866d-e9ec296ea7fc"
@@ -85,7 +85,7 @@
 					"y": 1073
 				},
 				"group": {
-					"definitionRef": "std-oklab-to-linear-rgb@0deeb5e1a34c78",
+					"definitionRef": "std-oklab-to-linear-rgb@d2ebff3aab738e0b",
 					"locked": true
 				},
 				"frame": "03cd4484-7f9c-4620-866d-e9ec296ea7fc"
@@ -109,7 +109,7 @@
 					"y": 1017
 				},
 				"group": {
-					"definitionRef": "std-linear-rgb-to-oklab@162875a4513f88",
+					"definitionRef": "std-linear-rgb-to-oklab@9812aae7fe1c2f2f",
 					"locked": true
 				},
 				"frame": "03cd4484-7f9c-4620-866d-e9ec296ea7fc"
@@ -261,7 +261,7 @@
 					"y": 992
 				},
 				"group": {
-					"definitionRef": "std-oklch-to-oklab@06de8acf481c99",
+					"definitionRef": "std-oklch-to-oklab@484eaf50ce66492a",
 					"locked": true
 				},
 				"frame": "81155318-80ce-407d-bbdb-d2f09f6b87b3"
@@ -275,7 +275,7 @@
 					"y": 964
 				},
 				"group": {
-					"definitionRef": "std-oklab-to-linear-rgb@0deeb5e1a34c78",
+					"definitionRef": "std-oklab-to-linear-rgb@d2ebff3aab738e0b",
 					"locked": true
 				},
 				"frame": "81155318-80ce-407d-bbdb-d2f09f6b87b3"
@@ -289,7 +289,7 @@
 					"y": 936
 				},
 				"group": {
-					"definitionRef": "std-in-display-gamut@0421a880f36e29",
+					"definitionRef": "std-in-display-gamut@c4c7d58f5885c374",
 					"locked": true
 				},
 				"frame": "81155318-80ce-407d-bbdb-d2f09f6b87b3"
@@ -313,7 +313,7 @@
 					"y": 731
 				},
 				"group": {
-					"definitionRef": "std-linear-rgb-to-oklab@162875a4513f88",
+					"definitionRef": "std-linear-rgb-to-oklab@9812aae7fe1c2f2f",
 					"locked": true
 				},
 				"frame": "81155318-80ce-407d-bbdb-d2f09f6b87b3"
@@ -466,7 +466,7 @@
 					"y": 633
 				},
 				"group": {
-					"definitionRef": "std-oklch-to-oklab@06de8acf481c99",
+					"definitionRef": "std-oklch-to-oklab@484eaf50ce66492a",
 					"locked": true
 				},
 				"frame": "85846d1c-76ca-44bc-8bb1-c1f56eb6fea5"
@@ -480,7 +480,7 @@
 					"y": 605
 				},
 				"group": {
-					"definitionRef": "std-oklab-to-linear-rgb@0deeb5e1a34c78",
+					"definitionRef": "std-oklab-to-linear-rgb@d2ebff3aab738e0b",
 					"locked": true
 				},
 				"frame": "85846d1c-76ca-44bc-8bb1-c1f56eb6fea5"

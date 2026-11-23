@@ -128,12 +128,36 @@ pub struct FieldDecl {
 }
 
 pub const FRAME_FIELDS: [FieldDecl; 6] = [
-    FieldDecl { name: "time", scalar: UniformScalar::F32, components: 1 },
-    FieldDecl { name: "delta", scalar: UniformScalar::F32, components: 1 },
-    FieldDecl { name: "resolution", scalar: UniformScalar::F32, components: 2 },
-    FieldDecl { name: "frame", scalar: UniformScalar::U32, components: 1 },
-    FieldDecl { name: DISPLAY_P3_FIELD, scalar: UniformScalar::U32, components: 1 },
-    FieldDecl { name: SIMULATION_DELTA_FIELD, scalar: UniformScalar::F32, components: 1 },
+    FieldDecl {
+        name: "time",
+        scalar: UniformScalar::F32,
+        components: 1,
+    },
+    FieldDecl {
+        name: "delta",
+        scalar: UniformScalar::F32,
+        components: 1,
+    },
+    FieldDecl {
+        name: "resolution",
+        scalar: UniformScalar::F32,
+        components: 2,
+    },
+    FieldDecl {
+        name: "frame",
+        scalar: UniformScalar::U32,
+        components: 1,
+    },
+    FieldDecl {
+        name: DISPLAY_P3_FIELD,
+        scalar: UniformScalar::U32,
+        components: 1,
+    },
+    FieldDecl {
+        name: SIMULATION_DELTA_FIELD,
+        scalar: UniformScalar::F32,
+        components: 1,
+    },
 ];
 
 /// Textures and samplers are bound after the frame, uniform and frame value blocks.
@@ -178,20 +202,30 @@ fn layout(binding: u32, decls: &[Decl]) -> UniformBlock {
         offset = offset.div_ceil(align) * align;
         fields.insert(
             d.name.clone(),
-            UniformField { offset, scalar: d.scalar, components: d.components },
+            UniformField {
+                offset,
+                scalar: d.scalar,
+                components: d.components,
+            },
         );
         offset += d.components * 4;
     }
-    UniformBlock { binding, size: (offset.div_ceil(16) * 16).max(16), fields }
+    UniformBlock {
+        binding,
+        size: (offset.div_ceil(16) * 16).max(16),
+        fields,
+    }
 }
 
 fn struct_source(name: &str, decls: &[Decl]) -> String {
-    let fields: Vec<String> =
-        decls.iter().map(|d| format!("\t{}: {},", d.name, wgsl_type(d))).collect();
+    let fields: Vec<String> = decls
+        .iter()
+        .map(|d| format!("\t{}: {},", d.name, wgsl_type(d)))
+        .collect();
     format!("struct {name} {{\n{}\n}};", fields.join("\n"))
 }
 
-/// Wrap a fragment from `generate_shader` (which defines `frag`) into a full program.
+/// Wrap a fragment from `generate_shader_with` (which defines `frag`) into a full program.
 pub fn build_program(
     fragment: &str,
     uniforms: &[(String, UniformValue)],
@@ -207,19 +241,35 @@ pub fn build_program(
         .collect();
     // A struct can't be empty: this stands in when the graph has no uniforms.
     if uniform_decls.is_empty() {
-        uniform_decls.push(Decl { name: "unused".to_owned(), scalar: UniformScalar::F32, components: 4 });
+        uniform_decls.push(Decl {
+            name: "unused".to_owned(),
+            scalar: UniformScalar::F32,
+            components: 4,
+        });
     }
     let mut value_decls: Vec<Decl> = parts
         .frame_values
         .iter()
-        .map(|f| Decl { name: f.name.clone(), scalar: f.scalar, components: f.components })
+        .map(|f| Decl {
+            name: f.name.clone(),
+            scalar: f.scalar,
+            components: f.components,
+        })
         .collect();
     if value_decls.is_empty() {
-        value_decls.push(Decl { name: "unused".to_owned(), scalar: UniformScalar::F32, components: 4 });
+        value_decls.push(Decl {
+            name: "unused".to_owned(),
+            scalar: UniformScalar::F32,
+            components: 4,
+        });
     }
     let frame_decls: Vec<Decl> = FRAME_FIELDS
         .iter()
-        .map(|f| Decl { name: f.name.to_owned(), scalar: f.scalar, components: f.components })
+        .map(|f| Decl {
+            name: f.name.to_owned(),
+            scalar: f.scalar,
+            components: f.components,
+        })
         .collect();
     let frame = layout(0, &frame_decls);
     let uniform_block = layout(1, &uniform_decls);
@@ -239,7 +289,11 @@ pub fn build_program(
         .samplers
         .iter()
         .zip(first_sampler..)
-        .map(|(s, binding)| ProgramSampler { binding, filter: s.filter, address: s.address })
+        .map(|(s, binding)| ProgramSampler {
+            binding,
+            filter: s.filter,
+            address: s.address,
+        })
         .collect();
     let resources: String = textures
         .iter()
@@ -253,7 +307,10 @@ pub fn build_program(
             )
         })
         .chain(samplers.iter().zip(parts.samplers).map(|(s, decl)| {
-            format!("@group(0) @binding({}) var {}: sampler;\n", s.binding, decl.name)
+            format!(
+                "@group(0) @binding({}) var {}: sampler;\n",
+                s.binding, decl.name
+            )
         }))
         .collect();
     let (output, targets_struct) = match parts.targets {
@@ -263,7 +320,10 @@ pub fn build_program(
                 .enumerate()
                 .map(|(i, t)| format!("\t@location({i}) t{i}: {},", t.wgsl_name()))
                 .collect();
-            (TARGETS_STRUCT.to_owned(), format!("struct {TARGETS_STRUCT} {{\n{}\n}};\n", fields.join("\n")))
+            (
+                TARGETS_STRUCT.to_owned(),
+                format!("struct {TARGETS_STRUCT} {{\n{}\n}};\n", fields.join("\n")),
+            )
         }
         None => ("@location(0) vec4f".to_owned(), String::new()),
     };
@@ -315,7 +375,11 @@ fn runtime_fragment_main(in: RuntimeVarying) -> {output} {{
         frame,
         uniforms: uniform_block,
         frame_values: values_block,
-        frame_value_refs: parts.frame_values.iter().map(|f| (f.name.clone(), f.reference.clone())).collect(),
+        frame_value_refs: parts
+            .frame_values
+            .iter()
+            .map(|f| (f.name.clone(), f.reference.clone()))
+            .collect(),
         textures,
         samplers,
         targets: parts.targets.map(<[WgslType]>::to_vec),

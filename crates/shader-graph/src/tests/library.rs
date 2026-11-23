@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::catalog::{EntryKind, add_menu_entries};
 use crate::graph::{GraphModel, GraphProject, Point, ROOT_ID};
 use crate::library::{self, entries, is_library_ref};
@@ -8,6 +10,11 @@ use crate::types::{HandleType, WgslType};
 fn the_library_loads() {
     assert!(library::load_error().is_none(), "{:?}", library::load_error());
     assert!(entries().len() >= 40);
+    let ids: HashSet<&str> = entries().iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids.len(), entries().len(), "library ids are unique");
+    let (first, second) = (library::load().expect("loads"), library::load().expect("loads"));
+    let refs = |loaded: &[library::LibraryEntry]| loaded.iter().map(|e| e.reference.clone()).collect::<Vec<_>>();
+    assert_eq!(refs(&first), refs(&second), "library versions are stable");
 }
 
 #[test]

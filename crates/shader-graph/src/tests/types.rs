@@ -21,7 +21,10 @@ fn a_forced_type_wins_over_links() {
     g.link((&time, "seconds"), (&sin, "e"));
     g.force_type(&sin, WgslType::Vec3f);
     assert_eq!(g.model.resolve_node_output_type(&sin), WgslType::Vec3f);
-    assert_eq!(g.model.resolve_inferred_input_type(&sin, "e"), WgslType::F32);
+    assert_eq!(
+        g.model.resolve_inferred_input_type(&sin, "e"),
+        WgslType::F32
+    );
 }
 
 #[test]
@@ -48,11 +51,5 @@ fn declare_inputs_follow_its_type() {
     let d = g.add("declare");
     g.force_type(&d, WgslType::Vec3i);
     assert_eq!(g.model.resolve_node_inputs(&d).len(), 3);
-    assert_eq!(g.resolve_in(&d, "x"), WgslType::I32);
-}
-
-impl TestGraph {
-    fn resolve_in(&self, node: &str, input: &str) -> WgslType {
-        self.model.resolve_input_type(node, input)
-    }
+    assert_eq!(g.model.resolve_input_type(&d, "x"), WgslType::I32);
 }

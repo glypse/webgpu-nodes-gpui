@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+log.workspace = true
 serde.workspace = true
 graph-math = { path = "../graph-math" }
 # Without it parsed floats can differ in the last digit, which changes library versions.
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 zip = { version = "9.8.1", default-features = false, features = ["deflate"] }
 uuid = { version = "1", features = ["v4"] }

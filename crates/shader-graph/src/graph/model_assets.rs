@@ -113,7 +113,7 @@ impl GraphModel {
     /// Have an Image or Video node read an asset of its kind (or none, with `None`).
     pub fn set_node_asset(&mut self, node_id: &str, asset_id: Option<&str>) {
         let Some(node) = self.project.resolve_node(node_id) else { return };
-        if !MEDIA_NODE_TYPES.contains(node.node_type.as_str()) {
+        if !MEDIA_NODE_TYPES.contains(&node.node_type.as_str()) {
             return;
         }
         let kind_fits = match asset_id {

@@ -16,8 +16,7 @@ impl ScalarValue {
     pub fn as_f64(self) -> f64 {
         match self {
             ScalarValue::Bool(b) => f64::from(u8::from(b)),
-            ScalarValue::Num(n) if n.is_finite() => n,
-            ScalarValue::Num(_) => 0.0,
+            ScalarValue::Num(n) => n,
         }
     }
 }
@@ -68,6 +67,12 @@ impl From<f64> for InputValue {
 impl From<i32> for InputValue {
     fn from(n: i32) -> Self {
         InputValue::Scalar(ScalarValue::Num(f64::from(n)))
+    }
+}
+
+impl From<i64> for InputValue {
+    fn from(n: i64) -> Self {
+        InputValue::Scalar(ScalarValue::Num(n as f64))
     }
 }
 
@@ -137,7 +142,8 @@ pub enum ColorDisplay {
 /// same when cases are renamed or reordered.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnumVariant {
-    pub value: f64,
+    #[serde(deserialize_with = "whole_number")]
+    pub value: i64,
     pub label: String,
     /// On an enum input with `variants_by`: the types of that variable the
     /// variant is offered for, all of them without.
@@ -147,12 +153,22 @@ pub struct EnumVariant {
 
 impl EnumVariant {
     pub fn new(value: i64, label: impl Into<String>) -> Self {
-        Self { value: value as f64, label: label.into(), types: None }
+        Self { value, label: label.into(), types: None }
     }
+}
 
-    pub fn int(&self) -> i64 {
-        self.value as i64
+/// An integer that older files stored as a float (`2.0`).
+fn whole_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Number {
+        Int(i64),
+        Float(f64),
     }
+    Ok(match Number::deserialize(d)? {
+        Number::Int(n) => n,
+        Number::Float(n) => n as i64,
+    })
 }
 
 /// The variants of a checkbox.
@@ -165,7 +181,8 @@ pub fn toggle_variants() -> Vec<EnumVariant> {
 #[serde(rename_all = "camelCase")]
 pub struct InputOwner {
     pub enum_id: String,
-    pub value: f64,
+    #[serde(deserialize_with = "whole_number")]
+    pub value: i64,
 }
 
 /// Some of the types of a group's type variable, by the variable's id.
@@ -307,26 +324,6 @@ impl<T> Handle<T> {
             size: None,
         }
     }
-
-    /// The handle with another type, the rest kept.
-    pub fn retyped<U>(&self, ty: U) -> Handle<U> {
-        Handle {
-            id: self.id.clone(),
-            label: self.label.clone(),
-            ty,
-            variants: self.variants.clone(),
-            compiled: self.compiled,
-            owner: self.owner.clone(),
-            type_owner: self.type_owner.clone(),
-            variants_by: self.variants_by.clone(),
-            min: self.min,
-            max: self.max,
-            display: self.display,
-            viewer: self.viewer,
-            format: self.format.clone(),
-            size: self.size.clone(),
-        }
-    }
 }
 
 /// A Custom WGSL node's socket.
@@ -353,7 +350,7 @@ pub struct CustomSockets {
 }
 
 /// Everything a node stores. Which fields apply depends on the node type.
-/// Fields of nodes this crate doesn't implement (assets) are
+/// Fields this crate has no typed field for (a Frame's tint and note) are
 /// kept in `extra` so saved projects round-trip.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -430,29 +427,24 @@ impl NodeData {
     /// `self` with `defaults` filled in where it has no value of its own.
     pub fn with_defaults(&self, defaults: &NodeData) -> NodeData {
         let mut data = defaults.clone();
-        let own = self.clone();
-        data.label = own.label;
-        data.items = own.items.or(data.items);
-        data.paired_output = own.paired_output.or(data.paired_output);
-        data.max_iterations = own.max_iterations.or(data.max_iterations);
-        data.cases = own.cases.or(data.cases);
-        data.code = own.code.or(data.code);
-        data.sockets = own.sockets.or(data.sockets);
-        data.hide_links = own.hide_links.or(data.hide_links);
-        data.hide_unlinked = own.hide_unlinked.or(data.hide_unlinked);
-        data.asset = own.asset.or(data.asset);
-        data.playback = own.playback.or(data.playback);
-        data.curve = own.curve.or(data.curve);
-        data.ramp = own.ramp.or(data.ramp);
-        data.values.extend(own.values);
-        data.settings.extend(own.settings);
-        data.types.extend(own.types);
-        data.extra.extend(own.extra);
+        data.label.clone_from(&self.label);
+        data.items = self.items.clone().or(data.items);
+        data.paired_output = self.paired_output.clone().or(data.paired_output);
+        data.max_iterations = self.max_iterations.or(data.max_iterations);
+        data.cases = self.cases.or(data.cases);
+        data.code = self.code.clone().or(data.code);
+        data.sockets = self.sockets.clone().or(data.sockets);
+        data.hide_links = self.hide_links.or(data.hide_links);
+        data.hide_unlinked = self.hide_unlinked.or(data.hide_unlinked);
+        data.asset = self.asset.clone().or(data.asset);
+        data.playback = self.playback.or(data.playback);
+        data.curve = self.curve.clone().or(data.curve);
+        data.ramp = self.ramp.clone().or(data.ramp);
+        data.values.extend(self.values.clone());
+        data.settings.extend(self.settings.clone());
+        data.types.extend(self.types.clone());
+        data.extra.extend(self.extra.clone());
         data
-    }
-
-    pub fn value(&self, id: &str) -> Option<&InputValue> {
-        self.values.get(id)
     }
 }
 
@@ -461,9 +453,9 @@ pub fn enum_value(stored: Option<&InputValue>, variants: &[EnumVariant]) -> Opti
     let value = stored.map_or(0, InputValue::as_i64);
     variants
         .iter()
-        .find(|v| v.int() == value)
+        .find(|v| v.value == value)
         .or_else(|| variants.first())
-        .map(EnumVariant::int)
+        .map(|v| v.value)
 }
 
 pub fn scalar_number_of(kind: ScalarKind, value: Option<f64>) -> f64 {
@@ -471,7 +463,7 @@ pub fn scalar_number_of(kind: ScalarKind, value: Option<f64>) -> f64 {
     match kind {
         ScalarKind::Bool => f64::from(u8::from(raw != 0.0)),
         ScalarKind::F32 => raw,
-        ScalarKind::I32 => raw.trunc().clamp(-2147483647.0, 2147483647.0),
-        ScalarKind::U32 => raw.trunc().clamp(0.0, 4294967295.0),
+        ScalarKind::I32 => raw.trunc().clamp(f64::from(i32::MIN), f64::from(i32::MAX)),
+        ScalarKind::U32 => raw.trunc().clamp(0.0, f64::from(u32::MAX)),
     }
 }

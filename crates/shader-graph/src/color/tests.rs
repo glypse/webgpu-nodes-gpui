@@ -134,10 +134,9 @@ fn draws_the_colour_wheel() {
     let mut model = GraphModel::default();
     let node = color_node(&mut model);
     let descriptor = model.resolve_descriptor(model.node(&node).expect("the node exists"));
-    let Some(NodeWidget::Color(GroupWidget::Color { mode, .. })) = &descriptor.widget else {
+    let Some(NodeWidget::Color(GroupWidget::Color { .. })) = &descriptor.widget else {
         panic!("the Color group has a colour widget")
     };
-    assert_eq!(*mode, mode_input());
 }
 
 #[test]

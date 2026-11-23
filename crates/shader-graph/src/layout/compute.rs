@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 use super::elk;
 use super::{LayoutError, LayoutSpacing, NodeGeometry};
 use crate::graph::{
-    Bounds, EMPTY_FRAME_SIZE, FRAME_PADDING, FrameAnalysis, GraphEdge, GraphNode, LAYOUT_FRAME, Point, Size,
-    frame_rects,
+    Bounds, EMPTY_FRAME_SIZE, FRAME_PADDING, FrameAnalysis, GraphEdge, GraphNode, LAYOUT_FRAME,
+    Point, Size, frame_rects,
 };
 use crate::zones::ZoneAnalysis;
 
@@ -39,13 +39,27 @@ pub fn compute_layout(input: &LayoutInput<'_>) -> Result<HashMap<String, Point>,
         .iter()
         .filter(|e| ids.contains(e.source.as_str()) && ids.contains(e.target.as_str()))
         .collect();
+    let mut touching: HashMap<&str, Vec<&GraphEdge>> = HashMap::new();
+    for e in &links {
+        touching.entry(e.source.as_str()).or_default().push(e);
+        if e.target != e.source {
+            touching.entry(e.target.as_str()).or_default().push(e);
+        }
+    }
+    let geometries: HashMap<&str, NodeGeometry> = nodes
+        .iter()
+        .map(|n| (n.id.as_str(), (input.geometry)(n)))
+        .collect();
 
     let mut elk_nodes: HashMap<&str, Value> = HashMap::new();
     for node in nodes {
         if is_frame_block(input.frames, node, &ids) {
             continue;
         }
-        let geometry = empty_frame_size(node, (input.geometry)(node));
+        let Some(geometry) = geometries.get(node.id.as_str()).cloned() else {
+            continue;
+        };
+        let geometry = empty_frame_size(node, geometry);
         let mut ports = Ports::default();
         for (handle, y) in &geometry.inputs {
             ports.add(input_port(&node.id, handle, *y));
@@ -54,9 +68,13 @@ pub fn compute_layout(input: &LayoutInput<'_>) -> Result<HashMap<String, Point>,
             ports.add(output_port(&node.id, handle, *y, geometry.width));
         }
         // Links to handles the geometry doesn't know of still get a port.
-        for e in &links {
+        for e in touching.get(node.id.as_str()).into_iter().flatten() {
             if e.target == node.id {
-                ports.add(input_port(&node.id, &e.target_handle, geometry.height / 2.0));
+                ports.add(input_port(
+                    &node.id,
+                    &e.target_handle,
+                    geometry.height / 2.0,
+                ));
             }
             if e.source == node.id {
                 ports.add(output_port(
@@ -79,10 +97,13 @@ pub fn compute_layout(input: &LayoutInput<'_>) -> Result<HashMap<String, Point>,
         );
     }
 
-    let blocks = layout_blocks(input, &ids);
+    let blocks = layout_blocks(input, &ids, &geometries);
     let mut children: HashMap<Option<usize>, Vec<Child>> = HashMap::new();
     for (index, parent) in blocks.parent.iter().enumerate() {
-        children.entry(*parent).or_default().push(Child::Block(index));
+        children
+            .entry(*parent)
+            .or_default()
+            .push(Child::Block(index));
     }
     for node in nodes {
         if !elk_nodes.contains_key(node.id.as_str()) {
@@ -134,18 +155,19 @@ pub fn compute_layout(input: &LayoutInput<'_>) -> Result<HashMap<String, Point>,
     let laid_out = elk::layout(root)?;
 
     let mut positions = HashMap::new();
-    collect(&laid_out, (0.0, 0.0), &ids, &mut positions);
+    collect(&laid_out, (0.0, 0.0), &ids, &mut positions)?;
 
     // Frames go where they're drawn: around what they hold, once it's moved.
-    let sizes: HashMap<&str, NodeGeometry> = nodes.iter().map(|n| (n.id.as_str(), (input.geometry)(n))).collect();
     let placed: HashMap<&str, (Point, Size)> = nodes
         .iter()
         .map(|n| {
             let at = positions.get(&n.id).copied().unwrap_or(n.position);
-            let size = sizes.get(n.id.as_str()).map_or(Size::default(), |g| Size {
-                width: g.width,
-                height: g.height,
-            });
+            let size = geometries
+                .get(n.id.as_str())
+                .map_or(Size::default(), |g| Size {
+                    width: g.width,
+                    height: g.height,
+                });
             (n.id.as_str(), (at, size))
         })
         .collect();
@@ -173,6 +195,7 @@ pub fn compute_layout(input: &LayoutInput<'_>) -> Result<HashMap<String, Point>,
         top_left(nodes.iter().map(|n| n.position)),
         top_left(positions.values().copied()),
     ) else {
+        log::warn!("the layout gave no positions for {} nodes", nodes.len());
         return Ok(HashMap::new());
     };
     let (dx, dy) = (before.x - after.x, before.y - after.y);
@@ -278,25 +301,37 @@ fn top_left(points: impl Iterator<Item = Point>) -> Option<Point> {
 }
 
 /// Reads the top-left corner of each node laid out, summing offsets through the blocks.
-fn collect(parent: &Value, offset: (f32, f32), ids: &HashSet<&str>, out: &mut HashMap<String, Point>) {
+fn collect(
+    parent: &Value,
+    offset: (f32, f32),
+    ids: &HashSet<&str>,
+    out: &mut HashMap<String, Point>,
+) -> Result<(), LayoutError> {
     let Some(children) = parent.get("children").and_then(Value::as_array) else {
-        return;
+        return Ok(());
     };
     for child in children {
-        let at = (offset.0 + coord(child, "x"), offset.1 + coord(child, "y"));
         let Some(id) = child.get("id").and_then(Value::as_str) else {
             continue;
         };
+        let at = (
+            offset.0 + coord(child, "x", id)?,
+            offset.1 + coord(child, "y", id)?,
+        );
         if ids.contains(id) {
             out.insert(id.to_owned(), Point::new(at.0, at.1));
         } else {
-            collect(child, at, ids, out);
+            collect(child, at, ids, out)?;
         }
     }
+    Ok(())
 }
 
-fn coord(node: &Value, key: &str) -> f32 {
-    node.get(key).and_then(Value::as_f64).unwrap_or(0.0) as f32
+fn coord(node: &Value, key: &str, id: &str) -> Result<f32, LayoutError> {
+    node.get(key)
+        .and_then(Value::as_f64)
+        .map(|v| v as f32)
+        .ok_or_else(|| LayoutError::Elk(format!("no {key} for {id} in the layout output")))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -346,7 +381,9 @@ impl Builder<'_> {
         for child in children {
             match child {
                 Child::Block(index) => {
-                    let Some(block) = self.blocks.get(index) else { continue };
+                    let Some(block) = self.blocks.get(index) else {
+                        continue;
+                    };
                     let inner = self.build(Some(index));
                     out.push(json!({ "id": block.key, "layoutOptions": block.options, "children": inner }));
                 }
@@ -365,7 +402,11 @@ impl Builder<'_> {
 /// each frame holding nodes laid out, unless it holds part of a zone only
 /// (zones decide what's in them, frames give way). Blocks nest as their
 /// nodes do; a frame holding exactly a zone's nodes goes around it.
-fn layout_blocks(input: &LayoutInput<'_>, ids: &HashSet<&str>) -> Blocks {
+fn layout_blocks(
+    input: &LayoutInput<'_>,
+    ids: &HashSet<&str>,
+    geometries: &HashMap<&str, NodeGeometry>,
+) -> Blocks {
     let frames = input.frames;
     let spacing = input.spacing;
 
@@ -390,7 +431,11 @@ fn layout_blocks(input: &LayoutInput<'_>, ids: &HashSet<&str>) -> Blocks {
         });
     }
 
-    let block_frames: Vec<&GraphNode> = input.nodes.iter().filter(|n| is_frame_block(frames, n, ids)).collect();
+    let block_frames: Vec<&GraphNode> = input
+        .nodes
+        .iter()
+        .filter(|n| is_frame_block(frames, n, ids))
+        .collect();
     let block_frame_ids: HashSet<&str> = block_frames.iter().map(|n| n.id.as_str()).collect();
     let mut frame_blocks: Vec<Block> = Vec::new();
     for node in block_frames {
@@ -410,7 +455,9 @@ fn layout_blocks(input: &LayoutInput<'_>, ids: &HashSet<&str>) -> Blocks {
         if straddles {
             continue;
         }
-        let header = (input.geometry)(node);
+        let Some(header) = geometries.get(node.id.as_str()) else {
+            continue;
+        };
         frame_blocks.push(Block {
             kind: BlockKind::Frame,
             id: frame.id.clone(),
@@ -439,7 +486,11 @@ fn layout_blocks(input: &LayoutInput<'_>, ids: &HashSet<&str>) -> Blocks {
             .collect();
         of_node.insert((*id).to_owned(), innermost(&list, frames, &around));
     }
-    Blocks { list, parent, of_node }
+    Blocks {
+        list,
+        parent,
+        of_node,
+    }
 }
 
 /// Whether block `outer` goes around block `inner`.
@@ -472,10 +523,11 @@ fn is_ancestor_frame(frames: &FrameAnalysis, outer: &str, inner: &str) -> bool {
 
 /// Of blocks around something, the innermost: the one all the others hold.
 fn innermost(list: &[Block], frames: &FrameAnalysis, around: &[usize]) -> Option<usize> {
-    around
-        .iter()
-        .copied()
-        .find(|&b| around.iter().all(|&other| other == b || holds(list, frames, other, b)))
+    around.iter().copied().find(|&b| {
+        around
+            .iter()
+            .all(|&other| other == b || holds(list, frames, other, b))
+    })
 }
 
 fn pad(top: f32, side: f32, min_width: f32) -> Value {

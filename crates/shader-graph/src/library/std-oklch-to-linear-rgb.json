@@ -3,7 +3,7 @@
 	"name": "OKLch to Linear RGB",
 	"aliases": ["OKLch to sRGB", "OKLch to RGB", "Color Space Conversion", "Perceptual Color"],
 	"category": "color",
-	"dependencies": ["std-oklch-to-oklab@06de8acf481c99", "std-oklab-to-linear-rgb@0deeb5e1a34c78"],
+	"dependencies": ["std-oklch-to-oklab@484eaf50ce66492a", "std-oklab-to-linear-rgb@d2ebff3aab738e0b"],
 	"definition": {
 		"nodes": [
 			{
@@ -15,7 +15,7 @@
 					"y": 28
 				},
 				"group": {
-					"definitionRef": "std-oklch-to-oklab@06de8acf481c99",
+					"definitionRef": "std-oklch-to-oklab@484eaf50ce66492a",
 					"locked": true
 				}
 			},
@@ -39,7 +39,7 @@
 					"y": 0
 				},
 				"group": {
-					"definitionRef": "std-oklab-to-linear-rgb@0deeb5e1a34c78",
+					"definitionRef": "std-oklab-to-linear-rgb@d2ebff3aab738e0b",
 					"locked": true
 				}
 			},

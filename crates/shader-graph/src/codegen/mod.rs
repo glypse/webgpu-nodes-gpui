@@ -19,6 +19,14 @@ pub use texture_read::*;
 use crate::graph::GraphProject;
 use crate::types::TypeResolver;
 
+/// Replaces the first of `items` that `same` says is `item`, or appends `item`.
+fn upsert<T>(items: &mut Vec<T>, item: T, same: impl Fn(&T, &T) -> bool) {
+    match items.iter_mut().find(|existing| same(existing, &item)) {
+        Some(existing) => *existing = item,
+        None => items.push(item),
+    }
+}
+
 /// A generated frame: the program drawing it, after the passes it reads from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {

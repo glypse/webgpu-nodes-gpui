@@ -1,6 +1,6 @@
 //! Editing Custom WGSL nodes' code and sockets.
 
-use super::limits::{MAX_CODE_LENGTH, js_length};
+use super::limits::MAX_CODE_LENGTH;
 use super::model::GraphModel;
 use super::{GraphNode, new_id};
 use crate::nodes::{CUSTOM_WGSL, custom_sockets, is_socket_name, new_socket_label};
@@ -13,7 +13,7 @@ impl GraphModel {
     }
 
     pub fn set_custom_code(&mut self, node_id: &str, code: &str) {
-        if self.custom_node(node_id).is_none() || js_length(code) > MAX_CODE_LENGTH {
+        if self.custom_node(node_id).is_none() || code.len() > MAX_CODE_LENGTH {
             return;
         }
         self.update_node_data(node_id, |data| data.code = Some(code.to_owned()));

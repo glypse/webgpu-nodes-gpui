@@ -1,10 +1,10 @@
 //! The add menu's catalog: every entry a graph can add, grouped by heading,
 //! and the search over them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphModel, GraphNode, NODE_GROUP, Point, REROUTE, ROOT_ID,
+    GROUP_INPUT, GROUP_OUTPUT, GraphModel, GraphNode, NODE_GROUP, Point, REROUTE, ROOT_ID,
 };
 use crate::library;
 use crate::nodes::{default_data_for_type, registered, registered_nodes, resolve_descriptor};
@@ -212,7 +212,7 @@ fn group_choices(definition: &crate::graph::GraphDocument) -> Vec<Vec<EntryOptio
                 .map(|v: &EnumVariant| {
                     let mut data = NodeData::default();
                     data.values.insert(input.id.clone(), InputValue::from(v.value));
-                    EntryOption { label: v.label.clone(), data, is_default: Some(v.int()) == default }
+                    EntryOption { label: v.label.clone(), data, is_default: Some(v.value) == default }
                 })
                 .collect(),
         ));
@@ -851,18 +851,17 @@ pub fn search_entries(
         }
     }
     hits.sort_by_key(|h| (h.tier, h.result.entry.label.len()));
-    let mut seen: Vec<(String, usize)> = Vec::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<Hit> = Vec::new();
     for hit in hits {
-        match seen.iter().position(|(k, _)| *k == hit.key) {
-            Some(i) => {
-                if hit.picked > out[seen[i].1].picked {
-                    let at = seen[i].1;
+        match seen.get(&hit.key) {
+            Some(&at) => {
+                if hit.picked > out[at].picked {
                     out[at] = hit;
                 }
             }
             None => {
-                seen.push((hit.key.clone(), out.len()));
+                seen.insert(hit.key.clone(), out.len());
                 out.push(hit);
             }
         }
@@ -870,14 +869,10 @@ pub fn search_entries(
     out.into_iter().map(|h| h.result).collect()
 }
 
-/// The frag output node is never offered.
-pub fn is_output(entry: &AddMenuEntry) -> bool {
-    matches!(&entry.kind, EntryKind::Node { node_type } if node_type == FRAG_OUTPUT)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::FRAG_OUTPUT;
 
     fn entries() -> Vec<AddMenuEntry> {
         add_menu_entries(&GraphModel::default())

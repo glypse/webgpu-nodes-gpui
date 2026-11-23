@@ -69,3 +69,56 @@ fn division_by_zero_is_zero() {
     g.set(&d, "a", 4.0);
     assert_eq!(g.eval(&d, "result"), [0.0]);
 }
+
+fn convert(ty: &str, x: f64) -> f64 {
+    let mut g = TestGraph::new();
+    let c = g.add(ty);
+    g.set(&c, "e", x);
+    g.eval(&c, "result")[0]
+}
+
+#[test]
+fn float_to_integer_saturates() {
+    assert_eq!(convert("to-int", 3e9), 2_147_483_647.0);
+    assert_eq!(convert("to-int", -3e9), -2_147_483_648.0);
+    assert_eq!(convert("to-uint", -1.0), 0.0);
+    assert_eq!(convert("to-uint", 5e9), 4_294_967_295.0);
+}
+
+#[test]
+fn nan_converts_to_zero() {
+    assert_eq!(convert("to-int", f64::NAN), 0.0);
+    assert_eq!(convert("to-uint", f64::NAN), 0.0);
+}
+
+fn integer_op(ty: &str, wgsl_type: WgslType, a: f64, b: f64) -> f64 {
+    let mut g = TestGraph::new();
+    let node = g.add(ty);
+    g.force_type(&node, wgsl_type);
+    if ty == "sub" {
+        g.set(&node, "a", a).set(&node, "b", b);
+    } else {
+        for x in [a, b] {
+            let d = g.add("declare");
+            g.force_type(&d, wgsl_type).set(&d, "x", x);
+            g.link((&d, "value"), (&node, "operands"));
+        }
+    }
+    g.eval(&node, "result")[0]
+}
+
+#[test]
+fn integer_arithmetic_wraps_both_ways() {
+    let max = f64::from(i32::MAX);
+    assert_eq!(integer_op("add", WgslType::I32, max, 1.0), f64::from(i32::MIN));
+    assert_eq!(integer_op("sub", WgslType::I32, f64::from(i32::MIN), 1.0), max);
+    assert_eq!(integer_op("mul", WgslType::I32, max, 2.0), -2.0);
+    assert_eq!(integer_op("add", WgslType::U32, f64::from(u32::MAX), 1.0), 0.0);
+    assert_eq!(integer_op("sub", WgslType::U32, 0.0, 1.0), f64::from(u32::MAX));
+}
+
+#[test]
+fn round_takes_halves_to_even() {
+    assert_eq!(convert("round", 2.5), 2.0);
+    assert_eq!(convert("round", 3.5), 4.0);
+}

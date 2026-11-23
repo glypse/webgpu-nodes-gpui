@@ -6,7 +6,8 @@ use crate::types::{SamplerAddress, SamplerFilter, ScalarKind, WgslCtx};
 pub const BILINEAR_FN: &str = "texture_bilinear";
 
 /// Linear filtering by hand, for 32-bit floats, which hardware filtering can't read.
-pub const BILINEAR_SOURCE: &str = "fn texture_bilinear(t: texture_2d<f32>, coords: vec2f, level: i32) -> vec4f {
+pub const BILINEAR_SOURCE: &str =
+    "fn texture_bilinear(t: texture_2d<f32>, coords: vec2f, level: i32) -> vec4f {
 	let size = vec2f(textureDimensions(t, level));
 	let p = coords * size - 0.5;
 	let base = vec2i(floor(p));
@@ -41,7 +42,11 @@ impl ReadEnv for WgslCtx<'_> {
 
 /// A `textureLoad` of a texture of `format` as a `vec4f`.
 pub fn texel_as_color(load: &str, format: TextureFormat) -> String {
-    if format.scalar() == ScalarKind::F32 { load.to_owned() } else { format!("vec4f({load})") }
+    if format.scalar() == ScalarKind::F32 {
+        load.to_owned()
+    } else {
+        format!("vec4f({load})")
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -54,7 +59,11 @@ pub struct ReadOptions<'a> {
 
 impl Default for ReadOptions<'_> {
     fn default() -> Self {
-        Self { filter: SamplerFilter::Linear, address: SamplerAddress::Clamp, level: None }
+        Self {
+            filter: SamplerFilter::Linear,
+            address: SamplerAddress::Clamp,
+            level: None,
+        }
     }
 }
 

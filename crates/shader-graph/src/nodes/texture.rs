@@ -1,10 +1,11 @@
 //! Nodes reading textures: Sample Texture, Texture Size and Load Texel.
 
+use super::builders::{enum_input, known_enum};
 use crate::codegen::{FRAGMENT_VAR, ReadOptions, read_texture};
 use crate::passes::texel_type;
 use crate::types::{
-    EnumVariant, InputControl, NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef,
-    SamplerAddress, SamplerFilter, TypeFamily, WgslCtx, WgslType, convert_var, enum_value,
+    EnumVariant, NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef,
+    SamplerAddress, SamplerFilter, TypeFamily, WgslCtx, WgslType, convert_var,
 };
 
 pub const SAMPLE_TEXTURE: &str = "sample-texture";
@@ -53,18 +54,6 @@ const OUTSIDE_SOURCE: &str = "fn texture_outside(coords: vec2f) -> bool {
 	return any(coords < vec2f(0.0)) || any(coords > vec2f(1.0));
 }";
 
-/// An enum input's value while compiling: set by the calling group node, or
-/// stored on the node while unlinked. `None` when it's only known per pixel.
-pub fn known_enum(ctx: &WgslCtx<'_>, id: &str, variants: &[EnumVariant]) -> Option<i64> {
-    if let Some(constant) = ctx.constant(id) {
-        return enum_value(Some(&(constant as f64).into()), variants);
-    }
-    if !ctx.operands(id).is_empty() {
-        return None;
-    }
-    enum_value(ctx.data.values.get(id), variants)
-}
-
 fn sampler_filter(interpolation: i64) -> SamplerFilter {
     if interpolation == 1 { SamplerFilter::Nearest } else { SamplerFilter::Linear }
 }
@@ -84,17 +73,14 @@ fn sampler_address(extension: i64) -> SamplerAddress {
 pub(super) fn sample_texture_node() -> NodeDescriptor {
     let mut uv = NodeInputDef::new(SAMPLE_TEXTURE_UV, "uv", &[WgslType::Vec2f]);
     uv.fallback = true;
-    let enum_input = |id: &str, variants: Vec<EnumVariant>| {
-        NodeInputDef::new(id, id, &[WgslType::U32]).control(InputControl::Enum { variants })
-    };
     let data = NodeData::with_values([("interpolation", 0.0), ("extension", 0.0), (SAMPLE_TEXTURE_LEVEL, 0.0)]);
     NodeDescriptor::new(SAMPLE_TEXTURE, "Sample Texture", NodeCategory::Texture)
         .aliases(&["Texture Sample", "Image Texture", "texture2D", "Lookup", "Texture Fetch"])
         .inputs(vec![
             NodeInputDef::new("texture", "texture", &[WgslType::Texture]),
             uv,
-            enum_input("interpolation", interpolations()),
-            enum_input("extension", extensions()),
+            enum_input("interpolation", "interpolation", interpolations()),
+            enum_input("extension", "extension", extensions()),
             NodeInputDef::new(SAMPLE_TEXTURE_LEVEL, "level", &[WgslType::F32]),
         ])
         .outputs(vec![

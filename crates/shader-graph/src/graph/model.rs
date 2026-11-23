@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::history::History;
 use super::{
-    Connection, FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode,
+    Connection, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode,
     GraphProject, GroupWidget, LAYOUT_FRAME, NODE_GROUP, Point, REROUTE, ROOT_ID, estimate_frame_header,
     frame_note, new_id,
 };
@@ -633,26 +633,6 @@ impl GraphModel {
         Some(id)
     }
 
-    /// Move nodes of the active document by `offset` from where `from` has them.
-    pub fn move_nodes(&mut self, from: &BTreeMap<String, Point>, offset: Point) {
-        let key = self.active_definition_ref();
-        let Some(doc) = self.doc_mut(&key) else { return };
-        for node in &mut doc.nodes {
-            if let Some(start) = from.get(&node.id) {
-                node.position = Point::new(start.x + offset.x, start.y + offset.y);
-            }
-        }
-        self.changed();
-    }
-
-    pub fn set_node_position(&mut self, node_id: &str, position: Point) {
-        let Some(key) = self.project.definition_ref_of(node_id).map(str::to_owned) else { return };
-        if let Some(node) = self.doc_mut(&key).and_then(|d| d.node_mut(node_id)) {
-            node.position = position;
-            self.changed();
-        }
-    }
-
     /// Zone nodes always go in pairs: the ids given, plus the partner of every
     /// zone boundary among them.
     fn with_zone_partners(&self, ids: &HashSet<String>) -> HashSet<String> {
@@ -976,10 +956,6 @@ impl GraphModel {
         self.is_valid_connection(&c) && self.connect(c)
     }
 
-    pub fn disconnect(&mut self, edge_id: &str) -> bool {
-        self.delete_edges(&[edge_id.to_owned()])
-    }
-
     // ── Code generation ──────────────────────────────────────────────────────
 
     /// Generate the program drawing the project's root document, reading
@@ -999,16 +975,6 @@ impl GraphModel {
 
     pub fn generate_with(&self, options: &ShaderOptions) -> Result<Program, CodegenError> {
         generate_program(&self.project, &self.resolver, options)
-    }
-
-    /// Whether the root has an Output node.
-    pub fn has_output(&self) -> bool {
-        self.root().nodes.iter().any(|n| n.is(FRAG_OUTPUT))
-    }
-
-    /// The model's nodes that are group boundaries, for editors.
-    pub fn is_boundary(&self, node_id: &str) -> bool {
-        self.node(node_id).is_some_and(|n| n.is(GROUP_INPUT) || n.is(GROUP_OUTPUT))
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────
@@ -1081,7 +1047,7 @@ impl GraphModel {
         let skipped = self.zone_analysis(doc).invalid_edges;
         let among = |id: &str| only.is_none_or(|o| o.contains(id));
         let RerouteBranches { reroutes, links, moved } =
-            reroute_branches(&doc.nodes, &doc.edges, among, |_| new_id(), &skipped);
+            reroute_branches(&doc.nodes, &doc.edges, among, new_id, &skipped);
         if reroutes.is_empty() {
             return HashSet::new();
         }

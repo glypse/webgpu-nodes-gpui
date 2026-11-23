@@ -51,9 +51,9 @@ impl Bounds {
 
 /// The smallest box holding every one of `boxes`.
 pub fn union_of(boxes: &[Bounds]) -> Option<Bounds> {
-    let first = boxes.first()?;
+    let (first, rest) = boxes.split_first()?;
     let (mut left, mut top, mut right, mut bottom) = (first.x, first.y, first.right(), first.bottom());
-    for b in &boxes[1..] {
+    for b in rest {
         left = left.min(b.x);
         top = top.min(b.y);
         right = right.max(b.right());

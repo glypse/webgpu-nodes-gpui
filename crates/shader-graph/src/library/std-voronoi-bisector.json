@@ -6,9 +6,9 @@
 	"section": ["Helpers", "Voronoi"],
 	"searchSection": "Helpers",
 	"dependencies": [
-		"std-voronoi-distance@0180c4aa500792",
-		"std-pad-vector@1728760d9cd716",
-		"std-component-sum@0e43caf9357ab7"
+		"std-voronoi-distance@4f6c70c0c6ccdc95",
+		"std-pad-vector@a1642ab9d45a02ac",
+		"std-component-sum@e8add6496bf06ef6"
 	],
 	"definition": {
 		"nodes": [
@@ -45,7 +45,7 @@
 					"y": 2504
 				},
 				"group": {
-					"definitionRef": "std-voronoi-distance@0180c4aa500792",
+					"definitionRef": "std-voronoi-distance@4f6c70c0c6ccdc95",
 					"locked": true
 				}
 			},
@@ -62,7 +62,7 @@
 					"y": 5019
 				},
 				"group": {
-					"definitionRef": "std-voronoi-distance@0180c4aa500792",
+					"definitionRef": "std-voronoi-distance@4f6c70c0c6ccdc95",
 					"locked": true
 				}
 			},
@@ -123,7 +123,7 @@
 					"y": 2353
 				},
 				"group": {
-					"definitionRef": "std-pad-vector@1728760d9cd716",
+					"definitionRef": "std-pad-vector@a1642ab9d45a02ac",
 					"locked": true
 				},
 				"frame": "babb8c9c-d264-4577-aabb-cebdd46f0bda"
@@ -147,7 +147,7 @@
 					"y": 2586
 				},
 				"group": {
-					"definitionRef": "std-pad-vector@1728760d9cd716",
+					"definitionRef": "std-pad-vector@a1642ab9d45a02ac",
 					"locked": true
 				},
 				"frame": "babb8c9c-d264-4577-aabb-cebdd46f0bda"
@@ -235,7 +235,7 @@
 					"y": 4520
 				},
 				"group": {
-					"definitionRef": "std-component-sum@0e43caf9357ab7",
+					"definitionRef": "std-component-sum@e8add6496bf06ef6",
 					"locked": true
 				},
 				"frame": "472fe529-22bf-4cae-b230-955105b7b894"

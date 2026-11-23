@@ -2,12 +2,12 @@
 //! implementation: graphs without a GPU, for tests and tools.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use thiserror::Error;
 
-use crate::graph::{ColorSpace, GraphDocument, GraphModel, GraphNode, GROUP_INPUT, GROUP_OUTPUT, NODE_GROUP};
-use crate::nodes::cpu::coerce;
+use crate::graph::{ColorSpace, GraphDocument, GraphModel, GraphNode, GROUP_INPUT, NODE_GROUP};
+use crate::nodes::cpu::{coerce, stored_value};
 use crate::types::{CpuCtx, CpuInputs, ResolvedNodeTypes, TypeBindings, Value, WgslType};
 use crate::zones::{
     ITERATION_HANDLE, ITERATIONS_HANDLE, REPEAT_INPUT, REPEAT_OUTPUT, zone_items, zone_max_iterations,
@@ -49,6 +49,8 @@ struct Frame<'m> {
     /// The final state of the zones run in this frame, by Repeat Output id.
     finals: RefCell<BTreeMap<String, BTreeMap<String, Value>>>,
     computed: RefCell<HashMap<String, Value>>,
+    /// Outputs being computed, to stop a cycle.
+    visiting: RefCell<HashSet<String>>,
 }
 
 impl<'m> Frame<'m> {
@@ -60,6 +62,7 @@ impl<'m> Frame<'m> {
             zones: BTreeMap::new(),
             finals: RefCell::default(),
             computed: RefCell::default(),
+            visiting: RefCell::default(),
         }
     }
 }
@@ -145,9 +148,7 @@ impl<'m> Evaluator<'m> {
         }
         let descriptor = self.model.resolve_descriptor(node);
         let stored = node.data.values.get(input_id).or_else(|| descriptor.default_value(input_id));
-        let components: Vec<f64> =
-            (0..ty.components()).map(|i| stored.map_or(0.0, |v| v.component(i))).collect();
-        coerce(&components, ty)
+        stored_value(stored, ty)
     }
 
     fn operands(&self, frame: &Frame<'m>, node: &GraphNode, input_id: &str) -> Vec<Value> {
@@ -166,7 +167,11 @@ impl<'m> Evaluator<'m> {
         if let Some(done) = frame.computed.borrow().get(&key) {
             return done.clone();
         }
+        if !frame.visiting.borrow_mut().insert(key.clone()) {
+            return self.fail(format!("\"{node_id}\" depends on itself"));
+        }
         let value = self.compute(frame, node_id, handle);
+        frame.visiting.borrow_mut().remove(&key);
         frame.computed.borrow_mut().insert(key, value.clone());
         value
     }
@@ -185,13 +190,7 @@ impl<'m> Evaluator<'m> {
                 let Some(inner) = self.group_frame(frame, node) else {
                     return self.fail(format!("no definition for \"{node_id}\""));
                 };
-                let outputs: Vec<&GraphNode> =
-                    inner.doc.nodes.iter().filter(|n| n.is(GROUP_OUTPUT)).collect();
-                let picked = outputs
-                    .iter()
-                    .find(|n| inner.doc.edges_into(&n.id).any(|e| e.target_handle == handle))
-                    .or(outputs.first());
-                return match picked {
+                return match inner.doc.output_node_of(handle) {
                     Some(out) => self.input(&inner, out, handle),
                     None => self.fail("no group output"),
                 };
@@ -283,6 +282,7 @@ impl<'m> Evaluator<'m> {
                     .collect(),
                 finals: RefCell::default(),
                 computed: RefCell::default(),
+                visiting: RefCell::default(),
             };
             state = items.iter().map(|i| (i.id.clone(), self.input(&inner, output, &i.id))).collect();
         }

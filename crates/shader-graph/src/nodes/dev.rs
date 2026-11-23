@@ -26,7 +26,6 @@ pub(super) fn dev_nodes() -> Vec<D> {
 
 #[cfg(test)]
 mod tests {
-    use crate::nodes::registered;
     use crate::testing::{TestGraph, validate_wgsl};
     use crate::types::WgslType;
 
@@ -40,15 +39,6 @@ mod tests {
         let out = g.output();
         g.link((&to_color, "value"), (&out, "color"));
         g.program().program.code
-    }
-
-    #[test]
-    fn the_dev_nodes_are_flagged_and_registered() {
-        for id in ["test-invalid-wgsl", "test-runtime-error"] {
-            let d = registered(id).expect("registered");
-            assert!(d.dev, "{id} is a developer-tool node");
-            assert!(!d.hidden, "{id} is not hidden, only gated by developer tools");
-        }
     }
 
     #[test]

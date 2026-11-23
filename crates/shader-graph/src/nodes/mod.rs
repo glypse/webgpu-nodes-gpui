@@ -21,16 +21,16 @@ pub use custom::*;
 pub use dynamic::*;
 pub use media::*;
 pub use render_texture::*;
-pub use standard::{COMPONENT_COUNT, COMPONENT_COUNT_INPUT};
+pub use standard::{COMPONENT_COUNT, COMPONENT_COUNT_INPUT, FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE};
 pub use texture::*;
 
-use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, WIDTH_SWITCH};
+use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR};
 use crate::graph::{GROUP_INPUT, GROUP_OUTPUT, GraphNode, GraphProject, NODE_GROUP};
 use crate::types::{NodeData, NodeDescriptor};
 use crate::zones::{build_zone_descriptor, is_zone_node_type};
 
 /// Node types whose descriptor is built from their node, not registered.
-pub const DYNAMIC_NODE_TYPES: [&str; 12] = [
+pub const DYNAMIC_NODE_TYPES: [&str; 14] = [
     GROUP_INPUT,
     GROUP_OUTPUT,
     crate::zones::REPEAT_INPUT,
@@ -43,6 +43,8 @@ pub const DYNAMIC_NODE_TYPES: [&str; 12] = [
     MATCH,
     INDEX_SWITCH,
     RENDER_TEXTURE,
+    CUSTOM_WGSL,
+    COLOR_RAMP,
 ];
 
 struct Registry {
@@ -148,6 +150,3 @@ pub fn resolve_descriptor(node: &GraphNode, project: &GraphProject) -> Arc<NodeD
             .expect("the registry has Declare"),
     }
 }
-
-/// The type name of the node deciding cases by component count.
-pub const WIDTH_SWITCH_TYPE: &str = WIDTH_SWITCH;

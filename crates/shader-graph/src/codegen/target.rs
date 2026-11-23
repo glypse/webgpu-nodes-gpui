@@ -1,7 +1,7 @@
 //! What a shader draws besides the fragment output: a socket's value, some
 //! of a simulation's state items, or some items of a Render Texture.
 
-use crate::passes::{RenderItemDraw, SimulationRef, SocketRef, StateItem, texel_type};
+use crate::passes::{RenderItemDraw, SimulationRef, SocketRef, StateItem, path_key, texel_type};
 use crate::types::WgslType;
 
 /// A simulation's state at its start (its initial values), or this frame's (its step).
@@ -56,9 +56,19 @@ pub(super) struct Probe {
 
 #[derive(Clone, Debug)]
 pub(super) enum ProbeKind {
-    Socket { node: String, handle: String },
-    Simulation { zone: String, stage: SimulationStage, items: Vec<StateItem> },
-    Textures { node: String, items: Vec<RenderItemDraw> },
+    Socket {
+        node: String,
+        handle: String,
+    },
+    Simulation {
+        zone: String,
+        stage: SimulationStage,
+        items: Vec<StateItem>,
+    },
+    Textures {
+        node: String,
+        items: Vec<RenderItemDraw>,
+    },
 }
 
 impl Probe {
@@ -66,7 +76,10 @@ impl Probe {
         match target {
             ShaderTarget::Socket(s) => Self {
                 path: s.path.clone(),
-                kind: ProbeKind::Socket { node: s.node.clone(), handle: s.handle.clone() },
+                kind: ProbeKind::Socket {
+                    node: s.node.clone(),
+                    handle: s.handle.clone(),
+                },
             },
             ShaderTarget::Simulation(t) => Self {
                 path: t.simulation.path.clone(),
@@ -78,7 +91,10 @@ impl Probe {
             },
             ShaderTarget::RenderTexture(t) => Self {
                 path: t.path.clone(),
-                kind: ProbeKind::Textures { node: t.node.clone(), items: t.items.clone() },
+                kind: ProbeKind::Textures {
+                    node: t.node.clone(),
+                    items: t.items.clone(),
+                },
             },
         }
     }
@@ -95,25 +111,23 @@ impl Probe {
 
     /// The probe of the group node it goes through at its level, as that group computes it.
     pub fn inner(&self) -> Self {
-        Self { path: self.path.iter().skip(1).cloned().collect(), kind: self.kind.clone() }
+        Self {
+            path: self.path.iter().skip(1).cloned().collect(),
+            kind: self.kind.clone(),
+        }
     }
 
     pub fn key(&self) -> String {
-        let at = self.path.join("/");
+        let at = |node: &String| path_key(self.path.iter().chain([node]));
         match &self.kind {
-            ProbeKind::Socket { node, handle } => {
-                let at = self.path.iter().chain([node]).cloned().collect::<Vec<_>>().join("/");
-                format!("{at}:{handle}")
-            }
+            ProbeKind::Socket { node, handle } => format!("{}:{handle}", at(node)),
             ProbeKind::Textures { node, items } => {
-                let at = self.path.iter().chain([node]).cloned().collect::<Vec<_>>().join("/");
                 let items: Vec<&str> = items.iter().map(|i| i.item.as_str()).collect();
-                format!("{at}:textures:{}", items.join(","))
+                format!("{}:textures:{}", at(node), items.join(","))
             }
             ProbeKind::Simulation { zone, stage, items } => {
-                let at = if at.is_empty() { zone.clone() } else { format!("{at}/{zone}") };
                 let items: Vec<&str> = items.iter().map(|i| i.texture.as_str()).collect();
-                format!("{at}:{}:{}", stage.id(), items.join(","))
+                format!("{}:{}:{}", at(zone), stage.id(), items.join(","))
             }
         }
     }
@@ -122,8 +136,12 @@ impl Probe {
     pub fn types(&self) -> Vec<WgslType> {
         match &self.kind {
             ProbeKind::Socket { .. } => vec![WgslType::Vec4f],
-            ProbeKind::Simulation { items, .. } => items.iter().map(|i| texel_type(i.format)).collect(),
-            ProbeKind::Textures { items, .. } => items.iter().map(|i| texel_type(i.format)).collect(),
+            ProbeKind::Simulation { items, .. } => {
+                items.iter().map(|i| texel_type(i.format)).collect()
+            }
+            ProbeKind::Textures { items, .. } => {
+                items.iter().map(|i| texel_type(i.format)).collect()
+            }
         }
     }
 

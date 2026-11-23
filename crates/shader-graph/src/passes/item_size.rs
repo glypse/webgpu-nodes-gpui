@@ -39,18 +39,30 @@ pub struct SizeHandles {
 
 /// Sizes read from inputs a Render Texture has once.
 pub fn node_size_handles() -> SizeHandles {
-    SizeHandles { scale: "scale".into(), pixels: "pixels".into(), like: "like".into() }
+    SizeHandles {
+        scale: "scale".into(),
+        pixels: "pixels".into(),
+        like: "like".into(),
+    }
 }
 
 pub const DEFAULT_SIZE_PIXELS: f64 = 256.0;
 
 /// The inputs giving the size of the item `id` of a zone's input node.
 pub fn item_size_handles(id: &str) -> SizeHandles {
-    SizeHandles { scale: format!("scale:{id}"), pixels: format!("pixels:{id}"), like: format!("like:{id}") }
+    SizeHandles {
+        scale: format!("scale:{id}"),
+        pixels: format!("pixels:{id}"),
+        like: format!("like:{id}"),
+    }
 }
 
 /// The size inputs an item has for its mode: none for the canvas' size.
-pub fn size_inputs(handles: &SizeHandles, mode: Option<ItemSizeMode>, label: Option<&str>) -> Vec<NodeInputDef> {
+pub fn size_inputs(
+    handles: &SizeHandles,
+    mode: Option<ItemSizeMode>,
+    label: Option<&str>,
+) -> Vec<NodeInputDef> {
     let name = |what: &str| label.map_or_else(|| what.to_owned(), |l| format!("{l} {what}"));
     let frame = |def: NodeInputDef| {
         let mut def = def;
@@ -59,11 +71,19 @@ pub fn size_inputs(handles: &SizeHandles, mode: Option<ItemSizeMode>, label: Opt
     };
     match mode {
         Some(ItemSizeMode::Scale) => vec![
-            frame(NodeInputDef::new(handles.scale.clone(), name("scale"), &[WgslType::F32])),
+            frame(NodeInputDef::new(
+                handles.scale.clone(),
+                name("scale"),
+                &[WgslType::F32],
+            )),
             NodeInputDef::new(handles.like.clone(), name("like"), &[WgslType::Texture]),
         ],
         Some(ItemSizeMode::Pixels) => {
-            vec![frame(NodeInputDef::new(handles.pixels.clone(), name("pixels"), &[WgslType::Vec2u]))]
+            vec![frame(NodeInputDef::new(
+                handles.pixels.clone(),
+                name("pixels"),
+                &[WgslType::Vec2u],
+            ))]
         }
         None => Vec::new(),
     }
@@ -93,15 +113,25 @@ pub fn default_size_values(handles: &SizeHandles, mode: ItemSizeMode) -> Vec<(St
 }
 
 /// The size the stored numbers of a node's size inputs give, with `base` for a scale to be relative to.
-pub fn stored_size(data: &NodeData, handles: &SizeHandles, mode: ItemSizeMode, base: SizeBase) -> TextureSize {
+pub fn stored_size(
+    data: &NodeData,
+    handles: &SizeHandles,
+    mode: ItemSizeMode,
+    base: SizeBase,
+) -> TextureSize {
     let number = |id: &str, component: usize, fallback: f64| {
-        data.values.get(id).map_or(fallback, |v| v.component(component))
+        data.values
+            .get(id)
+            .map_or(fallback, |v| v.component(component))
     };
     match mode {
         ItemSizeMode::Pixels => TextureSize::Pixels {
             width: number(&handles.pixels, 0, DEFAULT_SIZE_PIXELS).into(),
             height: number(&handles.pixels, 1, DEFAULT_SIZE_PIXELS).into(),
         },
-        ItemSizeMode::Scale => TextureSize::Scale { scale: number(&handles.scale, 0, 1.0).into(), of: base },
+        ItemSizeMode::Scale => TextureSize::Scale {
+            scale: number(&handles.scale, 0, 1.0).into(),
+            of: base,
+        },
     }
 }

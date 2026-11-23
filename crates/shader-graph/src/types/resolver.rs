@@ -64,7 +64,8 @@ pub fn complete_bindings(variables: &[TypeVariable], bindings: &TypeBindings) ->
 /// project: call `clear` after it changes.
 #[derive(Default)]
 pub struct TypeResolver {
-    cache: Mutex<HashMap<(String, String), Arc<ResolvedNodeTypes>>>,
+    /// By node id, then by bindings key, so a hit allocates nothing.
+    cache: Mutex<HashMap<String, HashMap<String, Arc<ResolvedNodeTypes>>>>,
 }
 
 impl TypeResolver {
@@ -97,12 +98,24 @@ impl TypeResolver {
         node: &GraphNode,
         bindings: &TypeBindings,
     ) -> Arc<ResolvedNodeTypes> {
-        let key = (node.id.clone(), Self::key(project, &node.id, bindings));
-        if let Some(found) = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key) {
-            return found.clone();
+        let key = Self::key(project, &node.id, bindings);
+        let found = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&node.id)
+            .and_then(|by_key| by_key.get(&key))
+            .cloned();
+        if let Some(found) = found {
+            return found;
         }
         let result = Arc::new(self.resolve_with(project, node, &node.data, bindings));
-        self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, result.clone());
+        self.cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(node.id.clone())
+            .or_default()
+            .insert(key, result.clone());
         result
     }
 

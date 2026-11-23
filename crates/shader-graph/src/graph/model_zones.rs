@@ -95,7 +95,7 @@ impl GraphModel {
         let boundary = [zone.input.id.clone(), zone.output.id.clone()];
         let fixed = [ITERATIONS_HANDLE, ITERATION_HANDLE, DELTA_TIME_HANDLE, SKIP_HANDLE];
         {
-            let doc = self.project.definitions.get_mut(&key).expect("active");
+            let Some(doc) = self.project.definitions.get_mut(&key) else { return };
             if let Some(node) = doc.node_mut(&zone.output.id) {
                 node.data.items = Some(items.clone());
             }

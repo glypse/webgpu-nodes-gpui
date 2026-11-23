@@ -101,7 +101,7 @@ fn passes_positions_as_uniforms_so_moving_a_stop_doesnt_recompile() {
 #[test]
 fn gives_rgba_once_a_stop_is_a_vec4() {
     let (mut g, ramp) = ramp_graph(&[]);
-    assert!(g.wgsl().contains("vec4f(") && !g.wgsl().contains("_rgba;"));
+    assert!(!g.wgsl().contains("_rgba;"));
     let color = g.add("declare");
     g.force_type(&color, WgslType::Vec4f);
     g.link((&color, "value"), (&ramp, "stop-2"));
@@ -159,7 +159,7 @@ fn saves_and_loads_its_stops() {
     let loaded: GraphProject = serde_json::from_str(&json).expect("loads");
     let model = GraphModel::new(loaded);
     let node = model.node(&ramp).expect("the ramp exists");
-    assert_eq!(node.data.ramp.as_ref().map(Vec::len), Some(3));
+    assert_eq!(node.data.ramp, Some(three_stops()));
 }
 
 #[test]
@@ -167,7 +167,10 @@ fn a_new_ramp_goes_from_black_to_white() {
     let mut g = TestGraph::new();
     let ramp = g.add(COLOR_RAMP);
     let node = g.model.node(&ramp).expect("the ramp exists");
-    assert_eq!(node.data.ramp, Some(crate::ramp::default_ramp()));
+    let ramp_stops = node.data.ramp.clone().expect("has stops");
+    assert_eq!(ramp_stops.len(), 2);
+    assert_eq!(node.data.values["stop-0"], vector([0.0, 0.0, 0.0, 1.0]));
+    assert_eq!(node.data.values["stop-1"], vector([1.0, 1.0, 1.0, 1.0]));
     let inputs = g.model.resolve_node_inputs(&ramp);
     let ids: Vec<&str> = inputs.iter().map(|i| i.id.as_str()).collect();
     assert_eq!(

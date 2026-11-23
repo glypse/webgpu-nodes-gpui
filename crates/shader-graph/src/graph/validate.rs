@@ -21,6 +21,10 @@ pub enum GraphIssue {
     DuplicateAsset {
         id: String,
     },
+    NodeIdInTwoDefinitions {
+        id: String,
+        definition: String,
+    },
     DanglingEdge {
         definition: String,
         edge: String,
@@ -81,15 +85,14 @@ impl Schema {
 
     fn length(&mut self, path: &str, len: usize, max: usize) {
         if len > max {
-            self.fail(
-                path,
-                format!("Invalid length: Expected <={max} but received {len}"),
-            );
+            self.fail(path, format!("too many: {len}, at most {max}"));
         }
     }
 
     fn text(&mut self, path: &str, text: &str, max: usize) {
-        self.length(path, js_length(text), max);
+        if text.len() > max {
+            self.fail(path, format!("too long: {} bytes, at most {max}", text.len()));
+        }
     }
 
     fn id(&mut self, path: &str, id: &str) {
@@ -111,6 +114,9 @@ impl Schema {
             self.list(&format!("{path}.variants"), variants);
             for (i, variant) in variants.iter().enumerate() {
                 self.variant(&format!("{path}.variants[{i}]"), variant);
+                if variants[..i].iter().any(|earlier| earlier.value == variant.value) {
+                    self.fail(&format!("{path}.variants[{i}].value"), "duplicates an earlier variant's value");
+                }
             }
         }
         if let Some(owner) = &handle.type_owner {
@@ -133,6 +139,9 @@ impl Schema {
     }
 
     fn variant(&mut self, path: &str, variant: &EnumVariant) {
+        if u32::try_from(variant.value).is_err() {
+            self.fail(&format!("{path}.value"), "must fit an unsigned 32-bit integer");
+        }
         self.label(&format!("{path}.label"), &variant.label);
         if let Some(types) = &variant.types {
             self.list(&format!("{path}.types"), types);
@@ -157,10 +166,14 @@ impl Schema {
         for key in data.values.keys().chain(data.types.keys()) {
             self.id(&format!("{path}.values"), key);
         }
+        self.length(&format!("{path}.values"), data.values.len(), MAX_LIST_LENGTH);
+        self.length(&format!("{path}.types"), data.types.len(), MAX_LIST_LENGTH);
         for (key, value) in &data.settings {
             self.id(&format!("{path}.settings"), key);
             self.label(&format!("{path}.settings.{key}"), value);
         }
+        self.length(&format!("{path}.settings"), data.settings.len(), MAX_LIST_LENGTH);
+        self.length(&format!("{path}.extra"), data.extra.len(), MAX_LIST_LENGTH);
         if let Some(items) = &data.items {
             self.list(&format!("{path}.items"), items);
             for (i, item) in items.iter().enumerate() {
@@ -173,13 +186,13 @@ impl Schema {
         if let Some(max) = data.max_iterations.filter(|m| *m > MAX_ITERATIONS) {
             self.fail(
                 &format!("{path}.maxIterations"),
-                format!("Invalid value: Expected <={MAX_ITERATIONS} but received {max}"),
+                format!("too large: {max}, at most {MAX_ITERATIONS}"),
             );
         }
         if let Some(cases) = data.cases.filter(|c| !(1..=MAX_CASES).contains(c)) {
             self.fail(
                 &format!("{path}.cases"),
-                format!("Invalid value: Expected 1 to {MAX_CASES} but received {cases}"),
+                format!("out of range: {cases}, must be 1 to {MAX_CASES}"),
             );
         }
         if let Some(code) = &data.code {
@@ -237,6 +250,7 @@ impl Schema {
             doc.nodes.len(),
             MAX_NODES_PER_DOCUMENT,
         );
+        self.length(&format!("{path}.defaults"), doc.defaults.len(), MAX_LIST_LENGTH);
         self.length(
             &format!("{path}.edges"),
             doc.edges.len(),
@@ -275,7 +289,7 @@ impl Schema {
         {
             self.fail(
                 &format!("{path}.viewport.zoom"),
-                format!("Invalid value: Expected >0 but received {}", viewport.zoom),
+                format!("zoom must be above 0, got {}", viewport.zoom),
             );
         }
     }
@@ -287,13 +301,22 @@ impl Schema {
 pub fn schema_issues(project: &GraphProject) -> Vec<String> {
     let mut schema = Schema::default();
     schema.length("definitions", project.definitions.len(), MAX_DEFINITIONS);
+    // Counted before the library's definitions are added, so only what the file holds is judged.
+    let nodes: usize = project.definitions.values().map(|d| d.nodes.len()).sum();
+    if nodes > MAX_PROJECT_NODES {
+        schema.fail("definitions", format!("too many nodes: {nodes}, at most {MAX_PROJECT_NODES}"));
+    }
     for (key, doc) in &project.definitions {
         schema.id("definitions", key);
         schema.document(&format!("definitions.{key}"), doc);
     }
+    schema.length("extra", project.extra.len(), MAX_LIST_LENGTH);
     schema.length("assets", project.assets.len(), MAX_ASSETS);
     for asset in &project.assets {
         schema.id("assets.id", asset.id());
+        if !asset.is_valid() {
+            schema.fail("assets", format!("\"{}\" isn't a valid asset", asset.name()));
+        }
     }
     schema.0
 }
@@ -427,6 +450,28 @@ pub fn document_issues(definition: &str, doc: &GraphDocument) -> Vec<GraphIssue>
     issues
 }
 
+/// A node id is looked up across the whole project, so one in two definitions
+/// would shadow the other. Within one definition `document_issues` reports it.
+fn node_id_issues(project: &GraphProject) -> Vec<GraphIssue> {
+    let mut owner: HashMap<&str, &str> = HashMap::new();
+    let mut issues = Vec::new();
+    for (key, doc) in &project.definitions {
+        for node in &doc.nodes {
+            match owner.get(node.id.as_str()) {
+                Some(first) if *first != key.as_str() => issues.push(GraphIssue::NodeIdInTwoDefinitions {
+                    id: node.id.clone(),
+                    definition: key.clone(),
+                }),
+                Some(_) => {}
+                None => {
+                    owner.insert(&node.id, key);
+                }
+            }
+        }
+    }
+    issues
+}
+
 /// Every rule a saved project keeps.
 pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
     let mut issues = Vec::new();
@@ -435,15 +480,6 @@ pub fn project_issues(project: &GraphProject) -> Vec<GraphIssue> {
     }
     if project.definitions.len() > MAX_DEFINITIONS {
         issues.push(GraphIssue::TooManyDefinitions);
-    }
-    if project
-        .definitions
-        .values()
-        .map(|d| d.nodes.len())
-        .sum::<usize>()
-        > MAX_PROJECT_NODES
-    {
-        issues.push(GraphIssue::TooManyNodes);
     }
     let asset_ids: Vec<&str> = project.assets.iter().map(|a| a.id()).collect();
     for id in duplicates(asset_ids.into_iter()) {
@@ -524,6 +560,7 @@ impl GraphProject {
                 definition: key.clone(),
             });
         let mut issues: Vec<GraphIssue> = reserved.collect();
+        issues.extend(node_id_issues(&project));
         normalise_project(&mut project);
         crate::library::register(&mut project);
         project.reindex();

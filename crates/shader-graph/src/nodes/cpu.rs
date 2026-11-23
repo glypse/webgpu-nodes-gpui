@@ -1,24 +1,31 @@
-//! Helpers for the CPU implementations of nodes, which compute as JavaScript
-//! numbers (f64) rounded to WGSL's types after each node.
+//! Helpers for the CPU implementations of nodes. Each node computes in f64
+//! and rounds its result to the WGSL type of the output: f32 rounds, float to
+//! integer conversions saturate (NaN gives 0), and integer arithmetic wraps.
+//! Rounding once per node, from f64, is at least as accurate as the GPU's f32
+//! steps, so results agree with it to within f32 precision, not bit for bit.
 
 use std::collections::BTreeMap;
 
-use crate::types::{CpuCtx, CpuFn, ScalarKind, Value, WgslType};
+use super::{FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE};
+use crate::graph::REROUTE;
+use crate::types::{CpuCtx, InputValue, CpuFn, ScalarKind, Value, WgslType};
 use std::sync::Arc;
+
+/// Components of the widest node input.
+const MAX_ARGS: usize = 4;
 
 /// Component-wise `f`, a single component standing for all of them.
 pub fn zip(values: &[Value], f: impl Fn(&[f64]) -> f64) -> Value {
     let width = values.iter().map(Vec::len).max().unwrap_or(0);
+    let count = values.len().min(MAX_ARGS);
     (0..width)
         .map(|i| {
-            let args: Vec<f64> = values
-                .iter()
-                .map(|v| {
-                    let at = if v.len() == 1 { 0 } else { i };
-                    v.get(at).copied().unwrap_or(0.0)
-                })
-                .collect();
-            f(&args)
+            let mut args = [0.0; MAX_ARGS];
+            for (slot, v) in args.iter_mut().zip(values) {
+                let at = if v.len() == 1 { 0 } else { i };
+                *slot = v.get(at).copied().unwrap_or(0.0);
+            }
+            f(&args[..count])
         })
         .collect()
 }
@@ -31,26 +38,28 @@ pub fn fit(value: &[f64], width: usize) -> Value {
     (0..width).map(|i| value.get(i).copied().unwrap_or(0.0)).collect()
 }
 
-/// A number as JavaScript's `ToInt32`: wrapping, with non-finite numbers 0.
-pub fn to_int32(n: f64) -> i32 {
-    if !n.is_finite() {
-        return 0;
+/// An integer result of kind `kind`, wrapped to its 32 bits.
+fn wrap_int(kind: ScalarKind, n: i64) -> f64 {
+    match kind {
+        ScalarKind::U32 => f64::from(n as u32),
+        _ => f64::from(n as i32),
     }
-    n.trunc().rem_euclid(4_294_967_296.0) as u64 as u32 as i32
 }
 
-pub fn to_uint32(n: f64) -> u32 {
-    to_int32(n) as u32
-}
-
-/// A number as a value of `kind`: f32s round, integers wrap as in WGSL.
+/// A number as a value of `kind`: f32s round, integers saturate (NaN is 0).
 pub fn as_kind(kind: ScalarKind, n: f64) -> f64 {
     match kind {
-        ScalarKind::I32 => f64::from(to_int32(n)),
-        ScalarKind::U32 => f64::from(to_uint32(n)),
+        ScalarKind::I32 => f64::from(n as i32),
+        ScalarKind::U32 => f64::from(n as u32),
         ScalarKind::Bool => f64::from(u8::from(n != 0.0)),
         ScalarKind::F32 => f64::from(n as f32),
     }
+}
+
+/// The value an unlinked input holds, as `ty`.
+pub fn stored_value(stored: Option<&InputValue>, ty: WgslType) -> Value {
+    let components: Vec<f64> = (0..ty.components()).map(|i| stored.map_or(0.0, |v| v.component(i))).collect();
+    coerce(&components, ty)
 }
 
 /// A value as `ty`: its width and kind.
@@ -59,29 +68,14 @@ pub fn coerce(value: &[f64], ty: WgslType) -> Value {
     fit(value, ty.components()).into_iter().map(|n| as_kind(kind, n)).collect()
 }
 
-/// JavaScript's `Math.round`: halves go up.
-pub fn js_round(n: f64) -> f64 {
-    let floor = n.floor();
-    if n - floor >= 0.5 { floor + 1.0 } else { floor }
-}
-
 /// WGSL's `round`: halves go to the even neighbour.
 pub fn round_half_even(n: f64) -> f64 {
-    if (n % 1.0).abs() == 0.5 { 2.0 * js_round(n / 2.0) } else { js_round(n) }
+    n.round_ties_even()
 }
 
-/// JavaScript's `Math.sign`.
-pub fn js_sign(n: f64) -> f64 {
+/// WGSL's `sign`: 0 for 0.
+pub fn sign(n: f64) -> f64 {
     if n.is_nan() || n == 0.0 { n } else { n.signum() }
-}
-
-/// JavaScript's `Math.min`: NaN wins.
-pub fn js_min(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) }
-}
-
-pub fn js_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) }
 }
 
 fn is_integer(ty: WgslType) -> bool {
@@ -99,21 +93,33 @@ pub fn output(id: &str, value: Value) -> BTreeMap<String, Value> {
 
 /// A node computing `f` of each component of `e`, giving `result`.
 pub fn unary_cpu(f: impl Fn(f64) -> f64 + Send + Sync + 'static) -> CpuFn {
+    unary_int_cpu(f, None)
+}
+
+/// As [`unary_cpu`], with integer outputs computed by `integer` on wrapping 32-bit values.
+pub fn unary_int_cpu(
+    f: impl Fn(f64) -> f64 + Send + Sync + 'static,
+    integer: Option<fn(i64) -> i64>,
+) -> CpuFn {
     Arc::new(move |ctx: &CpuCtx<'_>| {
-        let mapped: Value = ctx.input("e").into_iter().map(&f).collect();
-        result(coerce(&mapped, ctx.output_type))
+        let ty = ctx.output_type;
+        let mapped: Value = match integer.filter(|_| is_integer(ty)) {
+            Some(g) => ctx.input("e").into_iter().map(|n| wrap_int(ty.kind(), g(n as i64))).collect(),
+            None => ctx.input("e").into_iter().map(&f).collect(),
+        };
+        result(coerce(&mapped, ty))
     })
 }
 
-/// A node folding its `operands` by `f`; integers use `integer` where given, for products past a float's precision.
+/// A node folding its `operands` by `f`; integers use `integer` where given, which wraps.
 pub fn variadic_cpu(
     f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    integer: Option<fn(f64, f64) -> f64>,
+    integer: Option<fn(i64, i64) -> i64>,
 ) -> CpuFn {
     Arc::new(move |ctx: &CpuCtx<'_>| {
         let ty = ctx.output_type;
         let op = |a: f64, b: f64| match integer.filter(|_| is_integer(ty)) {
-            Some(g) => g(a, b),
+            Some(g) => wrap_int(ty.kind(), g(a as i64, b as i64)),
             None => f(a, b),
         };
         let operands = ctx.operands("operands");
@@ -126,13 +132,23 @@ pub fn variadic_cpu(
     })
 }
 
-/// A node computing `f` of the components of two inputs, giving `result`.
+/// A node computing `f` of the components of two inputs, giving `result`;
+/// integers use `integer` where given, which wraps.
 pub fn binary_cpu(
     a: &str,
     b: &str,
     f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
+    integer: Option<fn(i64, i64) -> i64>,
 ) -> CpuFn {
-    nary_cpu(&[a, b], move |n| f(n[0], n[1]))
+    let (a, b) = (a.to_owned(), b.to_owned());
+    Arc::new(move |ctx: &CpuCtx<'_>| {
+        let ty = ctx.output_type;
+        let op = |n: &[f64]| match integer.filter(|_| is_integer(ty)) {
+            Some(g) => wrap_int(ty.kind(), g(n[0] as i64, n[1] as i64)),
+            None => f(n[0], n[1]),
+        };
+        result(coerce(&zip(&[ctx.input(&a), ctx.input(&b)], op), ty))
+    })
 }
 
 /// A node computing `f` of the components of its inputs, in order, giving `result`.
@@ -162,26 +178,23 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
         "sqrt" => unary_cpu(f64::sqrt),
         "log" => unary_cpu(f64::ln),
         "exp" => unary_cpu(f64::exp),
-        "abs" => unary_cpu(f64::abs),
-        "sign" => unary_cpu(js_sign),
-        "negate" => unary_cpu(|n| -n),
-        "add" => variadic_cpu(|a, b| a + b, None),
-        "mul" => variadic_cpu(
-            |a, b| a * b,
-            Some(|a, b| f64::from(to_int32(a).wrapping_mul(to_int32(b)))),
-        ),
-        "min" => variadic_cpu(js_min, None),
-        "max" => variadic_cpu(js_max, None),
-        "sub" => binary_cpu("a", "b", |a, b| a - b),
-        "div" => binary_cpu("a", "b", |a, b| if b == 0.0 { 0.0 } else { a / b }),
-        "mod" => binary_cpu("a", "b", |a, b| if b == 0.0 { 0.0 } else { a % b }),
-        "pow" => binary_cpu("e1", "e2", |a, b| if b == 0.0 { 1.0 } else { a.powf(b) }),
-        "step" => binary_cpu("e1", "e2", |edge, x| f64::from(u8::from(x >= edge))),
-        "atan2" => binary_cpu("e1", "e2", f64::atan2),
-        "clamp" => nary_cpu(&["e", "low", "high"], |n| js_min(n[2], js_max(n[1], n[0]))),
+        "abs" => unary_int_cpu(f64::abs, Some(i64::abs)),
+        "sign" => unary_cpu(sign),
+        "negate" => unary_int_cpu(|n| -n, Some(i64::wrapping_neg)),
+        "add" => variadic_cpu(|a, b| a + b, Some(i64::wrapping_add)),
+        "mul" => variadic_cpu(|a, b| a * b, Some(i64::wrapping_mul)),
+        "min" => variadic_cpu(f64::min, None),
+        "max" => variadic_cpu(f64::max, None),
+        "sub" => binary_cpu("a", "b", |a, b| a - b, Some(i64::wrapping_sub)),
+        "div" => binary_cpu("a", "b", |a, b| if b == 0.0 { 0.0 } else { a / b }, None),
+        "mod" => binary_cpu("a", "b", |a, b| if b == 0.0 { 0.0 } else { a % b }, None),
+        "pow" => binary_cpu("e1", "e2", |a, b| if b == 0.0 { 1.0 } else { a.powf(b) }, None),
+        "step" => binary_cpu("e1", "e2", |edge, x| f64::from(u8::from(x >= edge)), None),
+        "atan2" => binary_cpu("e1", "e2", f64::atan2, None),
+        "clamp" => nary_cpu(&["e", "low", "high"], |n| n[2].min(n[1].max(n[0]))),
         "mix" => nary_cpu(&["e1", "e2", "e3"], |n| n[0] * (1.0 - n[2]) + n[1] * n[2]),
         "smoothstep" => nary_cpu(&["low", "high", "x"], |n| {
-            let t = js_min(1.0, js_max(0.0, (n[2] - n[0]) / (n[1] - n[0])));
+            let t = ((n[2] - n[0]) / (n[1] - n[0])).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
         }),
         "dot" => Arc::new(|ctx: &CpuCtx<'_>| {
@@ -190,13 +203,13 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
         }),
         "distance" => Arc::new(|ctx: &CpuCtx<'_>| {
             let diff = zip(&[ctx.input("e1"), ctx.input("e2")], |n| n[0] - n[1]);
-            result(vec![hypot(&diff) as f32 as f64])
+            result(vec![length(&diff) as f32 as f64])
         }),
-        "length" => Arc::new(|ctx: &CpuCtx<'_>| result(vec![hypot(&ctx.input("e1")) as f32 as f64])),
+        "length" => Arc::new(|ctx: &CpuCtx<'_>| result(vec![length(&ctx.input("e1")) as f32 as f64])),
         "normalize" => Arc::new(|ctx: &CpuCtx<'_>| {
             let v = ctx.input("e");
-            let length = hypot(&v);
-            let scaled: Value = v.iter().map(|n| n / length).collect();
+            let len = length(&v);
+            let scaled: Value = v.iter().map(|n| n / len).collect();
             result(coerce(&scaled, ctx.output_type))
         }),
         "cross" => Arc::new(|ctx: &CpuCtx<'_>| {
@@ -254,34 +267,35 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
                 if any { values.iter().any(|n| *n != 0.0) } else { values.iter().all(|n| *n != 0.0) };
             result(vec![f64::from(u8::from(reduced))])
         }),
-        "fallback" => Arc::new(|ctx: &CpuCtx<'_>| {
-            let chosen = if ctx.is_present("value") { "value" } else { "default" };
+        FALLBACK => Arc::new(|ctx: &CpuCtx<'_>| {
+            let chosen = if ctx.is_present(FALLBACK_VALUE) { FALLBACK_VALUE } else { FALLBACK_DEFAULT };
             result(coerce(&ctx.input(chosen), ctx.output_type))
         }),
         "bitwise" => Arc::new(|ctx: &CpuCtx<'_>| {
-            let op: fn(i32, i32) -> i32 = match setting(ctx, "op", "&") {
+            let ty = ctx.output_type;
+            let op: fn(i64, i64) -> i64 = match setting(ctx, "op", "&") {
                 "|" => |a, b| a | b,
                 "^" => |a, b| a ^ b,
                 _ => |a, b| a & b,
             };
             let v = zip(&[ctx.input("a"), ctx.input("b")], |n| {
-                f64::from(op(to_int32(n[0]), to_int32(n[1])))
+                wrap_int(ty.kind(), op(n[0] as i64, n[1] as i64))
             });
-            result(coerce(&v, ctx.output_type))
+            result(coerce(&v, ty))
         }),
-        "bitwise-not" => unary_cpu(|n| f64::from(!to_int32(n))),
+        "bitwise-not" => unary_int_cpu(|n| f64::from(!(n as i32)), Some(|n| !n)),
         "bit-shift" => Arc::new(|ctx: &CpuCtx<'_>| {
             let right = setting(ctx, "op", "<<") == ">>";
-            let unsigned = ctx.output_type.kind() == ScalarKind::U32;
+            let ty = ctx.output_type;
             let v = zip(&[ctx.input("a"), ctx.input("b")], |n| {
-                let by = (to_int32(n[1]) & 31) as u32;
-                match (right, unsigned) {
-                    (true, true) => f64::from(to_uint32(n[0]) >> by),
-                    (true, false) => f64::from(to_int32(n[0]) >> by),
-                    _ => f64::from(to_int32(n[0]) << by),
+                let (a, by) = (n[0] as i64, (n[1] as i64 & 31) as u32);
+                match (right, ty.kind()) {
+                    (true, ScalarKind::U32) => f64::from((a as u32) >> by),
+                    (true, _) => f64::from((a as i32) >> by),
+                    _ => wrap_int(ty.kind(), a << by),
                 }
             });
-            result(coerce(&v, ctx.output_type))
+            result(coerce(&v, ty))
         }),
         "declare" => Arc::new(|ctx: &CpuCtx<'_>| {
             output(
@@ -289,13 +303,13 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
                 ctx.resolved_inputs.iter().map(|i| ctx.input(&i.id).first().copied().unwrap_or(0.0)).collect(),
             )
         }),
-        "reroute" => Arc::new(|ctx: &CpuCtx<'_>| output("out", ctx.input("in"))),
+        REROUTE => Arc::new(|ctx: &CpuCtx<'_>| output("out", ctx.input("in"))),
         _ => return None,
     };
     Some(f)
 }
 
-/// `Math.hypot`: the length of a vector.
-fn hypot(v: &[f64]) -> f64 {
+/// The length of a vector.
+fn length(v: &[f64]) -> f64 {
     v.iter().map(|n| n * n).sum::<f64>().sqrt()
 }

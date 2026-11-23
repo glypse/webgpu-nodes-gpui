@@ -6,8 +6,8 @@ use std::rc::Rc;
 use super::analysis::FrameValueAnalysis;
 use crate::assets::frame_interval;
 use crate::codegen::{CodegenGraph, UniformValue, ident_suffix, uniform_name, uniform_value};
-use crate::graph::{GROUP_INPUT, GROUP_OUTPUT, GraphNode, NODE_GROUP, REROUTE, ROOT_ID};
-use crate::nodes::cpu::coerce;
+use crate::graph::{GROUP_INPUT, NODE_GROUP, REROUTE, ROOT_ID};
+use crate::nodes::cpu::{coerce, stored_value};
 use crate::nodes::{
     TEXTURE_SIZE, TEXTURE_SIZE_LEVEL, VIDEO, VIDEO_DURATION, VIDEO_INTERVAL, is_video_metadata,
     resolve_descriptor,
@@ -154,17 +154,7 @@ pub struct FrameValues {
 impl FrameValues {
     /// The value of a step's output.
     pub fn value(&self, reference: &FrameRef) -> Value {
-        let value = self
-            .outputs
-            .get(reference.step)
-            .and_then(Option::as_ref)
-            .and_then(|o| o.get(&reference.output))
-            .cloned()
-            .unwrap_or_else(|| vec![0.0]);
-        match reference.component {
-            None => value,
-            Some(c) => vec![value.get(c).copied().unwrap_or(0.0)],
-        }
+        value_of(&self.outputs, reference)
     }
 
     /// A number of the program: a literal, or one component of a step's output.
@@ -173,6 +163,19 @@ impl FrameValues {
             FrameArg::Literal(n) => *n,
             FrameArg::Frame(reference) => self.value(reference).first().copied().unwrap_or(0.0),
         }
+    }
+}
+
+fn value_of(outputs: &[Option<BTreeMap<String, Value>>], reference: &FrameRef) -> Value {
+    let value = outputs
+        .get(reference.step)
+        .and_then(Option::as_ref)
+        .and_then(|o| o.get(&reference.output))
+        .cloned()
+        .unwrap_or_else(|| vec![0.0]);
+    match reference.component {
+        None => value,
+        Some(c) => vec![value.get(c).copied().unwrap_or(0.0)],
     }
 }
 
@@ -207,6 +210,8 @@ struct Runner<'a, 'e> {
     env: &'a FrameEnv<'e>,
     outputs: RefCell<Vec<Option<BTreeMap<String, Value>>>>,
     loops: RefCell<HashMap<String, Loop>>,
+    /// Indices of the steps run by each loop (`None` for the program), in order.
+    bodies: HashMap<Option<&'a str>, Vec<usize>>,
 }
 
 struct StepInputs<'r, 'a, 'e> {
@@ -238,7 +243,7 @@ impl Runner<'_, '_> {
     fn read(&self, input: &FrameInput) -> Value {
         match input {
             FrameInput::Literal(v) => v.clone(),
-            FrameInput::Ref(r) => FrameValues { outputs: self.outputs.borrow().clone() }.value(r),
+            FrameInput::Ref(r) => value_of(&self.outputs.borrow(), r),
             FrameInput::Source(s) => source_value(s, self.env),
             FrameInput::Loop { id, item } => {
                 let loops = self.loops.borrow();
@@ -311,17 +316,20 @@ impl Runner<'_, '_> {
     }
 
     fn run_body(&self, loop_id: Option<&str>) {
-        for (index, step) in self.program.steps.iter().enumerate() {
-            if step.loop_id.as_deref() == loop_id {
-                self.run(index);
-            }
+        for &index in self.bodies.get(&loop_id).into_iter().flatten() {
+            self.run(index);
         }
     }
 }
 
 /// Run a frame program: each step by its node's `cpu`, so the CPU and the GPU agree.
 pub fn evaluate_frame(program: &FrameProgram, env: &FrameEnv<'_>) -> FrameValues {
+    let mut bodies: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
+    for (index, step) in program.steps.iter().enumerate() {
+        bodies.entry(step.loop_id.as_deref()).or_default().push(index);
+    }
     let runner = Runner {
+        bodies,
         program,
         env,
         outputs: RefCell::new(vec![None; program.steps.len()]),
@@ -445,7 +453,8 @@ impl<'g> FrameCompiler<'g> {
     }
 
     /// The same, as a number a plan can carry: a component of the value.
-    pub fn arg(&self, path: &[String], node: &str, handle: &str, component: usize) -> Option<FrameArg> {
+    #[cfg(test)]
+    pub(crate) fn arg(&self, path: &[String], node: &str, handle: &str, component: usize) -> Option<FrameArg> {
         let value = self.compile(path, node, handle)?;
         Some(self.as_arg(&value, component))
     }
@@ -540,11 +549,7 @@ impl<'g> FrameCompiler<'g> {
             }
             NODE_GROUP => {
                 let definition = self.graph.project.document(node.definition_ref()?)?;
-                let outputs: Vec<&GraphNode> = definition.nodes.iter().filter(|n| n.is(GROUP_OUTPUT)).collect();
-                let out = outputs
-                    .iter()
-                    .find(|n| definition.edges_into(&n.id).any(|e| e.target_handle == handle))
-                    .or(outputs.first())?;
+                let out = definition.output_node_of(handle)?;
                 let inner: Vec<String> = path.iter().cloned().chain([node_id.to_owned()]).collect();
                 self.input(&inner, &out.id, handle)
             }
@@ -589,8 +594,7 @@ impl<'g> FrameCompiler<'g> {
                 return Some(source(FrameSource::Uniform(name)));
             }
         }
-        let components: Vec<f64> = (0..ty.components()).map(|i| stored.map_or(0.0, |v| v.component(i))).collect();
-        Some(literal(coerce(&components, ty)))
+        Some(literal(stored_value(stored, ty)))
     }
 
     fn definition_of(&self, path: &[String]) -> Option<String> {

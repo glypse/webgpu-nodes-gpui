@@ -1,8 +1,5 @@
 //! Nodes reading a project asset: Image and Video.
 
-use std::collections::HashSet;
-use std::sync::LazyLock;
-
 use crate::assets::{AssetKind, frame_interval};
 use crate::codegen::format_wgsl_literal;
 use crate::types::{
@@ -28,8 +25,7 @@ pub fn is_video_metadata(handle: &str) -> bool {
 pub const MEDIA_TEXTURE: &str = "texture";
 
 /// Node types reading a project asset (`NodeData.asset`).
-pub static MEDIA_NODE_TYPES: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| HashSet::from([IMAGE, VIDEO]));
+pub const MEDIA_NODE_TYPES: [&str; 2] = [IMAGE, VIDEO];
 
 /// The node type showing an asset of each kind.
 pub const fn media_node_of(kind: AssetKind) -> &'static str {

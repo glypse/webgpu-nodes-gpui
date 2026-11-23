@@ -12,7 +12,8 @@ use super::literals::{
     UniformValue, format_wgsl_literal, ident_suffix, uniform_name, uniform_value,
 };
 use super::program::{
-    FRAGMENT_VAR, FRAME_VALUES_VAR, FRAME_VAR, FrameValueUse, UniformScalar, SIMULATION_DELTA_FIELD, SamplerBinding, TextureBinding, UNIFORMS_VAR,
+    FRAGMENT_VAR, FRAME_VALUES_VAR, FRAME_VAR, FrameValueUse, SIMULATION_DELTA_FIELD,
+    SamplerBinding, TextureBinding, UNIFORMS_VAR, UniformScalar,
 };
 use super::target::{Probe, ProbeKind, ShaderTarget, SimulationStage};
 use super::texture_read::{ReadEnv, ReadOptions, read_texture, texel_as_color};
@@ -22,18 +23,20 @@ use crate::graph::{
     FRAG_OUTPUT, GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GraphProject,
     NODE_GROUP, REROUTE, ROOT_ID,
 };
-use crate::nodes::{RENDER_TEXTURE, SAMPLE_TEXTURE, TEXTURE_SIZE, resolve_descriptor, texture_coordinates};
+use crate::nodes::{
+    RENDER_TEXTURE, SAMPLE_TEXTURE, TEXTURE_SIZE, resolve_descriptor, texture_coordinates,
+};
 use crate::passes::{
-    CANVAS_SIZE, SimulationRef, SimulationState, StateItem, StateRead, TextureFormat,
-    TextureSize, TextureSource, TextureSources, pack_state, same_size, state_source, unpack_state,
+    SimulationRef, SimulationState, StateItem, StateRead, TextureFormat, TextureSize,
+    TextureSource, TextureSources, pack_state, state_source, unpack_state,
 };
 use crate::types::{
     CtxEnv, GroupHandleDef, HelperName, InputValue, NodeDescriptor, ResolvedNodeTypes,
-    SamplerAddress, SamplerFilter, ScalarKind, TypeBindings, TypeResolver, WgslType, ZoneItem, bound_type,
-    complete_bindings, convert_var, input_control, make_type, unavailable_edges,
+    SamplerAddress, SamplerFilter, ScalarKind, TypeBindings, TypeResolver, WgslType, ZoneItem,
+    bound_type, complete_bindings, convert_var, input_control, make_type, unavailable_edges,
 };
 use crate::zones::{
-    DEFAULT_ITERATIONS, DELTA_TIME_HANDLE, ITERATIONS_HANDLE, ITERATION_HANDLE, REPEAT_INPUT,
+    DEFAULT_ITERATIONS, DELTA_TIME_HANDLE, ITERATION_HANDLE, ITERATIONS_HANDLE, REPEAT_INPUT,
     REPEAT_OUTPUT, SIMULATION_INPUT, SIMULATION_OUTPUT, SKIP_HANDLE, Zone, ZoneAnalysis, ZoneKind,
     analyze_zones, paired_output_id, zone_items, zone_max_iterations, zone_options,
 };
@@ -107,7 +110,10 @@ fn find_reachable(
     }
     let mut reachable: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<&str> = VecDeque::new();
-    for n in nodes.iter().filter(|n| n.is(seed_type) || seeds.contains(&n.id)) {
+    for n in nodes
+        .iter()
+        .filter(|n| n.is(seed_type) || seeds.contains(&n.id))
+    {
         reachable.insert(n.id.clone());
         queue.push_back(&n.id);
     }
@@ -122,8 +128,12 @@ fn find_reachable(
 }
 
 /// Topological sort of node ids; fails on a cycle.
-fn topological_sort(ids: &[String], edges: &[(String, String)]) -> Result<Vec<String>, CodegenError> {
-    let mut adjacency: HashMap<&str, Vec<&str>> = ids.iter().map(|id| (id.as_str(), vec![])).collect();
+fn topological_sort(
+    ids: &[String],
+    edges: &[(String, String)],
+) -> Result<Vec<String>, CodegenError> {
+    let mut adjacency: HashMap<&str, Vec<&str>> =
+        ids.iter().map(|id| (id.as_str(), vec![])).collect();
     let mut in_degree: HashMap<&str, usize> = ids.iter().map(|id| (id.as_str(), 0)).collect();
     for (s, t) in edges {
         if !adjacency.contains_key(s.as_str()) || !in_degree.contains_key(t.as_str()) {
@@ -132,8 +142,11 @@ fn topological_sort(ids: &[String], edges: &[(String, String)]) -> Result<Vec<St
         adjacency.get_mut(s.as_str()).expect("checked").push(t);
         *in_degree.get_mut(t.as_str()).expect("checked") += 1;
     }
-    let mut queue: VecDeque<&str> =
-        ids.iter().map(String::as_str).filter(|id| in_degree[id] == 0).collect();
+    let mut queue: VecDeque<&str> = ids
+        .iter()
+        .map(String::as_str)
+        .filter(|id| in_degree[id] == 0)
+        .collect();
     let mut sorted = Vec::with_capacity(ids.len());
     while let Some(id) = queue.pop_front() {
         sorted.push(id.to_owned());
@@ -145,7 +158,11 @@ fn topological_sort(ids: &[String], edges: &[(String, String)]) -> Result<Vec<St
             }
         }
     }
-    if sorted.len() == ids.len() { Ok(sorted) } else { Err(CodegenError::Cycle) }
+    if sorted.len() == ids.len() {
+        Ok(sorted)
+    } else {
+        Err(CodegenError::Cycle)
+    }
 }
 
 type LiveItems = BTreeMap<String, BTreeSet<String>>;
@@ -198,8 +215,13 @@ fn needed_edges(
             if !reachable.contains(&e.target) || is_live(&live_items, &e.source, &e.source_handle) {
                 continue;
             }
-            let Some(owner) = item_owner(&e.source, &e.source_handle) else { continue };
-            live_items.entry(owner).or_default().insert(e.source_handle.clone());
+            let Some(owner) = item_owner(&e.source, &e.source_handle) else {
+                continue;
+            };
+            live_items
+                .entry(owner)
+                .or_default()
+                .insert(e.source_handle.clone());
             grew = true;
         }
         if !grew {
@@ -207,7 +229,11 @@ fn needed_edges(
                 .into_iter()
                 .filter(|e| reachable.contains(&e.source) && reachable.contains(&e.target))
                 .collect();
-            return Needed { edges: needed, reachable, live_items };
+            return Needed {
+                edges: needed,
+                reachable,
+                live_items,
+            };
         }
     }
 }
@@ -279,25 +305,35 @@ impl ShaderState<'_, '_> {
             return binding.name.clone();
         }
         let name = format!("runtime_texture_{}", self.textures.len());
-        self.textures.push(TextureBinding { name: name.clone(), source: source.clone() });
+        self.textures.push(TextureBinding {
+            name: name.clone(),
+            source: source.clone(),
+        });
         name
     }
 
     /// The module-scope sampler filtering and addressing as asked.
     fn sampler_var(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String {
-        if let Some(binding) = self.samplers.iter().find(|s| s.filter == filter && s.address == address) {
+        if let Some(binding) = self
+            .samplers
+            .iter()
+            .find(|s| s.filter == filter && s.address == address)
+        {
             return binding.name.clone();
         }
         let name = format!("runtime_sampler_{}_{}", filter.id(), address.id());
-        self.samplers.push(SamplerBinding { name: name.clone(), filter, address });
+        self.samplers.push(SamplerBinding {
+            name: name.clone(),
+            filter,
+            address,
+        });
         name
     }
 
     fn set_uniform(&mut self, name: &str, value: UniformValue) {
-        match self.uniforms.iter_mut().find(|(n, _)| n == name) {
-            Some((_, existing)) => *existing = value,
-            None => self.uniforms.push((name.to_owned(), value)),
-        }
+        super::upsert(&mut self.uniforms, (name.to_owned(), value), |a, b| {
+            a.0 == b.0
+        });
     }
 }
 
@@ -345,7 +381,11 @@ fn simulation_var_names(zone: &Zone, items: usize) -> SimulationNames {
 /// it, a scalar grey, a vec2f in red and green.
 pub fn field_color(expr: &str, ty: WgslType) -> String {
     let components = ty.components();
-    let float = convert_var(expr, ty, make_type(crate::types::ScalarKind::F32, components));
+    let float = convert_var(
+        expr,
+        ty,
+        make_type(crate::types::ScalarKind::F32, components),
+    );
     match components {
         1 => format!("vec4f(vec3f({float}), 1.0)"),
         2 => format!("vec4f({float}, 0.0, 1.0)"),
@@ -354,10 +394,10 @@ pub fn field_color(expr: &str, ty: WgslType) -> String {
     }
 }
 
-struct BodyEmitter {
+struct BodyEmitter<'a> {
     lines: Vec<String>,
     line_map: BTreeMap<String, Range<usize>>,
-    doc_nodes: Vec<GraphNode>,
+    doc_nodes: &'a [GraphNode],
     node_index: HashMap<String, usize>,
     /// The needed, valid links.
     edges: Vec<GraphEdge>,
@@ -402,9 +442,9 @@ fn zone_var_names(zone: &Zone, items: usize) -> ZoneNames {
     }
 }
 
-impl BodyEmitter {
-    fn node(&self, id: &str) -> Option<&GraphNode> {
-        self.node_index.get(id).map(|i| &self.doc_nodes[*i])
+impl<'a> BodyEmitter<'a> {
+    fn node(&self, id: &str) -> Option<&'a GraphNode> {
+        self.node_index.get(id).and_then(|i| self.doc_nodes.get(*i))
     }
 
     fn incoming(&self, id: &str) -> &[GraphEdge] {
@@ -413,7 +453,7 @@ impl BodyEmitter {
 
     fn enum_document(&self) -> EnumDocument<'_> {
         EnumDocument {
-            nodes: &self.doc_nodes,
+            nodes: self.doc_nodes,
             edges: &self.edges,
             inputs: &self.inputs,
             input_type: None,
@@ -421,21 +461,37 @@ impl BodyEmitter {
     }
 
     fn constant_of(&self, node: &str, input: &str) -> Option<i64> {
-        self.enum_document().constant_at(node, input, &self.constants)
+        self.enum_document()
+            .constant_at(node, input, &self.constants)
     }
 
     fn zone_item_types(&self, state: &ShaderState, zone: &Zone) -> HashMap<String, WgslType> {
-        let Some(input) = self.node(&zone.input_id) else { return HashMap::new() };
-        let resolved = state.graph.resolver.resolve(state.graph.project, input, &self.bindings);
-        resolved.resolved_outputs.iter().map(|o| (o.id.clone(), o.ty.value_type())).collect()
+        let Some(input) = self.node(&zone.input_id) else {
+            return HashMap::new();
+        };
+        let resolved = state
+            .graph
+            .resolver
+            .resolve(state.graph.project, input, &self.bindings);
+        resolved
+            .resolved_outputs
+            .iter()
+            .map(|o| (o.id.clone(), o.ty.value_type()))
+            .collect()
     }
 
     fn is_present(&self, node: &str, input: &str) -> bool {
-        let mut edge = self.incoming(node).iter().find(|e| e.target_handle == input);
+        let mut edge = self
+            .incoming(node)
+            .iter()
+            .find(|e| e.target_handle == input);
         // A reroute's value is present where the one it passes on is.
         while let Some(e) = edge {
             if self.node(&e.source).is_some_and(|n| n.is(REROUTE)) {
-                edge = self.incoming(&e.source).iter().find(|x| x.target_handle == "in");
+                edge = self
+                    .incoming(&e.source)
+                    .iter()
+                    .find(|x| x.target_handle == "in");
             } else {
                 break;
             }
@@ -465,7 +521,7 @@ impl BodyEmitter {
         let texture = state.texture_var(source);
         let format = source.format();
         // Made for this pass' size, proved while compiling: its pixel is read exactly.
-        if source.size().is_some_and(|size| same_size(size, &state.target_size)) {
+        if source.size().is_some_and(|size| size == &state.target_size) {
             return texel_as_color(
                 &format!("textureLoad({texture}, vec2i({FRAGMENT_VAR}.position), 0)"),
                 format,
@@ -477,11 +533,15 @@ impl BodyEmitter {
 
     fn source_expr(&self, state: &mut ShaderState, edge: &GraphEdge) -> String {
         if self.source_socket_type(state, edge).is_texture() {
-            let source =
-                state.sources.output(&self.path, &edge.source, &edge.source_handle).source();
+            let source = state
+                .sources
+                .output(&self.path, &edge.source, &edge.source_handle)
+                .source();
             return self.sample_at_pixel(state, &source);
         }
-        let Some(source) = self.node(&edge.source) else { return var_name(&edge.source) };
+        let Some(source) = self.node(&edge.source) else {
+            return var_name(&edge.source);
+        };
         if source.is(GROUP_INPUT) {
             return match self.constants.get(&edge.source_handle) {
                 Some(constant) => format_wgsl_literal(
@@ -491,20 +551,33 @@ impl BodyEmitter {
                 None => sanitize_ident(&edge.source_handle),
             };
         }
-        if let Some(var) = self.zone_vars.get(&edge.source).and_then(|m| m.get(&edge.source_handle)) {
+        if let Some(var) = self
+            .zone_vars
+            .get(&edge.source)
+            .and_then(|m| m.get(&edge.source_handle))
+        {
             return var.clone();
         }
         let base = var_name(&edge.source);
         if source.is(NODE_GROUP) {
             return format!("{base}.{}", sanitize_ident(&edge.source_handle));
         }
-        if resolve_descriptor(source, state.graph.project).outputs.len() > 1 {
+        if resolve_descriptor(source, state.graph.project)
+            .outputs
+            .len()
+            > 1
+        {
             return format!("{base}_{}", ident_suffix(&edge.source_handle));
         }
         base
     }
 
-    fn converted_source(&self, state: &mut ShaderState, edge: &GraphEdge, target: WgslType) -> String {
+    fn converted_source(
+        &self,
+        state: &mut ShaderState,
+        edge: &GraphEdge,
+        target: WgslType,
+    ) -> String {
         let expr = self.source_expr(state, edge);
         convert_var(&expr, self.source_type(state, edge), target)
     }
@@ -512,7 +585,10 @@ impl BodyEmitter {
     /// The outputs of a node something reads, the probe's included.
     fn read_outputs(&self, node: &str) -> BTreeSet<String> {
         let mut read = self.read_handles.get(node).cloned().unwrap_or_default();
-        if let Some(Probe { path, kind: ProbeKind::Socket { node: n, handle } }) = &self.probe
+        if let Some(Probe {
+            path,
+            kind: ProbeKind::Socket { node: n, handle },
+        }) = &self.probe
             && path.is_empty()
             && n == node
         {
@@ -539,7 +615,9 @@ impl BodyEmitter {
 
     /// The values of the probe (see `Probe`), from where they're computed.
     fn probe_fields(&self, state: &mut ShaderState) -> Vec<String> {
-        let Some(probe) = &self.probe else { return Vec::new() };
+        let Some(probe) = &self.probe else {
+            return Vec::new();
+        };
         if let Some(inner) = probe.path.first() {
             return (0..probe.types().len())
                 .map(|k| format!("{}.{}", var_name(inner), Probe::field(k)))
@@ -548,11 +626,13 @@ impl BodyEmitter {
         match &probe.kind {
             ProbeKind::Simulation { .. } => self.simulation_fields.clone(),
             ProbeKind::Textures { node, items } => {
-                let Some(node) = self.node(node).cloned() else { return Vec::new() };
+                let Some(node) = self.node(node) else {
+                    return Vec::new();
+                };
                 items
                     .iter()
                     .map(|i| {
-                        let value = self.input_expr(state, &node, &i.item, i.ty, None);
+                        let value = self.input_expr(state, node, &i.item, i.ty, None);
                         // Floats are colours, as any value rendered to a texture is; integers are kept as they are.
                         if i.format.scalar() == crate::types::ScalarKind::F32 {
                             field_color(&value, i.ty)
@@ -586,7 +666,11 @@ impl BodyEmitter {
         target: WgslType,
         fallback: Option<&InputValue>,
     ) -> String {
-        if let Some(edge) = self.incoming(&node.id).iter().find(|e| e.target_handle == input) {
+        if let Some(edge) = self
+            .incoming(&node.id)
+            .iter()
+            .find(|e| e.target_handle == input)
+        {
             return self.converted_source(state, edge, target);
         }
         let value = node.data.values.get(input).or(fallback);
@@ -602,10 +686,19 @@ impl BodyEmitter {
         format_wgsl_literal(target, value)
     }
 
-    fn param_expr(&self, state: &mut ShaderState, node: &GraphNode, key: &str, value: &[f64]) -> String {
+    fn param_expr(
+        &self,
+        state: &mut ShaderState,
+        node: &GraphNode,
+        key: &str,
+        value: &[f64],
+    ) -> String {
         let ty = make_type(crate::types::ScalarKind::F32, value.len());
-        let stored =
-            if value.len() == 1 { InputValue::from(value[0]) } else { InputValue::vector(value) };
+        let stored = if value.len() == 1 {
+            InputValue::from(value[0])
+        } else {
+            InputValue::vector(value)
+        };
         if self.uniforms {
             return Self::uniform_expr(state, &uniform_name(&node.id, key), ty, Some(&stored));
         }
@@ -626,8 +719,10 @@ impl BodyEmitter {
 
     fn push(&mut self, node_id: &str, statements: Vec<String>, indent: &str) {
         let start = self.lines.len();
-        self.lines.extend(statements.into_iter().map(|l| format!("{indent}{l}")));
-        self.line_map.insert(node_id.to_owned(), start..self.lines.len());
+        self.lines
+            .extend(statements.into_iter().map(|l| format!("{indent}{l}")));
+        self.line_map
+            .insert(node_id.to_owned(), start..self.lines.len());
     }
 
     fn emit_node(&mut self, state: &mut ShaderState, node: &GraphNode, indent: &str) {
@@ -638,8 +733,15 @@ impl BodyEmitter {
             let lines = hoisted
                 .iter()
                 .map(|(handle, HoistedValue { field, storage, ty })| {
-                    let name = if multiple { format!("{var}_{}", ident_suffix(handle)) } else { var.clone() };
-                    format!("let {name} = {};", convert_var(&format!("{FRAME_VALUES_VAR}.{field}"), *storage, *ty))
+                    let name = if multiple {
+                        format!("{var}_{}", ident_suffix(handle))
+                    } else {
+                        var.clone()
+                    };
+                    format!(
+                        "let {name} = {};",
+                        convert_var(&format!("{FRAME_VALUES_VAR}.{field}"), *storage, *ty)
+                    )
                 })
                 .collect();
             self.push(&node.id, lines, indent);
@@ -649,10 +751,20 @@ impl BodyEmitter {
         // A node only textures are read from computes nothing: they're read where they're used.
         let read = self.read_handles.get(&node.id);
         let is_texture = |id: &String| {
-            resolved.resolved_outputs.iter().find(|o| &o.id == id).is_some_and(|o| o.ty.is_texture())
+            resolved
+                .resolved_outputs
+                .iter()
+                .find(|o| &o.id == id)
+                .is_some_and(|o| o.ty.is_texture())
         };
-        let seed = self.probe.as_ref().is_some_and(|p| p.seed_node() == node.id);
-        if !resolved.resolved_outputs.is_empty() && read.is_none_or(|r| r.iter().all(is_texture)) && !seed {
+        let seed = self
+            .probe
+            .as_ref()
+            .is_some_and(|p| p.seed_node() == node.id);
+        if !resolved.resolved_outputs.is_empty()
+            && read.is_none_or(|r| r.iter().all(is_texture))
+            && !seed
+        {
             return;
         }
         if node.is(NODE_GROUP) {
@@ -679,7 +791,11 @@ impl BodyEmitter {
                 .get(id)
                 .copied()
                 .unwrap_or_else(|| {
-                    resolved.resolved_inputs.iter().find(|i| i.id == id).map_or(WgslType::F32, |i| i.default_type())
+                    resolved
+                        .resolved_inputs
+                        .iter()
+                        .find(|i| i.id == id)
+                        .map_or(WgslType::F32, |i| i.default_type())
                 })
                 .value_type()
         };
@@ -687,9 +803,16 @@ impl BodyEmitter {
         // Texture input gives its texture.
         let mut ctx_inputs: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for input in &resolved.resolved_inputs {
-            let edges: Vec<&GraphEdge> =
-                self.incoming(&node.id).iter().filter(|e| e.target_handle == input.id).collect();
-            let values = if resolved.input_types.get(&input.id).is_some_and(|t| t.is_texture()) {
+            let edges: Vec<&GraphEdge> = self
+                .incoming(&node.id)
+                .iter()
+                .filter(|e| e.target_handle == input.id)
+                .collect();
+            let values = if resolved
+                .input_types
+                .get(&input.id)
+                .is_some_and(|t| t.is_texture())
+            {
                 if edges.is_empty() {
                     Vec::new()
                 } else {
@@ -697,9 +820,16 @@ impl BodyEmitter {
                     vec![state.texture_var(&source)]
                 }
             } else if input.variadic {
-                edges.iter().map(|e| self.converted_source(state, e, type_of(&input.id))).collect()
+                edges
+                    .iter()
+                    .map(|e| self.converted_source(state, e, type_of(&input.id)))
+                    .collect()
             } else {
-                edges.first().map(|e| self.source_expr(state, e)).into_iter().collect()
+                edges
+                    .first()
+                    .map(|e| self.source_expr(state, e))
+                    .into_iter()
+                    .collect()
             };
             ctx_inputs.insert(input.id.clone(), values);
         }
@@ -712,7 +842,12 @@ impl BodyEmitter {
                 resolved: resolved.clone(),
                 variadic: ctx_inputs
                     .iter()
-                    .filter(|(id, _)| resolved.resolved_inputs.iter().any(|i| &i.id == *id && i.variadic))
+                    .filter(|(id, _)| {
+                        resolved
+                            .resolved_inputs
+                            .iter()
+                            .any(|i| &i.id == *id && i.variadic)
+                    })
                     .map(|(id, v)| (id.clone(), v.join(", ")))
                     .collect(),
             };
@@ -738,7 +873,13 @@ impl BodyEmitter {
     }
 
     fn emit_group_call(&mut self, state: &mut ShaderState, node: &GraphNode, indent: &str) {
-        let Some(definition_ref) = node.definition_ref() else { return };
+        let Some(definition_ref) = node.definition_ref() else {
+            state.fail(CodegenError::Unsupported(format!(
+                "group {} has no definition",
+                node.id
+            )));
+            return;
+        };
         let project = state.graph.project;
         let descriptor = resolve_descriptor(node, project);
         // Fallback inputs this call leaves without a value pick the group's own default.
@@ -751,24 +892,36 @@ impl BodyEmitter {
         let resolved = state.graph.resolver.resolve(project, node, &self.bindings);
         // Enum values known here are compiled into the call's function.
         let group_bindings = resolved.bindings.clone().unwrap_or_default();
-        let constants =
-            group_constants(&self.enum_document(), node, project, &group_bindings, &self.constants);
+        let constants = group_constants(
+            &self.enum_document(),
+            node,
+            project,
+            &group_bindings,
+            &self.constants,
+        );
         let inner_path: Vec<String> = self.path.iter().cloned().chain([node.id.clone()]).collect();
         let probe = self
             .probe
             .as_ref()
             .filter(|p| p.path.first() == Some(&node.id))
             .map(Probe::inner);
+        let site = GroupSite {
+            path: &inner_path,
+            absent_inputs: &absent,
+            constants: &constants,
+        };
         let Some(decl) = emit_group_function(
             state,
             definition_ref,
-            &absent,
-            &constants,
+            site,
             &group_bindings,
             Some(&self.read_outputs(&node.id)),
-            &inner_path,
             probe.as_ref(),
         ) else {
+            state.fail(CodegenError::Unsupported(format!(
+                "group {} refers to a missing definition",
+                node.id
+            )));
             return;
         };
         // Converted to the function's parameters, which its body was emitted for.
@@ -779,7 +932,12 @@ impl BodyEmitter {
                 args.push(self.input_expr(state, node, &input.id, *ty, default.as_ref()));
             }
         }
-        let line = format!("let {} = {}({});", var_name(&node.id), decl.fn_name, args.join(", "));
+        let line = format!(
+            "let {} = {}({});",
+            var_name(&node.id),
+            decl.fn_name,
+            args.join(", ")
+        );
         self.push(&node.id, vec![line], indent);
     }
 
@@ -794,7 +952,11 @@ impl BodyEmitter {
             };
         }
         while let Some(z) = zone {
-            let parent = self.zones.zones.get(&z).and_then(|zone| zone.parent.clone());
+            let parent = self
+                .zones
+                .zones
+                .get(&z)
+                .and_then(|zone| zone.parent.clone());
             if parent.as_deref() == scope {
                 return Some(format!("zone:{z}"));
             }
@@ -807,21 +969,25 @@ impl BodyEmitter {
         let mut units: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
         // Document order keeps the output stable.
-        for node in self.doc_nodes.clone() {
+        for node in self.doc_nodes {
             if !self.reachable.contains(&node.id) {
                 continue;
             }
             if let Some(unit) = self.unit_in(scope, &node.id)
-                && seen.insert(unit.clone()) {
-                    units.push(unit);
-                }
+                && seen.insert(unit.clone())
+            {
+                units.push(unit);
+            }
         }
         let mut unit_edges = Vec::new();
         for e in &self.edges {
-            if let (Some(s), Some(t)) = (self.unit_in(scope, &e.source), self.unit_in(scope, &e.target))
-                && s != t {
-                    unit_edges.push((s, t));
-                }
+            if let (Some(s), Some(t)) = (
+                self.unit_in(scope, &e.source),
+                self.unit_in(scope, &e.target),
+            ) && s != t
+            {
+                unit_edges.push((s, t));
+            }
         }
         let order = match topological_sort(&units, &unit_edges) {
             Ok(order) => order,
@@ -829,33 +995,45 @@ impl BodyEmitter {
         };
         for unit in order {
             if let Some(zone_id) = unit.strip_prefix("zone:") {
-                let Some(zone) = self.zones.zones.get(zone_id).cloned() else { continue };
+                let Some(zone) = self.zones.zones.get(zone_id).cloned() else {
+                    continue;
+                };
                 match zone.kind {
-                    ZoneKind::Repeat | ZoneKind::Passes => self.emit_zone_loop(state, &zone, indent),
+                    ZoneKind::Repeat | ZoneKind::Passes => {
+                        self.emit_zone_loop(state, &zone, indent)
+                    }
                     ZoneKind::Simulation => self.emit_simulation(state, &zone, indent),
                 }
                 continue;
             }
-            let Some(node) = self.node(&unit).cloned() else { continue };
+            let Some(node) = self.node(&unit) else {
+                continue;
+            };
             if node.is(GROUP_INPUT) || node.is(GROUP_OUTPUT) {
                 continue;
             }
-            self.emit_node(state, &node, indent);
+            self.emit_node(state, node, indent);
         }
     }
 
     fn emit_zone_loop(&mut self, state: &mut ShaderState, zone: &Zone, indent: &str) {
-        let (Some(input), Some(output)) =
-            (self.node(&zone.input_id).cloned(), self.node(&zone.output_id).cloned())
+        let (Some(input), Some(output)) = (self.node(&zone.input_id), self.node(&zone.output_id))
         else {
             return;
         };
-        let all_items: Vec<ZoneItem> = zone_items(Some(&output));
+        let all_items: Vec<ZoneItem> = zone_items(Some(output));
         let names = zone_var_names(zone, all_items.len());
-        let live = self.live_items.get(&zone.output_id).cloned().unwrap_or_default();
+        let live = self
+            .live_items
+            .get(&zone.output_id)
+            .cloned()
+            .unwrap_or_default();
         // Variables keep their item's index among all items, live or not.
-        let items: Vec<(usize, &ZoneItem)> =
-            all_items.iter().enumerate().filter(|(_, i)| live.contains(&i.id)).collect();
+        let items: Vec<(usize, &ZoneItem)> = all_items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| live.contains(&i.id))
+            .collect();
         let types = self.zone_item_types(state, zone);
         let type_of = |item: &ZoneItem| types.get(&item.id).copied().unwrap_or(WgslType::F32);
 
@@ -871,13 +1049,26 @@ impl BodyEmitter {
 
         let mut setup: Vec<String> = Vec::new();
         for (k, item) in &items {
-            let initial = self.input_expr(state, &input, &item.id, type_of(item), None);
-            setup.push(format!("var {}: {} = {initial};", names.state[*k], type_of(item).wgsl_name()));
+            let initial = self.input_expr(state, input, &item.id, type_of(item), None);
+            setup.push(format!(
+                "var {}: {} = {initial};",
+                names.state[*k],
+                type_of(item).wgsl_name()
+            ));
         }
         let default_iterations = InputValue::from(DEFAULT_ITERATIONS);
-        let iterations = self.input_expr(state, &input, ITERATIONS_HANDLE, WgslType::I32, Some(&default_iterations));
-        let max = zone_max_iterations(&input);
-        setup.push(format!("let {} = clamp({iterations}, 0, {max});", names.count));
+        let iterations = self.input_expr(
+            state,
+            input,
+            ITERATIONS_HANDLE,
+            WgslType::I32,
+            Some(&default_iterations),
+        );
+        let max = zone_max_iterations(input);
+        setup.push(format!(
+            "let {} = clamp({iterations}, 0, {max});",
+            names.count
+        ));
         setup.push(format!(
             "for (var {i}: i32 = 0; {i} < {n}; {i}++) {{",
             i = names.index,
@@ -889,7 +1080,7 @@ impl BodyEmitter {
         // another item's current value.
         let mut update: Vec<String> = Vec::new();
         for (k, item) in &items {
-            let next = self.input_expr(state, &output, &item.id, type_of(item), None);
+            let next = self.input_expr(state, output, &item.id, type_of(item), None);
             update.push(format!("  let {} = {next};", names.next[*k]));
         }
         for (k, _) in &items {
@@ -900,7 +1091,7 @@ impl BodyEmitter {
     }
 }
 
-impl BodyEmitter {
+impl<'a> BodyEmitter<'a> {
     /// A texel of a state item as of `read`'s frame, at the pixel; one kept at
     /// another size than the pass is the nearest to the pixel.
     fn load_state(
@@ -911,7 +1102,7 @@ impl BodyEmitter {
         read: StateRead,
     ) -> String {
         let texture = state.texture_var(&state_source(&simulation.reference, item, read));
-        if same_size(&item.size, &state.target_size) {
+        if item.size == state.target_size {
             return format!("textureLoad({texture}, vec2i({FRAGMENT_VAR}.position), 0)");
         }
         let dimensions = format!("vec2f(textureDimensions({texture}))");
@@ -924,20 +1115,39 @@ impl BodyEmitter {
     /// Emits a simulation zone: its state read from the textures keeping it,
     /// but where the probe is in it (see `SimulationMode`).
     fn emit_simulation(&mut self, state: &mut ShaderState, zone: &Zone, indent: &str) {
-        let (Some(input), Some(output)) =
-            (self.node(&zone.input_id).cloned(), self.node(&zone.output_id).cloned())
+        let (Some(input), Some(output)) = (self.node(&zone.input_id), self.node(&zone.output_id))
         else {
             return;
         };
-        let Some(simulation) = state.sources.simulation(&self.path, &zone.id) else { return };
-        let mode = self.simulations.get(&zone.id).copied().unwrap_or(SimulationMode::Opaque);
-        let all_items = zone_items(Some(&output));
+        let Some(simulation) = state.sources.simulation(&self.path, &zone.id) else {
+            return;
+        };
+        let mode = self
+            .simulations
+            .get(&zone.id)
+            .copied()
+            .unwrap_or(SimulationMode::Opaque);
+        let all_items = zone_items(Some(output));
         let vars = simulation_var_names(zone, all_items.len());
-        let index_of = |id: &str| all_items.iter().position(|i| i.id == id).unwrap_or(0);
+        let index_of = |id: &str| {
+            all_items.iter().position(|i| i.id == id).ok_or_else(|| {
+                CodegenError::Unsupported(format!(
+                    "state item {id} is not an item of zone {}",
+                    zone.id
+                ))
+            })
+        };
         // A texture item's values are read where they're used, as a texture.
-        let values: Vec<&StateItem> = simulation.items.iter().filter(|i| !i.ty.is_texture()).collect();
+        let values: Vec<&StateItem> = simulation
+            .items
+            .iter()
+            .filter(|i| !i.ty.is_texture())
+            .collect();
         let targeted: Vec<StateItem> = match &self.probe {
-            Some(Probe { kind: ProbeKind::Simulation { items, .. }, .. }) => items.clone(),
+            Some(Probe {
+                kind: ProbeKind::Simulation { items, .. },
+                ..
+            }) => items.clone(),
             _ => Vec::new(),
         };
         let is_targeted = |i: &StateItem| targeted.iter().any(|t| t.texture == i.texture);
@@ -946,10 +1156,14 @@ impl BodyEmitter {
             let read = self.read_outputs(&zone.output_id);
             let mut lines = Vec::new();
             for i in values.iter().filter(|i| read.contains(&i.item.id)) {
+                let k = match index_of(&i.item.id) {
+                    Ok(k) => k,
+                    Err(error) => return state.fail(error),
+                };
                 let load = self.load_state(state, &simulation, i, StateRead::Current);
                 lines.push(format!(
                     "let {} = {};",
-                    vars.current[index_of(&i.item.id)],
+                    vars.current[k],
                     unpack_state(&load, i.value_type(), i.format)
                 ));
             }
@@ -961,7 +1175,7 @@ impl BodyEmitter {
                 .iter()
                 .map(|i| {
                     let ty = i.value_type();
-                    let initial = self.input_expr(state, &input, &i.item.id, ty, None);
+                    let initial = self.input_expr(state, input, &i.item.id, ty, None);
                     pack_state(&initial, ty, i.format)
                 })
                 .collect();
@@ -971,11 +1185,18 @@ impl BodyEmitter {
         let read = self.read_outputs(&zone.input_id);
         let step = mode == SimulationMode::Step;
         let mut previous = Vec::new();
-        for i in values.iter().filter(|i| read.contains(&i.item.id) || (step && is_targeted(i))) {
+        for i in values
+            .iter()
+            .filter(|i| read.contains(&i.item.id) || (step && is_targeted(i)))
+        {
+            let k = match index_of(&i.item.id) {
+                Ok(k) => k,
+                Err(error) => return state.fail(error),
+            };
             let load = self.load_state(state, &simulation, i, StateRead::Previous);
             previous.push(format!(
                 "let {} = {};",
-                vars.previous[index_of(&i.item.id)],
+                vars.previous[k],
                 unpack_state(&load, i.value_type(), i.format)
             ));
         }
@@ -987,20 +1208,32 @@ impl BodyEmitter {
             return;
         }
         // Skipping keeps the previous frame's state: the nodes in the zone don't change it.
-        let skip = self.input_expr(state, &output, SKIP_HANDLE, WgslType::Bool, Some(&InputValue::from(false)));
+        let skip = self.input_expr(
+            state,
+            output,
+            SKIP_HANDLE,
+            WgslType::Bool,
+            Some(&InputValue::from(false)),
+        );
         let mut update = vec![format!("let {} = {skip};", vars.skip)];
         let mut fields = Vec::new();
         for i in &targeted {
             let ty = i.value_type();
-            let k = index_of(&i.item.id);
+            let k = match index_of(&i.item.id) {
+                Ok(k) => k,
+                Err(error) => return state.fail(error),
+            };
             let next = &vars.next[k];
             let kept = if i.ty.is_texture() {
                 self.load_state(state, &simulation, i, StateRead::Previous)
             } else {
                 vars.previous[k].clone()
             };
-            let value = self.input_expr(state, &output, &i.item.id, ty, None);
-            update.push(format!("let {next} = select({value}, {kept}, {});", vars.skip));
+            let value = self.input_expr(state, output, &i.item.id, ty, None);
+            update.push(format!(
+                "let {next} = select({value}, {kept}, {});",
+                vars.skip
+            ));
             fields.push(pack_state(next, ty, i.format));
         }
         self.simulation_fields = fields;
@@ -1009,8 +1242,8 @@ impl BodyEmitter {
 }
 
 /// What a node's `WgslCtx` asks of the generator.
-struct NodeEnv<'a, 's, 'g> {
-    em: &'a mut BodyEmitter,
+struct NodeEnv<'a, 'd, 's, 'g> {
+    em: &'a mut BodyEmitter<'d>,
     state: &'a mut ShaderState<'s, 'g>,
     node: &'a GraphNode,
     descriptor: Arc<NodeDescriptor>,
@@ -1019,12 +1252,17 @@ struct NodeEnv<'a, 's, 'g> {
     variadic: HashMap<String, String>,
 }
 
-impl CtxEnv for NodeEnv<'_, '_, '_> {
+impl CtxEnv for NodeEnv<'_, '_, '_, '_> {
     fn promote_input(&mut self, id: &str) -> String {
         if let Some(joined) = self.variadic.get(id) {
             return joined.clone();
         }
-        if self.resolved.input_types.get(id).is_some_and(|t| t.is_texture()) {
+        if self
+            .resolved
+            .input_types
+            .get(id)
+            .is_some_and(|t| t.is_texture())
+        {
             return CtxEnv::texture(self, id);
         }
         let ty = self
@@ -1041,7 +1279,8 @@ impl CtxEnv for NodeEnv<'_, '_, '_> {
             })
             .value_type();
         let default = self.descriptor.default_value(id).copied();
-        self.em.input_expr(self.state, self.node, id, ty, default.as_ref())
+        self.em
+            .input_expr(self.state, self.node, id, ty, default.as_ref())
     }
 
     fn is_present(&self, id: &str) -> bool {
@@ -1065,17 +1304,27 @@ impl CtxEnv for NodeEnv<'_, '_, '_> {
     }
 
     fn texture(&mut self, id: &str) -> String {
-        let source = self.em.texture_source_of(self.state, self.node, &self.resolved, id);
+        let source = self
+            .em
+            .texture_source_of(self.state, self.node, &self.resolved, id);
         self.state.texture_var(&source)
     }
 
     fn texture_format(&self, id: &str) -> TextureFormat {
-        self.em.texture_source_of(self.state, self.node, &self.resolved, id).format()
+        self.em
+            .texture_source_of(self.state, self.node, &self.resolved, id)
+            .format()
     }
 
     fn asset(&self) -> Option<crate::assets::Asset> {
         let id = self.node.data.asset.as_deref()?;
-        self.state.graph.project.assets.iter().find(|a| a.id() == id).cloned()
+        self.state
+            .graph
+            .project
+            .assets
+            .iter()
+            .find(|a| a.id() == id)
+            .cloned()
     }
 
     fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> String {
@@ -1089,8 +1338,30 @@ fn input_type_in(
     node: &GraphNode,
     input: &str,
 ) -> Option<WgslType> {
-    let ty = state.graph.resolver.resolve(state.graph.project, node, bindings).input_type(input)?;
+    let ty = state
+        .graph
+        .resolver
+        .resolve(state.graph.project, node, bindings)
+        .input_type(input)?;
     (!ty.is_texture()).then_some(ty)
+}
+
+/// The group instance a document's body is emitted for: the group nodes it's
+/// computed through, and what its inputs have.
+#[derive(Clone, Copy)]
+struct GroupSite<'a> {
+    path: &'a [String],
+    absent_inputs: &'a BTreeSet<String>,
+    constants: &'a BTreeMap<String, i64>,
+}
+
+/// A `GroupSite` with the bindings its document is resolved with.
+#[derive(Clone, Copy)]
+struct BodyScope<'a> {
+    path: &'a [String],
+    absent_inputs: &'a BTreeSet<String>,
+    constants: &'a BTreeMap<String, i64>,
+    bindings: &'a TypeBindings,
 }
 
 /// The frame values of the root document pixel computations read, to be read
@@ -1099,19 +1370,20 @@ fn input_type_in(
 /// that something computed per pixel reads. A node whose values are all read
 /// only by other frame values stays inside the frame program. Groups' bodies
 /// are shared by their instances, so their values aren't hoisted.
-#[allow(clippy::too_many_arguments)]
 fn hoist_frame_values(
     state: &mut ShaderState,
-    path: &[String],
+    scope: &BodyScope,
     doc: &GraphDocument,
     zones: &ZoneAnalysis,
     edges: &[GraphEdge],
     reachable: &HashSet<String>,
-    bindings: &TypeBindings,
     seeds: &HashSet<String>,
 ) -> HashMap<String, BTreeMap<String, HoistedValue>> {
+    let (path, bindings) = (scope.path, scope.bindings);
     let mut hoisted = HashMap::new();
-    let Some(frame) = state.frame.filter(|_| path.is_empty()) else { return hoisted };
+    let Some(frame) = state.frame.filter(|_| path.is_empty()) else {
+        return hoisted;
+    };
     let project = state.graph.project;
     let mut read: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     for e in edges {
@@ -1120,20 +1392,28 @@ fn hoist_frame_values(
     // The nodes computed on the CPU, whatever reads them.
     let mut on_cpu: Vec<&GraphNode> = Vec::new();
     for node in doc.nodes.iter().filter(|n| reachable.contains(&n.id)) {
-        let Some(handles) = read.get(node.id.as_str()) else { continue };
+        let Some(handles) = read.get(node.id.as_str()) else {
+            continue;
+        };
         if seeds.contains(&node.id) || zones.node_zone.get(&node.id).is_some_and(Option::is_some) {
             continue;
         }
         if resolve_descriptor(node, project).cpu.is_none() {
             continue;
         }
-        if handles.iter().all(|h| frame.analysis.is_frame_value(path, &node.id, h)) {
+        if handles
+            .iter()
+            .all(|h| frame.analysis.is_frame_value(path, &node.id, h))
+        {
             on_cpu.push(node);
         }
     }
     let cpu_ids: HashSet<&str> = on_cpu.iter().map(|n| n.id.as_str()).collect();
     for node in on_cpu {
-        if !edges.iter().any(|e| e.source == node.id && !cpu_ids.contains(e.target.as_str())) {
+        if !edges
+            .iter()
+            .any(|e| e.source == node.id && !cpu_ids.contains(e.target.as_str()))
+        {
             continue;
         }
         let types = state.graph.resolver.resolve(project, node, bindings);
@@ -1141,8 +1421,12 @@ fn hoist_frame_values(
         let mut values = BTreeMap::new();
         let mut uses = Vec::new();
         for handle in handles {
-            let Some(reference) = frame.hoist(path, &node.id, handle) else { break };
-            let Some(output) = types.resolved_outputs.iter().find(|o| o.id == *handle) else { break };
+            let Some(reference) = frame.hoist(path, &node.id, handle) else {
+                break;
+            };
+            let Some(output) = types.resolved_outputs.iter().find(|o| o.id == *handle) else {
+                break;
+            };
             if output.ty.is_texture() {
                 break;
             }
@@ -1155,9 +1439,18 @@ fn hoist_frame_values(
             let name = frame_value_field(&node.id, handle);
             values.insert(
                 (*handle).to_owned(),
-                HoistedValue { field: name.clone(), storage: make_type(kind, ty.components()), ty },
+                HoistedValue {
+                    field: name.clone(),
+                    storage: make_type(kind, ty.components()),
+                    ty,
+                },
             );
-            uses.push(FrameValueUse { name, reference, scalar, components: ty.components() as u32 });
+            uses.push(FrameValueUse {
+                name,
+                reference,
+                scalar,
+                components: ty.components() as u32,
+            });
         }
         // All of a node's values are hoisted or none, as what feeds it is dropped.
         if values.len() != handles.len() {
@@ -1165,10 +1458,7 @@ fn hoist_frame_values(
         }
         hoisted.insert(node.id.clone(), values);
         for used in uses {
-            match state.frame_values.iter_mut().find(|u| u.name == used.name) {
-                Some(existing) => *existing = used,
-                None => state.frame_values.push(used),
-            }
+            super::upsert(&mut state.frame_values, used, |a, b| a.name == b.name);
         }
     }
     hoisted
@@ -1185,22 +1475,25 @@ fn hoist_frame_values(
 /// read from the textures keeping it, but where the probe is in it (see
 /// `SimulationMode`). Invalid links, and links to sockets the nodes don't
 /// have with `bindings`, are ignored (inputs fall back to their stored values).
-#[allow(clippy::too_many_arguments)]
-fn emit_document_body(
+fn emit_document_body<'a>(
     state: &mut ShaderState,
-    doc: &GraphDocument,
+    doc: &'a GraphDocument,
     seed_type: &str,
-    absent_inputs: &BTreeSet<String>,
-    constants: &BTreeMap<String, i64>,
+    scope: &BodyScope,
     uniforms: bool,
-    bindings: &TypeBindings,
     seed_handles: Option<&BTreeSet<String>>,
-    path: &[String],
     probe: Option<&Probe>,
-) -> BodyEmitter {
+) -> BodyEmitter<'a> {
+    let BodyScope {
+        path,
+        absent_inputs,
+        constants,
+        bindings,
+    } = *scope;
     let project = state.graph.project;
     let zones = analyze_zones(&doc.nodes, &doc.edges, &zone_options(project));
-    let node_by_id: HashMap<&str, &GraphNode> = doc.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let node_by_id: HashMap<&str, &GraphNode> =
+        doc.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
     // The node the probe is computed at, here: the group node it goes through,
     // or the socket's node, or the boundary node whose inputs a simulation
@@ -1210,22 +1503,31 @@ fn emit_document_body(
             return Some(inner.clone());
         }
         match &p.kind {
-            ProbeKind::Simulation { zone, stage: SimulationStage::Start, .. } => Some(zone.clone()),
-            ProbeKind::Simulation { zone, .. } => zones.zones.get(zone).map(|z| z.output_id.clone()),
+            ProbeKind::Simulation {
+                zone,
+                stage: SimulationStage::Start,
+                ..
+            } => Some(zone.clone()),
+            ProbeKind::Simulation { zone, .. } => {
+                zones.zones.get(zone).map(|z| z.output_id.clone())
+            }
             ProbeKind::Socket { node, .. } | ProbeKind::Textures { node, .. } => Some(node.clone()),
         }
     });
     let mut simulations: HashMap<String, SimulationMode> = HashMap::new();
-    for zone in zones.zones.values().filter(|z| z.kind == ZoneKind::Simulation) {
+    for zone in zones
+        .zones
+        .values()
+        .filter(|z| z.kind == ZoneKind::Simulation)
+    {
         let mode = match probe {
-            Some(Probe { path, kind: ProbeKind::Simulation { zone: z, stage, .. } })
-                if path.is_empty() && *z == zone.id =>
-            {
-                match stage {
-                    SimulationStage::Start => SimulationMode::Start,
-                    SimulationStage::Step => SimulationMode::Step,
-                }
-            }
+            Some(Probe {
+                path,
+                kind: ProbeKind::Simulation { zone: z, stage, .. },
+            }) if path.is_empty() && *z == zone.id => match stage {
+                SimulationStage::Start => SimulationMode::Start,
+                SimulationStage::Step => SimulationMode::Step,
+            },
             _ if probe_node
                 .as_ref()
                 .is_some_and(|n| zone.members.contains(n) || *n == zone.input_id) =>
@@ -1236,20 +1538,32 @@ fn emit_document_body(
         };
         simulations.insert(zone.id.clone(), mode);
         if mode != SimulationMode::Opaque {
-            state.simulation = Some(SimulationRef { path: path.to_vec(), zone: zone.id.clone() }.id());
+            state.simulation = Some(
+                SimulationRef {
+                    path: path.to_vec(),
+                    zone: zone.id.clone(),
+                }
+                .id(),
+            );
         }
     }
     let probe_items: HashSet<String> = match probe {
-        Some(Probe { path, kind: ProbeKind::Simulation { items, .. } }) if path.is_empty() => {
-            items.iter().map(|i| i.item.id.clone()).collect()
-        }
+        Some(Probe {
+            path,
+            kind: ProbeKind::Simulation { items, .. },
+        }) if path.is_empty() => items.iter().map(|i| i.item.id.clone()).collect(),
         _ => HashSet::new(),
     };
     // Whether a link into a simulation's boundary node is computed here.
     let into_simulation = |e: &GraphEdge| -> bool {
-        let zone = zones.zone_of_boundary.get(&e.target).and_then(|z| zones.zones.get(z));
+        let zone = zones
+            .zone_of_boundary
+            .get(&e.target)
+            .and_then(|z| zones.zones.get(z));
         let mode = zone.and_then(|z| simulations.get(&z.id));
-        let (Some(zone), Some(mode)) = (zone, mode) else { return true };
+        let (Some(zone), Some(mode)) = (zone, mode) else {
+            return true;
+        };
         if e.target == zone.input_id {
             return *mode == SimulationMode::Start;
         }
@@ -1258,7 +1572,9 @@ fn emit_document_body(
     };
 
     let unavailable = unavailable_edges(&doc.edges, |id| {
-        node_by_id.get(id).map(|n| state.graph.resolver.resolve(project, n, bindings))
+        node_by_id
+            .get(id)
+            .map(|n| state.graph.resolver.resolve(project, n, bindings))
     });
     // Links into Texture inputs compute nothing here: textures are read where
     // they're used, and values are rendered to them by passes of their own.
@@ -1274,7 +1590,10 @@ fn emit_document_body(
     };
     // A Render Texture's values are computed by the pass drawing them, and only its items'.
     let into_render_texture = |e: &GraphEdge| {
-        if !node_by_id.get(e.target.as_str()).is_some_and(|n| n.is(RENDER_TEXTURE)) {
+        if !node_by_id
+            .get(e.target.as_str())
+            .is_some_and(|n| n.is(RENDER_TEXTURE))
+        {
             return false;
         }
         !matches!(probe, Some(Probe { path, kind: ProbeKind::Textures { node, items } })
@@ -1292,9 +1611,8 @@ fn emit_document_body(
         })
         .cloned()
         .collect();
-    let input_type = |node: &str, input: &str| {
-        input_type_in(state, bindings, node_by_id.get(node)?, input)
-    };
+    let input_type =
+        |node: &str, input: &str| input_type_in(state, bindings, node_by_id.get(node)?, input);
     let enum_doc = EnumDocument {
         nodes: &doc.nodes,
         edges: &valid,
@@ -1306,15 +1624,22 @@ fn emit_document_body(
         .into_iter()
         .filter(|e| {
             seed_handles.is_none_or(|handles| {
-                !node_by_id.get(e.target.as_str()).is_some_and(|n| n.is(seed_type))
+                !node_by_id
+                    .get(e.target.as_str())
+                    .is_some_and(|n| n.is(seed_type))
                     || handles.contains(&e.target_handle)
             })
         })
         .collect();
     let seeds: HashSet<String> = probe_node.into_iter().collect();
     let viewed: LiveItems = match probe {
-        Some(Probe { path, kind: ProbeKind::Socket { node, handle } })
-            if path.is_empty() && node_by_id.get(node.as_str()).is_some_and(|n| n.is(REPEAT_OUTPUT)) =>
+        Some(Probe {
+            path,
+            kind: ProbeKind::Socket { node, handle },
+        }) if path.is_empty()
+            && node_by_id
+                .get(node.as_str())
+                .is_some_and(|n| n.is(REPEAT_OUTPUT)) =>
         {
             BTreeMap::from([(node.clone(), BTreeSet::from([handle.clone()]))])
         }
@@ -1327,24 +1652,46 @@ fn emit_document_body(
         )
     };
     let mut needed = needed_edges(&doc.nodes, &used, seed_type, &seeds, &viewed, &computes);
-    let hoisted =
-        hoist_frame_values(state, path, doc, &zones, &needed.edges, &needed.reachable, bindings, &seeds);
+    let hoisted = hoist_frame_values(
+        state,
+        scope,
+        doc,
+        &zones,
+        &needed.edges,
+        &needed.reachable,
+        &seeds,
+    );
     // What only a hoisted value read is no longer needed.
     if !hoisted.is_empty() {
-        let pruned: Vec<GraphEdge> = used.iter().filter(|e| !hoisted.contains_key(&e.target)).cloned().collect();
+        let pruned: Vec<GraphEdge> = used
+            .iter()
+            .filter(|e| !hoisted.contains_key(&e.target))
+            .cloned()
+            .collect();
         needed = needed_edges(&doc.nodes, &pruned, seed_type, &seeds, &viewed, &computes);
     }
     let mut incoming: HashMap<String, Vec<GraphEdge>> = HashMap::new();
     let mut read_handles: HashMap<String, BTreeSet<String>> = HashMap::new();
     for e in &needed.edges {
-        incoming.entry(e.target.clone()).or_default().push(e.clone());
-        read_handles.entry(e.source.clone()).or_default().insert(e.source_handle.clone());
+        incoming
+            .entry(e.target.clone())
+            .or_default()
+            .push(e.clone());
+        read_handles
+            .entry(e.source.clone())
+            .or_default()
+            .insert(e.source_handle.clone());
     }
     let mut emitter = BodyEmitter {
         lines: Vec::new(),
         line_map: BTreeMap::new(),
-        node_index: doc.nodes.iter().enumerate().map(|(i, n)| (n.id.clone(), i)).collect(),
-        doc_nodes: doc.nodes.clone(),
+        node_index: doc
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id.clone(), i))
+            .collect(),
+        doc_nodes: &doc.nodes,
         edges: needed.edges,
         incoming,
         zone_vars: HashMap::new(),
@@ -1363,23 +1710,48 @@ fn emit_document_body(
         simulation_fields: Vec::new(),
         hoisted,
     };
-    for zone in emitter.zones.zones.values().filter(|z| z.kind == ZoneKind::Simulation).cloned().collect::<Vec<_>>() {
+    for zone in emitter
+        .zones
+        .zones
+        .values()
+        .filter(|z| z.kind == ZoneKind::Simulation)
+        .cloned()
+        .collect::<Vec<_>>()
+    {
         let items = zone_items(emitter.node(&zone.output_id)).len();
         let names = simulation_var_names(&zone, items);
-        let ids: Vec<String> = zone_items(emitter.node(&zone.output_id)).into_iter().map(|i| i.id).collect();
-        let mut previous: HashMap<String, String> =
-            ids.iter().cloned().zip(names.previous.iter().cloned()).collect();
-        previous.insert(DELTA_TIME_HANDLE.to_owned(), format!("{FRAME_VAR}.{SIMULATION_DELTA_FIELD}"));
+        let ids: Vec<String> = zone_items(emitter.node(&zone.output_id))
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        let mut previous: HashMap<String, String> = ids
+            .iter()
+            .cloned()
+            .zip(names.previous.iter().cloned())
+            .collect();
+        previous.insert(
+            DELTA_TIME_HANDLE.to_owned(),
+            format!("{FRAME_VAR}.{SIMULATION_DELTA_FIELD}"),
+        );
         emitter.zone_vars.insert(zone.input_id.clone(), previous);
-        emitter.zone_vars.insert(zone.output_id.clone(), ids.into_iter().zip(names.current).collect());
+        emitter.zone_vars.insert(
+            zone.output_id.clone(),
+            ids.into_iter().zip(names.current).collect(),
+        );
     }
     emitter.emit_scope(state, None, "  ");
     emitter
 }
 
 /// Node types reading or giving textures of their own: a simulation's keep its state.
-const TEXTURE_NODE_TYPES: [&str; 6] =
-    [crate::nodes::IMAGE, crate::nodes::VIDEO, SAMPLE_TEXTURE, TEXTURE_SIZE, SIMULATION_INPUT, SIMULATION_OUTPUT];
+const TEXTURE_NODE_TYPES: [&str; 6] = [
+    crate::nodes::IMAGE,
+    crate::nodes::VIDEO,
+    SAMPLE_TEXTURE,
+    TEXTURE_SIZE,
+    SIMULATION_INPUT,
+    SIMULATION_OUTPUT,
+];
 
 /// Whether a definition reads textures: itself, through its sockets or the groups it nests.
 fn reads_textures(state: &mut ShaderState, definition_ref: &str) -> bool {
@@ -1387,8 +1759,12 @@ fn reads_textures(state: &mut ShaderState, definition_ref: &str) -> bool {
         return *known;
     }
     // A group nesting itself reads none through itself.
-    state.reads_textures.insert(definition_ref.to_owned(), false);
-    let Some(def) = state.graph.project.document(definition_ref) else { return false };
+    state
+        .reads_textures
+        .insert(definition_ref.to_owned(), false);
+    let Some(def) = state.graph.project.document(definition_ref) else {
+        return false;
+    };
     let texture = |h: &GroupHandleDef| h.ty.fixed().is_some_and(WgslType::is_texture);
     let reads = def.inputs.iter().any(texture)
         || def.outputs.iter().any(texture)
@@ -1397,7 +1773,9 @@ fn reads_textures(state: &mut ShaderState, definition_ref: &str) -> bool {
                 || n.is(RENDER_TEXTURE)
                 || n.definition_ref().is_some_and(|r| reads_textures(state, r))
         });
-    state.reads_textures.insert(definition_ref.to_owned(), reads);
+    state
+        .reads_textures
+        .insert(definition_ref.to_owned(), reads);
     reads
 }
 
@@ -1408,16 +1786,24 @@ fn texture_fingerprint(state: &mut ShaderState, definition_ref: &str, path: &[St
     if !reads_textures(state, definition_ref) {
         return String::new();
     }
-    let (Some(def), Some(instance)) =
-        (state.graph.project.document(definition_ref), state.sources.instance(path))
-    else {
+    let (Some(def), Some(instance)) = (
+        state.graph.project.document(definition_ref),
+        state.sources.instance(path),
+    ) else {
         return String::new();
     };
     let mut parts: Vec<String> = Vec::new();
     for node in &def.nodes {
         // Each instance keeps a state of its own.
         if node.is(SIMULATION_INPUT) {
-            parts.push(format!("sim:{}", SimulationRef { path: path.to_vec(), zone: node.id.clone() }.id()));
+            parts.push(format!(
+                "sim:{}",
+                SimulationRef {
+                    path: path.to_vec(),
+                    zone: node.id.clone()
+                }
+                .id()
+            ));
         }
         if let Some(nested) = node.definition_ref() {
             let inner: Vec<String> = path.iter().cloned().chain([node.id.clone()]).collect();
@@ -1426,10 +1812,17 @@ fn texture_fingerprint(state: &mut ShaderState, definition_ref: &str, path: &[St
                 parts.push(format!("{}({nested})", node.id));
             }
         }
-        let types = state.graph.resolver.resolve(state.graph.project, node, &instance.bindings);
+        let types = state
+            .graph
+            .resolver
+            .resolve(state.graph.project, node, &instance.bindings);
         for (id, ty) in &types.input_types {
             if ty.is_texture() {
-                parts.push(format!("{}.{id}={}", node.id, state.sources.input(path, &node.id, id).source().id()));
+                parts.push(format!(
+                    "{}.{id}={}",
+                    node.id,
+                    state.sources.input(path, &node.id, id).source().id()
+                ));
             }
         }
         for output in &types.resolved_outputs {
@@ -1438,7 +1831,11 @@ fn texture_fingerprint(state: &mut ShaderState, definition_ref: &str, path: &[St
                     "{}:{}={}",
                     node.id,
                     output.id,
-                    state.sources.output(path, &node.id, &output.id).source().id()
+                    state
+                        .sources
+                        .output(path, &node.id, &output.id)
+                        .source()
+                        .id()
                 ));
             }
         }
@@ -1447,19 +1844,20 @@ fn texture_fingerprint(state: &mut ShaderState, definition_ref: &str, path: &[St
 }
 
 /// Generate one group's `struct` + `fn` (recursively for nested groups).
-#[allow(clippy::too_many_arguments)]
 fn emit_group_function(
     state: &mut ShaderState,
     definition_ref: &str,
-    absent_inputs: &BTreeSet<String>,
-    constants: &BTreeMap<String, i64>,
+    site: GroupSite,
     given: &TypeBindings,
     // The outputs the caller reads; all of them when `None`.
     read_outputs: Option<&BTreeSet<String>>,
-    // The group nodes it's computed through, from the root, the caller last.
-    path: &[String],
     probe: Option<&Probe>,
 ) -> Option<GroupDecl> {
+    let GroupSite {
+        path,
+        absent_inputs,
+        constants,
+    } = site;
     let project = state.graph.project;
     let definition = project.document(definition_ref)?;
     let variables = &definition.type_variables;
@@ -1480,8 +1878,17 @@ fn emit_group_function(
         .enumerate()
         .filter_map(|(i, h)| constants.get(&h.id).map(|v| format!("{i}_{v}")))
         .collect();
-    let type_suffix: String =
-        variables.iter().map(|v| bindings.get(&v.id).copied().unwrap_or(WgslType::F32).to_string()).collect::<Vec<_>>().join("_");
+    let type_suffix: String = variables
+        .iter()
+        .map(|v| {
+            bindings
+                .get(&v.id)
+                .copied()
+                .unwrap_or(WgslType::F32)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("_");
     let unread_indices: Vec<usize> = definition
         .outputs
         .iter()
@@ -1489,7 +1896,12 @@ fn emit_group_function(
         .filter(|(_, h)| read_outputs.is_some_and(|r| !r.contains(&h.id)))
         .map(|(i, _)| i)
         .collect();
-    let join = |list: &[usize]| list.iter().map(ToString::to_string).collect::<Vec<_>>().join("|");
+    let join = |list: &[usize]| {
+        list.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("|")
+    };
     let textures = texture_fingerprint(state, definition_ref, path);
     let key = format!(
         "{definition_ref}|{}|e|{}|t|{type_suffix}|u|{}|x|{textures}|v|{}",
@@ -1505,7 +1917,10 @@ fn emit_group_function(
     let ident = sanitize_ident(definition_ref);
     // Variants reading other textures are numbered, their reads being too long for a name.
     let texture_variant = (!textures.is_empty()).then(|| {
-        let count = state.texture_variants.entry(definition_ref.to_owned()).or_default();
+        let count = state
+            .texture_variants
+            .entry(definition_ref.to_owned())
+            .or_default();
         *count += 1;
         *count - 1
     });
@@ -1513,14 +1928,22 @@ fn emit_group_function(
     if !absent_indices.is_empty() {
         suffix.push(format!(
             "d{}",
-            absent_indices.iter().map(ToString::to_string).collect::<Vec<_>>().join("_")
+            absent_indices
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("_")
         ));
     }
     suffix.extend(enum_values.iter().map(|v| format!("e{v}")));
     if !unread_indices.is_empty() {
         suffix.push(format!(
             "u{}",
-            unread_indices.iter().map(ToString::to_string).collect::<Vec<_>>().join("_")
+            unread_indices
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("_")
         ));
     }
     if let Some(variant) = texture_variant {
@@ -1552,24 +1975,34 @@ fn emit_group_function(
         .map(|(_, h)| h.id.clone())
         .collect();
     let group_uniforms = state.uniform_scopes.contains(definition_ref);
+    let scope = BodyScope {
+        path,
+        absent_inputs,
+        constants,
+        bindings: &bindings,
+    };
     let body = emit_document_body(
         state,
         definition,
         GROUP_OUTPUT,
-        absent_inputs,
-        constants,
+        &scope,
         group_uniforms,
-        &bindings,
         Some(&read_handles),
-        path,
         probe,
     );
 
     // Struct fields follow the handle types; whatever feeds them is converted
     // on the way in, exactly like any other typed input.
     let output_types = |node: Option<&GraphNode>| {
-        node.map(|n| state.graph.resolver.resolve(project, n, &bindings).input_types.clone())
-            .unwrap_or_default()
+        node.map(|n| {
+            state
+                .graph
+                .resolver
+                .resolve(project, n, &bindings)
+                .input_types
+                .clone()
+        })
+        .unwrap_or_default()
     };
     // Textures are no WGSL values: they're read where they're used, never passed.
     let outputs: Vec<(&GroupHandleDef, WgslType)> = definition
@@ -1577,7 +2010,11 @@ fn emit_group_function(
         .iter()
         .map(|h| {
             let ty = bound_type(&h.ty, variables, &bindings)
-                .or_else(|| output_types(definition.output_node_of(&h.id)).get(&h.id).copied())
+                .or_else(|| {
+                    output_types(definition.output_node_of(&h.id))
+                        .get(&h.id)
+                        .copied()
+                })
                 .unwrap_or(WgslType::F32);
             (h, ty)
         })
@@ -1586,7 +2023,12 @@ fn emit_group_function(
     let inputs: Vec<(&GroupHandleDef, WgslType)> = definition
         .inputs
         .iter()
-        .map(|h| (h, bound_type(&h.ty, variables, &bindings).unwrap_or(WgslType::F32)))
+        .map(|h| {
+            (
+                h,
+                bound_type(&h.ty, variables, &bindings).unwrap_or(WgslType::F32),
+            )
+        })
         .filter(|(_, ty)| !ty.is_texture())
         .collect();
     // Outputs the caller doesn't read keep their struct field, zeroed.
@@ -1607,7 +2049,11 @@ fn emit_group_function(
         .collect();
     if let Some(probe) = probe {
         struct_fields.extend(
-            probe.types().iter().enumerate().map(|(k, t)| format!("  {}: {},", Probe::field(k), t.wgsl_name())),
+            probe
+                .types()
+                .iter()
+                .enumerate()
+                .map(|(k, t)| format!("  {}: {},", Probe::field(k), t.wgsl_name())),
         );
     }
     let params: Vec<String> = inputs
@@ -1618,12 +2064,21 @@ fn emit_group_function(
     let first_of_definition = state.group_structs.insert(struct_name.clone());
     let mut decl: Vec<String> = Vec::new();
     if first_of_definition {
-        decl.push(format!("struct {struct_name} {{\n{}\n}}", struct_fields.join("\n")));
+        decl.push(format!(
+            "struct {struct_name} {{\n{}\n}}",
+            struct_fields.join("\n")
+        ));
         decl.push(String::new());
     }
-    decl.push(format!("fn {fn_name}({}) -> {struct_name} {{", params.join(", ")));
+    decl.push(format!(
+        "fn {fn_name}({}) -> {struct_name} {{",
+        params.join(", ")
+    ));
     decl.extend(body.lines.iter().cloned());
-    decl.push(format!("  return {struct_name}({});", field_values.join(", ")));
+    decl.push(format!(
+        "  return {struct_name}({});",
+        field_values.join(", ")
+    ));
     decl.push("}".to_owned());
     let entry = GroupDecl {
         decl: decl.join("\n"),
@@ -1632,16 +2087,6 @@ fn emit_group_function(
     };
     state.group_decls.push((key, entry.clone()));
     Some(entry)
-}
-
-/// Emit the full WGSL fragment shader source from the graph: `frag` returns
-/// a colour.
-pub fn generate_shader(
-    graph: CodegenGraph<'_>,
-    options: &ShaderOptions,
-) -> Result<ShaderSource, CodegenError> {
-    let sources = TextureSources::new(graph);
-    generate_shader_with(graph, options, &sources, None, &CANVAS_SIZE, None)
 }
 
 /// Emit the WGSL fragment shader source drawing `target`: a colour for a
@@ -1681,16 +2126,19 @@ pub fn generate_shader_with<'g>(
     let probe = target.map(Probe::of);
     let root = graph.project.root();
     let root_uniforms = state.uniform_scopes.contains(ROOT_ID);
+    let root_scope = BodyScope {
+        path: &[],
+        absent_inputs: &BTreeSet::new(),
+        constants: &BTreeMap::new(),
+        bindings: &BTreeMap::new(),
+    };
     let body = emit_document_body(
         &mut state,
         root,
         if target.is_some() { "" } else { FRAG_OUTPUT },
-        &BTreeSet::new(),
-        &BTreeMap::new(),
+        &root_scope,
         root_uniforms,
-        &BTreeMap::new(),
         None,
-        &[],
         probe.as_ref(),
     );
     if let Some(error) = state.error.take() {
@@ -1703,11 +2151,17 @@ pub fn generate_shader_with<'g>(
         .map(Probe::types);
     let fields = probe.as_ref().map(|_| body.probe_fields(&mut state));
     let result = if targets.is_some() {
-        Some(format!("{}({})", super::program::TARGETS_STRUCT, fields.unwrap_or_default().join(", ")))
+        Some(format!(
+            "{}({})",
+            super::program::TARGETS_STRUCT,
+            fields.unwrap_or_default().join(", ")
+        ))
     } else if let Some(fields) = fields {
         fields.into_iter().next()
     } else {
-        output.filter(|n| body.line_map.contains_key(&n.id)).map(|n| var_name(&n.id))
+        output
+            .filter(|n| body.line_map.contains_key(&n.id))
+            .map(|n| var_name(&n.id))
     };
 
     let mut preamble: Vec<String> = Vec::new();
@@ -1727,15 +2181,28 @@ pub fn generate_shader_with<'g>(
     }
     preamble.push("// ---------- User code ----------".to_owned());
     preamble.push(String::new());
-    let returns = if targets.is_some() { super::program::TARGETS_STRUCT } else { "vec4f" };
+    let returns = if targets.is_some() {
+        super::program::TARGETS_STRUCT
+    } else {
+        "vec4f"
+    };
     preamble.push(format!("fn frag(uv: vec2f) -> {returns} {{"));
     // Offset the line map so line numbers correspond to the final shader string.
     let offset: usize = preamble.iter().map(|l| l.matches('\n').count() + 1).sum();
+    // The line each body line starts at, by index, so a range's lines are found in constant time.
+    let mut body_starts = Vec::with_capacity(body.lines.len() + 1);
+    let mut body_end = 0;
+    body_starts.push(body_end);
+    for line in &body.lines {
+        body_end += line.matches('\n').count() + 1;
+        body_starts.push(body_end);
+    }
+    let line_at = |index: usize| body_starts.get(index).copied().unwrap_or(body_end);
     let line_map = body
         .line_map
         .iter()
         .map(|(id, r)| {
-            let (start, end) = (line_offset(&body.lines, r.start), line_offset(&body.lines, r.end));
+            let (start, end) = (line_at(r.start), line_at(r.end));
             (id.clone(), offset + start..offset + end)
         })
         .collect();
@@ -1746,7 +2213,6 @@ pub fn generate_shader_with<'g>(
         None => format!("  return {};", WgslType::Vec4f.zero()),
     });
     lines.push("}".to_owned());
-    let _ = FRAGMENT_VAR;
     Ok(ShaderSource {
         fragment: lines.join("\n"),
         uniforms: state.uniforms,
@@ -1757,9 +2223,4 @@ pub fn generate_shader_with<'g>(
         simulation: state.simulation,
         frame_values: state.frame_values,
     })
-}
-
-/// The physical line a body entry starts at: entries may hold several lines.
-fn line_offset(lines: &[String], index: usize) -> usize {
-    lines.iter().take(index).map(|l| l.matches('\n').count() + 1).sum()
 }

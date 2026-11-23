@@ -88,7 +88,11 @@ impl TextureFormat {
     /// How many components its texels have.
     pub const fn channels(self) -> usize {
         match self {
-            Self::Rgba16Float | Self::Rgba32Float | Self::Rgba8Unorm | Self::Rgba32Uint | Self::Rgba32Sint => 4,
+            Self::Rgba16Float
+            | Self::Rgba32Float
+            | Self::Rgba8Unorm
+            | Self::Rgba32Uint
+            | Self::Rgba32Sint => 4,
             Self::Rg16Float | Self::Rg32Float | Self::Rg32Uint | Self::Rg32Sint => 2,
             _ => 1,
         }
@@ -107,7 +111,10 @@ impl TextureFormat {
     /// Whether linear filtering reads it. 32-bit floats aren't without the
     /// optional `float32-filterable` feature, which codegen can't count on.
     pub const fn is_filterable(self) -> bool {
-        matches!(self, Self::Rgba16Float | Self::Rg16Float | Self::R16Float | Self::Rgba8Unorm)
+        matches!(
+            self,
+            Self::Rgba16Float | Self::Rg16Float | Self::R16Float | Self::Rgba8Unorm
+        )
     }
 
     pub const fn sample_type(self) -> TextureSampleType {
@@ -186,29 +193,24 @@ pub enum TextureSize {
 }
 
 /// The canvas' own size.
-pub const CANVAS_SIZE: TextureSize =
-    TextureSize::Scale { scale: FrameArg::Literal(1.0), of: SizeBase::Canvas };
+pub const CANVAS_SIZE: TextureSize = TextureSize::Scale {
+    scale: FrameArg::Literal(1.0),
+    of: SizeBase::Canvas,
+};
 
 /// How many levels a full mip chain of a texture of this size has.
 pub fn mip_level_count(size: Size) -> u32 {
     size.width.max(size.height).max(1).ilog2() + 1
 }
 
-/// Whether two sizes are provably the same. Only equality it can see: the
-/// same base with the same literal scale or value of the frame program, or the same pixels.
-pub fn same_size(a: &TextureSize, b: &TextureSize) -> bool {
-    a == b
-}
-
-/// Whether `size` is the canvas' own.
-pub fn is_canvas_size(size: &TextureSize) -> bool {
-    matches!(size, TextureSize::Scale { scale: FrameArg::Literal(s), of: SizeBase::Canvas } if *s == 1.0)
-}
-
 /// Rounds up, ignoring the error of products like `1000 * 0.1`.
 fn pixels(value: f64, max: u32) -> u32 {
     let ceiled = (value - 1e-6).ceil();
-    if ceiled.is_nan() { 1 } else { ceiled.clamp(1.0, f64::from(max)) as u32 }
+    if ceiled.is_nan() {
+        1
+    } else {
+        ceiled.clamp(1.0, f64::from(max)) as u32
+    }
 }
 
 /// What sizes are resolved against.
@@ -233,9 +235,10 @@ pub fn resolve_size(size: &TextureSize, env: &SizeEnv) -> Size {
         (FrameArg::Frame(_), None) => f64::NAN,
     };
     match size {
-        TextureSize::Pixels { width, height } => {
-            Size::new(pixels(arg(width), env.max_dimension), pixels(arg(height), env.max_dimension))
-        }
+        TextureSize::Pixels { width, height } => Size::new(
+            pixels(arg(width), env.max_dimension),
+            pixels(arg(height), env.max_dimension),
+        ),
         TextureSize::Scale { scale, of } => {
             let scale = arg(scale);
             let base = match of {
@@ -254,27 +257,55 @@ pub fn resolve_size(size: &TextureSize, env: &SizeEnv) -> Size {
 mod tests {
     use super::*;
 
-    const ENV: SizeEnv =
-        SizeEnv { canvas: Size::new(1001, 500), resource: &|_| None, max_dimension: 8192, frame: None };
+    const ENV: SizeEnv = SizeEnv {
+        canvas: Size::new(1001, 500),
+        resource: &|_| None,
+        max_dimension: 8192,
+        frame: None,
+    };
 
     #[test]
     fn scales_round_up() {
-        let half = TextureSize::Scale { scale: 0.5.into(), of: SizeBase::Canvas };
+        let half = TextureSize::Scale {
+            scale: 0.5.into(),
+            of: SizeBase::Canvas,
+        };
         assert_eq!(resolve_size(&half, &ENV), Size::new(501, 250));
-        let tenth = TextureSize::Scale { scale: 0.1.into(), of: SizeBase::Canvas };
-        assert_eq!(resolve_size(&tenth, &SizeEnv { canvas: Size::new(1000, 10), ..ENV }), Size::new(100, 1));
+        let tenth = TextureSize::Scale {
+            scale: 0.1.into(),
+            of: SizeBase::Canvas,
+        };
+        assert_eq!(
+            resolve_size(
+                &tenth,
+                &SizeEnv {
+                    canvas: Size::new(1000, 10),
+                    ..ENV
+                }
+            ),
+            Size::new(100, 1)
+        );
     }
 
     #[test]
     fn sizes_are_clamped_to_the_device() {
-        let huge = TextureSize::Pixels { width: 100_000.0.into(), height: 0.0.into() };
+        let huge = TextureSize::Pixels {
+            width: 100_000.0.into(),
+            height: 0.0.into(),
+        };
         assert_eq!(resolve_size(&huge, &ENV), Size::new(8192, 1));
     }
 
     #[test]
     fn scales_follow_resources() {
-        let size = TextureSize::Scale { scale: 2.0.into(), of: SizeBase::Resource("a".into()) };
-        let env = SizeEnv { resource: &|id| (id == "a").then_some(Size::new(10, 20)), ..ENV };
+        let size = TextureSize::Scale {
+            scale: 2.0.into(),
+            of: SizeBase::Resource("a".into()),
+        };
+        let env = SizeEnv {
+            resource: &|id| (id == "a").then_some(Size::new(10, 20)),
+            ..ENV
+        };
         assert_eq!(resolve_size(&size, &env), Size::new(20, 40));
     }
 
@@ -291,8 +322,14 @@ mod tests {
             assert_eq!(TextureFormat::from_id(f.id()), Some(f));
         }
         assert_eq!(TextureFormat::Rgba16Float.texel_bytes(), 8);
-        assert_eq!(TextureFormat::R32Uint.sample_type(), TextureSampleType::Uint);
-        assert_eq!(TextureFormat::Rgba32Float.sample_type(), TextureSampleType::UnfilterableFloat);
+        assert_eq!(
+            TextureFormat::R32Uint.sample_type(),
+            TextureSampleType::Uint
+        );
+        assert_eq!(
+            TextureFormat::Rgba32Float.sample_type(),
+            TextureSampleType::UnfilterableFloat
+        );
         assert!(!TextureFormat::R32Sint.can_mip());
     }
 }

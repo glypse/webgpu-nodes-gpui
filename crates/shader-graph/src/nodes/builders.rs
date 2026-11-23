@@ -1,9 +1,25 @@
 //! Factories for the node shapes many types share.
 
 use crate::types::{
-    FLOAT_TYPES, NUMERIC_TYPES, NodeCategory, NodeData, NodeDescriptor, NodeInputDef,
+    EnumVariant, FLOAT_TYPES, InputControl, InputValue, enum_value, NUMERIC_TYPES, NodeCategory, NodeData, NodeDescriptor, NodeInputDef,
     NodeOutputDef, NodeSetting, ScalarKind, WgslCtx, WgslType, make_type,
 };
+
+/// An enum input's value while compiling: set by the calling group node, or
+/// stored on the node while unlinked. `None` when it's only known per pixel.
+pub(crate) fn known_enum(ctx: &WgslCtx<'_>, id: &str, variants: &[EnumVariant]) -> Option<i64> {
+    if let Some(constant) = ctx.constant(id) {
+        return enum_value(Some(&InputValue::from(constant)), variants);
+    }
+    if !ctx.operands(id).is_empty() {
+        return None;
+    }
+    enum_value(ctx.data.values.get(id), variants)
+}
+
+pub(crate) fn enum_input(id: &str, label: &str, variants: Vec<EnumVariant>) -> NodeInputDef {
+    NodeInputDef::new(id, label, &[WgslType::U32]).control(InputControl::Enum { variants })
+}
 
 pub(crate) fn float_values<const N: usize>(values: [(&'static str, f64); N]) -> NodeData {
     NodeData::with_values(values)
@@ -11,6 +27,14 @@ pub(crate) fn float_values<const N: usize>(values: [(&'static str, f64); N]) -> 
 
 fn result_output() -> Vec<NodeOutputDef> {
     vec![NodeOutputDef::new("result", "result", WgslType::F32)]
+}
+
+/// One input `e` and one output, with no emitter.
+pub fn unary_node(ty: &str, label: &str, types: &[WgslType], category: NodeCategory) -> NodeDescriptor {
+    NodeDescriptor::new(ty, label, category)
+        .inputs(vec![NodeInputDef::new("e", "e", types)])
+        .outputs(result_output())
+        .defaults(float_values([("e", 0.0)]))
 }
 
 /// One input `e`, one output, `fn(e)`: sin, abs, floor...
@@ -21,10 +45,7 @@ pub fn unary_fn(
     types: &[WgslType],
     category: NodeCategory,
 ) -> NodeDescriptor {
-    NodeDescriptor::new(ty, label, category)
-        .inputs(vec![NodeInputDef::new("e", "e", types)])
-        .outputs(result_output())
-        .defaults(float_values([("e", 0.0)]))
+    unary_node(ty, label, types, category)
         .wgsl(move |ctx| {
             let e = ctx.promote_input("e");
             vec![format!("let {} = {wgsl_fn}({e});", ctx.var_name)]
@@ -96,6 +117,11 @@ pub fn binary_node(
             let expr = emit(&a, &b, ctx);
             vec![format!("let {} = {expr};", ctx.var_name)]
         })
+}
+
+/// Two inputs passed to a function: step, atan2, dot...
+pub fn binary_fn(ty: &str, label: &str, wgsl_fn: &'static str, opts: BinaryOptions) -> NodeDescriptor {
+    binary_node(ty, label, move |a, b, _| format!("{wgsl_fn}({a}, {b})"), opts)
 }
 
 /// `fn(a, b, c...)` over the given inputs: clamp, mix.

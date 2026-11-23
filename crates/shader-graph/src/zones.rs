@@ -32,14 +32,6 @@ pub const SIMULATION_INPUT: &str = "simulation-input";
 pub const SIMULATION_OUTPUT: &str = "simulation-output";
 pub const PASS_REPEAT_INPUT: &str = "pass-repeat-input";
 pub const PASS_REPEAT_OUTPUT: &str = "pass-repeat-output";
-pub const ZONE_NODE_TYPES: [&str; 6] = [
-    REPEAT_INPUT,
-    REPEAT_OUTPUT,
-    SIMULATION_INPUT,
-    SIMULATION_OUTPUT,
-    PASS_REPEAT_INPUT,
-    PASS_REPEAT_OUTPUT,
-];
 
 /// Repeat Input's iteration count input.
 pub const ITERATIONS_HANDLE: &str = "iterations";

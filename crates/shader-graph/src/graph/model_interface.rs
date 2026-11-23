@@ -65,7 +65,7 @@ impl GraphModel {
         &mut self,
         definition_ref: &str,
         handle_id: &str,
-        value: f64,
+        value: i64,
         ty: WgslType,
         offered: bool,
     ) {

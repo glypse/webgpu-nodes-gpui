@@ -5,19 +5,16 @@ use crate::graph::{Connection, FRAG_OUTPUT, GraphModel, Point};
 use crate::types::{InputValue, WgslType};
 
 /// A model with helpers to build a graph tersely.
+#[derive(Default)]
 pub struct TestGraph {
     pub model: GraphModel,
 }
 
-impl Default for TestGraph {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TestGraph {
     pub fn new() -> Self {
-        Self { model: GraphModel::default() }
+        Self {
+            model: GraphModel::default(),
+        }
     }
 
     pub fn output(&self) -> String {
@@ -32,7 +29,9 @@ impl TestGraph {
     }
 
     pub fn add(&mut self, node_type: &str) -> String {
-        self.model.add_node(node_type, Point::default()).unwrap_or_else(|| panic!("adds {node_type}"))
+        self.model
+            .add_node(node_type, Point::default())
+            .unwrap_or_else(|| panic!("adds {node_type}"))
     }
 
     pub fn set(&mut self, node: &str, input: &str, value: impl Into<InputValue>) -> &mut Self {
@@ -63,7 +62,9 @@ impl TestGraph {
     }
 
     pub fn literal_program(&self) -> Program {
-        self.model.generate_with(&ShaderOptions::default()).expect("generates")
+        self.model
+            .generate_with(&ShaderOptions::default())
+            .expect("generates")
     }
 
     /// The program's WGSL, validated by naga.
@@ -78,7 +79,10 @@ impl TestGraph {
 pub fn validate_wgsl(code: &str) {
     let module = naga::front::wgsl::parse_str(code)
         .unwrap_or_else(|e| panic!("{}\n{code}", e.emit_to_string(code)));
-    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-        .validate(&module)
-        .unwrap_or_else(|e| panic!("{e:?}\n{code}"));
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|e| panic!("{e:?}\n{code}"));
 }

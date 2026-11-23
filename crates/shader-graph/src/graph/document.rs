@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -352,12 +352,15 @@ impl GraphProject {
         self.fallbacks.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(reference.to_owned(), handles);
     }
 
+    /// A project without a root is reported by `project_issues`; reading one
+    /// gives an empty root rather than panicking.
     pub fn root(&self) -> &GraphDocument {
-        &self.definitions[ROOT_ID]
+        static EMPTY: OnceLock<GraphDocument> = OnceLock::new();
+        self.definitions.get(ROOT_ID).unwrap_or_else(|| EMPTY.get_or_init(GraphDocument::default))
     }
 
     pub fn root_mut(&mut self) -> &mut GraphDocument {
-        self.definitions.get_mut(ROOT_ID).expect("a project always has a root")
+        self.definitions.entry(ROOT_ID.to_owned()).or_default()
     }
 
     pub fn document(&self, key: &str) -> Option<&GraphDocument> {

@@ -2,11 +2,23 @@ use crate::types::{InputValue, ScalarKind, WgslType, scalar_number_of};
 
 /// WGSL identifiers can't contain characters like the dashes of a UUID.
 pub fn ident_suffix(id: &str) -> String {
-    id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
-fn number(n: f64) -> String {
-    if n != 0.0 && (n.abs() >= 1e15 || n.abs() < 1e-6) { format!("{n:e}") } else { format!("{n}") }
+pub(crate) fn number(n: f64) -> String {
+    if n != 0.0 && (n.abs() >= 1e15 || n.abs() < 1e-6) {
+        format!("{n:e}")
+    } else {
+        format!("{n}")
+    }
 }
 
 fn scalar_literal(kind: ScalarKind, value: Option<f64>) -> String {
@@ -33,7 +45,11 @@ pub fn format_wgsl_literal(ty: WgslType, value: Option<&InputValue>) -> String {
             format!("{}({})", ty.wgsl_name(), parts.join(", "))
         }
         Some(scalar) => {
-            format!("{}({})", ty.wgsl_name(), scalar_literal(kind, Some(scalar.component(0))))
+            format!(
+                "{}({})",
+                ty.wgsl_name(),
+                scalar_literal(kind, Some(scalar.component(0)))
+            )
         }
     }
 }

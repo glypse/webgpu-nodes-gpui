@@ -19,44 +19,50 @@ pub struct RerouteBranches {
 /// One reroute after each output linked to several inputs, its links then
 /// leaving from the reroute. Only outputs and inputs of nodes `among` takes
 /// count; reroutes, which already are such points, and links in `skipped`
-/// (broken ones) are left alone. `new_id` gives the id of what's added from
-/// a key unique to it.
+/// (broken ones) are left alone. `new_id` gives a fresh id for each node and
+/// link added.
 pub fn reroute_branches(
     nodes: &[GraphNode],
     edges: &[GraphEdge],
     among: impl Fn(&str) -> bool,
-    mut new_id: impl FnMut(&str) -> String,
+    mut new_id: impl FnMut() -> String,
     skipped: &HashSet<String>,
 ) -> RerouteBranches {
     let by_id: HashMap<&str, &GraphNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let mut keys: Vec<String> = Vec::new();
-    let mut groups: HashMap<String, Vec<&GraphEdge>> = HashMap::new();
+    // Outputs in the order of their first link, so the reroutes come out in document order.
+    let mut groups: Vec<Vec<&GraphEdge>> = Vec::new();
+    let mut slot_of: HashMap<(&str, &str), usize> = HashMap::new();
     for edge in edges {
-        let Some(source) = by_id.get(edge.source.as_str()) else {
-            continue;
-        };
-        if source.is(REROUTE) || skipped.contains(&edge.id) || !among(&edge.source) || !among(&edge.target) {
+        if by_id
+            .get(edge.source.as_str())
+            .is_some_and(|s| s.is(REROUTE))
+            || skipped.contains(&edge.id)
+            || !among(&edge.source)
+            || !among(&edge.target)
+        {
             continue;
         }
-        let key = format!("{}\0{}", edge.source, edge.source_handle);
-        let group = groups.entry(key.clone()).or_insert_with(|| {
-            keys.push(key);
-            Vec::new()
-        });
-        group.push(edge);
+        let slot = *slot_of
+            .entry((edge.source.as_str(), edge.source_handle.as_str()))
+            .or_insert_with(|| {
+                groups.push(Vec::new());
+                groups.len() - 1
+            });
+        groups[slot].push(edge);
     }
 
     let mut out = RerouteBranches::default();
-    for key in &keys {
-        let Some(group) = groups.get(key) else { continue };
-        let Some(first) = group.first().copied() else { continue };
-        let Some(source) = by_id.get(first.source.as_str()) else {
+    for group in groups {
+        let Some(&first) = group.first() else {
             continue;
         };
         if group.len() < 2 {
             continue;
         }
-        let id = new_id(&format!("reroute/{key}"));
+        let Some(source) = by_id.get(first.source.as_str()) else {
+            continue;
+        };
+        let id = new_id();
         let mut reroute = GraphNode::new(
             REROUTE,
             Point::new(source.position.x + REROUTE_OFFSET, source.position.y),
@@ -65,7 +71,7 @@ pub fn reroute_branches(
         reroute.frame = source.frame.clone();
         out.reroutes.push(reroute);
         out.links.push(GraphEdge {
-            id: new_id(&format!("link/{key}")),
+            id: new_id(),
             source: first.source.clone(),
             source_handle: first.source_handle.clone(),
             target: id.clone(),

@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::graph::{GraphDocument, GraphEdge, GraphNode, GraphProject};
+use crate::graph::{GROUP_INPUT, GraphDocument, GraphEdge, GraphNode, GraphProject, REROUTE};
 use crate::types::{
     EnumVariant, GroupHandleDef, InputOwner, TypeBindings, TypeOwner,
     TypeVariable, WgslType, enum_value, InputValue,
@@ -38,7 +38,7 @@ pub fn is_case_handle(handle: &str) -> bool {
 
 /// A value for a new variant: one no variant of `variants` has.
 pub fn next_variant_value(variants: &[EnumVariant]) -> i64 {
-    variants.iter().map(|v| v.int() + 1).max().unwrap_or(0).max(0)
+    variants.iter().map(|v| v.value.saturating_add(1)).max().unwrap_or(0).max(0)
 }
 
 /// The type an input of a node resolves to.
@@ -72,10 +72,10 @@ impl<'a> EnumDocument<'a> {
     /// passing values unchanged.
     pub fn enum_of_output(&self, node: &str, handle: &str) -> Option<&[EnumVariant]> {
         let node = self.node(node)?;
-        if node.is("group-input") {
+        if node.is(GROUP_INPUT) {
             return self.inputs.iter().find(|h| h.id == handle)?.variants.as_deref();
         }
-        if node.is("reroute") {
+        if node.is(REROUTE) {
             return self.enum_at(&node.id, "in");
         }
         None
@@ -97,10 +97,10 @@ impl<'a> EnumDocument<'a> {
     ) -> Option<i64> {
         let edge = self.feed(node, input)?;
         let source = self.node(&edge.source)?;
-        if source.is("group-input") {
+        if source.is(GROUP_INPUT) {
             return constants.get(&edge.source_handle).copied();
         }
-        if source.is("reroute") {
+        if source.is(REROUTE) {
             return self.constant_at(&edge.source, "in", constants);
         }
         None
@@ -115,8 +115,8 @@ impl<'a> EnumDocument<'a> {
     ) -> Option<String> {
         let value = self.constant_at(node, MATCH_SELECTOR, constants)?;
         let variants = self.enum_at(node, MATCH_SELECTOR).unwrap_or(&[]);
-        let variant = variants.iter().find(|v| v.int() == value).or(variants.first())?;
-        Some(case_handle(variant.int()))
+        let variant = variants.iter().find(|v| v.value == value).or(variants.first())?;
+        Some(case_handle(variant.value))
     }
 
     /// The case input a Width Switch node uses: that of its value's component count.
@@ -169,7 +169,7 @@ pub fn is_under(
     handles: &[GroupHandleDef],
     handle: &GroupHandleDef,
     enum_id: &str,
-    value: Option<f64>,
+    value: Option<i64>,
 ) -> bool {
     owner_chain(handles, handle)
         .iter()
@@ -291,7 +291,7 @@ pub fn hidden_inputs_of(
         .filter(|handle| {
             let off_variant = owner_chain(handles, handle)
                 .iter()
-                .any(|o| values.get(&o.enum_id).is_some_and(|v| *v as f64 != o.value));
+                .any(|o| values.get(&o.enum_id).is_some_and(|v| *v != o.value));
             let off_type =
                 type_owners(handles, handle).iter().any(|o| !owned_by(Some(o), bindings));
             off_variant || off_type

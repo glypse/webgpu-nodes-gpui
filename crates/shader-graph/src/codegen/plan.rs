@@ -3,8 +3,8 @@
 //! drawing the frame.
 
 use std::collections::{BTreeMap, HashSet};
-use std::rc::Rc;
 use std::ops::Range;
+use std::rc::Rc;
 
 use super::generate::{CodegenError, CodegenGraph, ShaderOptions, generate_shader_with};
 use super::literals::UniformValue;
@@ -13,9 +13,8 @@ use super::target::{RenderTextureTarget, ShaderTarget, SimulationStage, Simulati
 use crate::assets::VideoPlayback;
 use crate::frame::{FrameCompiler, FrameCompilerOptions, FrameProgram};
 use crate::passes::{
-    FrameArg,
-    CANVAS_SIZE, SimulationRef, StateItem, StateRead, TextureFormat, TextureSize, TextureSource,
-    TextureSources, attachment_groups, state_read_id, state_source,
+    CANVAS_SIZE, FrameArg, SimulationRef, StateItem, StateRead, TextureFormat, TextureSize,
+    TextureSource, TextureSources, attachment_groups, state_read_id, state_source,
 };
 
 /// What the last pass of a plan writes: the frame drawn.
@@ -34,7 +33,12 @@ pub enum ResourceDecl {
     },
     /// A project asset's image, which the runtime is given; a video's frame at
     /// the project's time or, with `time`, at that project time instead.
-    Media { id: String, asset: String, video: Option<VideoPlayback>, time: Option<FrameArg> },
+    Media {
+        id: String,
+        asset: String,
+        video: Option<VideoPlayback>,
+        time: Option<FrameArg>,
+    },
     /// A simulation's state item, as of the previous frame or this one: one of
     /// the two textures keeping it (`texture`), which swap roles as frames go
     /// by. The simulation starts over when the size they resolve to changes.
@@ -47,7 +51,9 @@ pub enum ResourceDecl {
         /// The simulation it's state of, by `SimulationRef::id`.
         simulation: String,
     },
-    Empty { id: String },
+    Empty {
+        id: String,
+    },
 }
 
 impl ResourceDecl {
@@ -105,7 +111,9 @@ impl RenderPlan {
 
     /// Whether the plan keeps state between frames, which drawing it then needs.
     pub fn simulates(&self) -> bool {
-        self.resources.iter().any(|r| matches!(r, ResourceDecl::State { .. }))
+        self.resources
+            .iter()
+            .any(|r| matches!(r, ResourceDecl::State { .. }))
     }
 
     pub fn resource(&self, id: &str) -> Option<&ResourceDecl> {
@@ -115,19 +123,37 @@ impl RenderPlan {
 
 fn resource_of(source: &TextureSource) -> ResourceDecl {
     match source {
-        TextureSource::Render { id, size, format, mips, .. } => ResourceDecl::Transient {
+        TextureSource::Render {
+            id,
+            size,
+            format,
+            mips,
+            ..
+        } => ResourceDecl::Transient {
             id: id.clone(),
             size: size.clone(),
             format: *format,
             mips: *mips,
         },
-        TextureSource::Media { id, asset, video, time } => ResourceDecl::Media {
+        TextureSource::Media {
+            id,
+            asset,
+            video,
+            time,
+        } => ResourceDecl::Media {
             id: id.clone(),
             asset: asset.clone(),
             video: *video,
             time: time.clone(),
         },
-        TextureSource::State { id, texture, read, format, size, simulation } => ResourceDecl::State {
+        TextureSource::State {
+            id,
+            texture,
+            read,
+            format,
+            size,
+            simulation,
+        } => ResourceDecl::State {
             id: id.clone(),
             texture: texture.clone(),
             read: *read,
@@ -153,23 +179,29 @@ struct PlanBuilder<'a, 'g> {
 
 impl PlanBuilder<'_, '_> {
     fn set_resource(&mut self, resource: ResourceDecl) {
-        match self.resources.iter_mut().find(|r| r.id() == resource.id()) {
-            Some(existing) => *existing = resource,
-            None => self.resources.push(resource),
-        }
+        super::upsert(&mut self.resources, resource, |a, b| a.id() == b.id());
     }
 
     /// The run of a simulation's items, in its passes, holding `texture`'s.
     fn run_of(&self, reference: &SimulationRef, texture: &str) -> Option<Vec<StateItem>> {
         let state = self.sources.simulation(&reference.path, &reference.zone)?;
-        attachment_groups(&state.items).into_iter().find(|run| run.iter().any(|i| i.texture == texture))
+        attachment_groups(&state.items)
+            .into_iter()
+            .find(|run| run.iter().any(|i| i.texture == texture))
     }
 
     /// Declares a texture a pass reads, and adds the passes making it before the one reading it.
     fn include(&mut self, source: &TextureSource) {
         self.set_resource(resource_of(source));
         match source {
-            TextureSource::Render { id, size, mips, target, draw, .. } => match draw {
+            TextureSource::Render {
+                id,
+                size,
+                mips,
+                target,
+                draw,
+                ..
+            } => match draw {
                 Some(draw) => {
                     let ids: Vec<String> = draw.run.iter().map(|i| i.id.clone()).collect();
                     self.visit(
@@ -202,7 +234,12 @@ impl PlanBuilder<'_, '_> {
                     None,
                 ),
             },
-            TextureSource::State { simulation, texture, read, .. } => {
+            TextureSource::State {
+                simulation,
+                texture,
+                read,
+                ..
+            } => {
                 if let Some(items) = self.run_of(simulation, texture) {
                     // What's read as the previous frame's state is the last frame's step, so
                     // it has to be stepped every frame, read as its current state or not.
@@ -244,15 +281,16 @@ impl PlanBuilder<'_, '_> {
                 return;
             }
         };
-        let read: Vec<TextureSource> = generated.textures.iter().map(|t| t.source.clone()).collect();
+        let read: Vec<TextureSource> = generated
+            .textures
+            .iter()
+            .map(|t| t.source.clone())
+            .collect();
         for source in read.iter().chain(sized_by.as_ref()) {
             self.include(source);
         }
-        for (name, value) in &generated.uniforms {
-            match self.uniforms.iter_mut().find(|(n, _)| n == name) {
-                Some((_, existing)) => *existing = value.clone(),
-                None => self.uniforms.push((name.clone(), value.clone())),
-            }
+        for entry in &generated.uniforms {
+            super::upsert(&mut self.uniforms, entry.clone(), |a, b| a.0 == b.0);
         }
         let program = build_program(
             &generated.fragment,
@@ -264,7 +302,11 @@ impl PlanBuilder<'_, '_> {
                 frame_values: &generated.frame_values,
             },
         );
-        let simulation = simulation.or_else(|| generated.simulation.map(|id| PassSimulation { id, stage: None }));
+        let simulation = simulation.or_else(|| {
+            generated
+                .simulation
+                .map(|id| PassSimulation { id, stage: None })
+        });
         self.passes.push(PassDecl {
             id: format!("pass:{key}"),
             program,
@@ -275,9 +317,21 @@ impl PlanBuilder<'_, '_> {
         });
     }
 
-    fn visit_simulation(&mut self, reference: &SimulationRef, stage: SimulationStage, items: &[StateItem]) {
-        let read = if stage == SimulationStage::Start { StateRead::Previous } else { StateRead::Current };
-        let writes: Vec<String> = items.iter().map(|i| state_read_id(&i.texture, read)).collect();
+    fn visit_simulation(
+        &mut self,
+        reference: &SimulationRef,
+        stage: SimulationStage,
+        items: &[StateItem],
+    ) {
+        let read = if stage == SimulationStage::Start {
+            StateRead::Previous
+        } else {
+            StateRead::Current
+        };
+        let writes: Vec<String> = items
+            .iter()
+            .map(|i| state_read_id(&i.texture, read))
+            .collect();
         for (item, write) in items.iter().zip(&writes) {
             debug_assert_eq!(*write, state_source(reference, item, read).id());
             self.set_resource(resource_of(&state_source(reference, item, read)));
@@ -290,7 +344,10 @@ impl PlanBuilder<'_, '_> {
                 stage,
                 items: items.to_vec(),
             })),
-            Some(PassSimulation { id: reference.id(), stage: Some(stage) }),
+            Some(PassSimulation {
+                id: reference.id(),
+                stage: Some(stage),
+            }),
             items.first().map(|i| i.size.clone()),
             items.first().and_then(|i| i.like.as_deref().cloned()),
         );
@@ -310,7 +367,10 @@ pub fn generate_render_plan(
     let frame = FrameCompiler::new(
         graph,
         sources.clone(),
-        FrameCompilerOptions { uniform_scopes: options.uniform_scopes.clone(), texture_size: true },
+        FrameCompilerOptions {
+            uniform_scopes: options.uniform_scopes.clone(),
+            texture_size: true,
+        },
     );
     let mut builder = PlanBuilder {
         graph,
@@ -323,7 +383,14 @@ pub fn generate_render_plan(
         visited: HashSet::new(),
         error: None,
     };
-    builder.visit(PLAN_TARGET.to_owned(), vec![PLAN_TARGET.to_owned()], None, None, None, None);
+    builder.visit(
+        PLAN_TARGET.to_owned(),
+        vec![PLAN_TARGET.to_owned()],
+        None,
+        None,
+        None,
+        None,
+    );
     if let Some(error) = builder.error {
         return Err(error);
     }
@@ -333,11 +400,8 @@ pub fn generate_render_plan(
             builder.resources.push(resource_of(&source));
         }
     }
-    for (name, value) in frame.uniforms() {
-        match builder.uniforms.iter_mut().find(|(n, _)| *n == name) {
-            Some((_, existing)) => *existing = value,
-            None => builder.uniforms.push((name, value)),
-        }
+    for entry in frame.uniforms() {
+        super::upsert(&mut builder.uniforms, entry, |a, b| a.0 == b.0);
     }
     Ok(RenderPlan {
         resources: builder.resources,

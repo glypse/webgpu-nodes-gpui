@@ -13,7 +13,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - `src/zones.rs`: geometry-nodes-style zones (repeat, simulation, pass repeat); output node owns `data.items`, input node points at it via `data.paired_output`.
 - `src/enums.rs`: enums on group inputs; Match and Width Switch branch on them at compile time.
 - `src/evaluate.rs`: CPU evaluation of a graph (`evaluate`, `evaluate_with`) for nodes with a `cpu` fn.
-- `src/library.rs`: standard library groups, embedded from `src/library/*.json` via `include_str!` (`SOURCES`), loaded lazily (`LIBRARY`); `load_error()` reports failures.
+- `src/library.rs`: standard library groups, embedded from `src/library/*.json` via `include_str!` (`SOURCES`, id and text per file), loaded lazily (`LIBRARY`); a broken file is logged and leaves the library empty.
 - `src/library/*.json`: group definitions, one file per group.
 - `src/catalog.rs`: add-menu entries (nodes, groups, zones, links) and search.
 - `src/assets/`: project asset metadata (`asset.rs`), bundles beside project JSON (`bundle.rs`), import description (`import.rs`).
@@ -35,7 +35,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - `resolve_descriptor` falls back to the `declare` descriptor for unknown types and `expect`s it exists; don't remove `declare`.
 - Match is registered with `type_family = None` so the add menu doesn't offer one per type.
 - Dev nodes are registered always but hidden from the add menu unless developer tools are on (`dev` flag).
-- CPU results must round f32 and wrap integers as WGSL does (per the `cpu` field's doc). Nodes that read pixels, textures or custom code have no `cpu`.
+- CPU results follow WGSL, computed in f64 and rounded to the output type: f32 rounds, float to integer conversions saturate (NaN gives 0), integer arithmetic wraps, `round` ties to even (per the `cpu` field's doc and `nodes/cpu.rs`). Nodes that read pixels, textures or custom code have no `cpu`.
 - `ShaderOptions::uniform_scopes` decides which unlinked input values are read from uniforms instead of written as literals; `hoist_frame_values` reads the root's frame values from a block the runtime writes once a frame.
 - Zone item handle ids are shared between the input and output nodes of a zone.
 - Layout: ELK is pinned exactly (`elk-layout = "=0.12.2"`) because placement changes between releases. `serde_json` has `float_roundtrip` so saved floats round-trip exactly.
@@ -46,7 +46,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 ## Adding a common thing
 - New node type with fixed sockets: a builder/descriptor in `src/nodes/standard.rs` (or a new file), register it in `REGISTRY` in `src/nodes/mod.rs`; add a CPU fn in `src/nodes/cpu.rs` if it has a CPU meaning; the WGSL emitter is the descriptor's `wgsl` field. The catalog picks it up from the registry.
 - Node whose sockets depend on the document: add a builder in `src/nodes/dynamic.rs`, a match arm in `resolve_descriptor`, and its type in `DYNAMIC_NODE_TYPES`.
-- New library group: add `src/library/<id>.json` and an `include_str!` entry in `SOURCES` in `src/library.rs`.
+- New library group: add `src/library/<id>.json` and an `(id, include_str!)` entry in `SOURCES` in `src/library.rs`. Version ids hash the definition, and definitions embed their dependencies' refs, so changing one group changes the refs of every group that nests it: rewrite those refs (and the saved projects' refs) with the new versions.
 - New edit operation: a method on `GraphModel` in the matching `src/graph/model_*.rs`, with history recorded like its neighbours.
 
 ## Tests
@@ -56,5 +56,5 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - Test helper for graphs: `testing::TestGraph` (`new`, `add`, `set`, `output()`, and generation helpers).
 
 ## Dependencies
-- Depends on: `graph-math` (colour/curve/ramp maths), `serde`, `serde_json`, `thiserror`, `sha2`, `image`, `zip`, `uuid`, `elk-layout`. Dev: `naga`, `runtime`.
+- Depends on: `graph-math` (colour/curve/ramp maths), `log`, `serde`, `serde_json`, `thiserror`, `sha2`, `image`, `zip`, `uuid`, `elk-layout`. Dev: `naga`, `runtime`.
 - Depended on by: `runtime` (normal dep, so changes to `codegen` output or uniform layout reach the renderer), `app`, `export`.

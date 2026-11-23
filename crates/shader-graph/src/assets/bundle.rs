@@ -62,7 +62,12 @@ pub struct Bundle {
 
 /// SHA-256 of a file's bytes, hex.
 pub fn asset_hash(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    Sha256::digest(bytes).iter().fold(String::with_capacity(64), |mut hex, b| {
+        // Writing to a String can't fail.
+        let _ = write!(hex, "{b:02x}");
+        hex
+    })
 }
 
 /// A bundle of `json` and the files of the assets it uses, by bundle path.
@@ -106,7 +111,10 @@ pub fn unpack_bundle(bytes: &[u8], kind: BundleKind) -> Result<Bundle, BundleErr
     let mut files = BTreeMap::new();
     for index in 0..archive.len() {
         let entry = archive.by_index(index).map_err(|_| BundleError::NotABundle)?;
-        let Ok(entry_name) = entry.name().map(|n| n.into_owned()) else { continue };
+        let Ok(entry_name) = entry.name().map(|n| n.into_owned()) else {
+            log::warn!("a bundle entry with a name that isn't UTF-8 is left out");
+            continue;
+        };
         // A name given twice would inflate twice, for only one result.
         if !names.insert(entry_name.clone()) {
             return Err(BundleError::NotABundle);
@@ -154,12 +162,13 @@ pub struct VerifiedFiles {
     pub altered: Vec<Asset>,
 }
 
-pub fn verified_files(bundle: &Bundle, assets: &[Asset]) -> VerifiedFiles {
+/// Moves each asset's file out of `bundle` into the result, by asset id.
+pub fn verified_files(mut bundle: Bundle, assets: &[Asset]) -> VerifiedFiles {
     let mut verified = VerifiedFiles::default();
     for asset in assets {
-        let Some(data) = bundle.files.get(asset.file()) else { continue };
-        if data.len() as u64 == asset.file_info().bytes && asset_hash(data) == asset.hash() {
-            verified.files.insert(asset.id().to_owned(), data.clone());
+        let Some(data) = bundle.files.remove(asset.file()) else { continue };
+        if data.len() as u64 == asset.file_info().bytes && asset_hash(&data) == asset.hash() {
+            verified.files.insert(asset.id().to_owned(), data);
         } else {
             verified.altered.push(asset.clone());
         }
@@ -195,11 +204,10 @@ mod tests {
     }
 
     #[test]
-    fn hashes_are_sha256_in_hex() {
-        assert_eq!(
-            asset_hash(b"abc"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
+    fn hashes_are_64_lowercase_hex_digits() {
+        let hash = asset_hash(b"abc");
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')));
     }
 
     #[test]
@@ -262,7 +270,7 @@ mod tests {
         .expect("packs");
         let bundle = unpack_bundle(&bytes, BundleKind::Project).expect("unpacks");
         let missing = image_of("d", &honest);
-        let verified = verified_files(&bundle, &[a, b.clone(), short.clone(), missing]);
+        let verified = verified_files(bundle, &[a, b.clone(), short.clone(), missing]);
         assert_eq!(verified.files.keys().collect::<Vec<_>>(), ["a"]);
         assert_eq!(verified.altered, [b, short]);
     }

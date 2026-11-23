@@ -6,9 +6,9 @@
 	"section": ["Helpers", "Voronoi"],
 	"searchSection": "Helpers",
 	"dependencies": [
-		"std-lattice-neighbor@00261a88c1423c",
-		"std-voronoi-point@0bfee95a7f94f4",
-		"std-voronoi-bisector@18c82391759ba2"
+		"std-lattice-neighbor@3788b541dbe1aa83",
+		"std-voronoi-point@46472c253e5c3d20",
+		"std-voronoi-bisector@dc5a10f29c97cc56"
 	],
 	"definition": {
 		"nodes": [
@@ -59,7 +59,7 @@
 					"y": 449
 				},
 				"group": {
-					"definitionRef": "std-lattice-neighbor@00261a88c1423c",
+					"definitionRef": "std-lattice-neighbor@3788b541dbe1aa83",
 					"locked": true
 				},
 				"frame": "96d8d03d-1845-4a1e-b1e0-8238affb21ae"
@@ -110,7 +110,7 @@
 					"y": 202
 				},
 				"group": {
-					"definitionRef": "std-lattice-neighbor@00261a88c1423c",
+					"definitionRef": "std-lattice-neighbor@3788b541dbe1aa83",
 					"locked": true
 				},
 				"frame": "96d8d03d-1845-4a1e-b1e0-8238affb21ae"
@@ -134,7 +134,7 @@
 					"y": 576
 				},
 				"group": {
-					"definitionRef": "std-voronoi-point@0bfee95a7f94f4",
+					"definitionRef": "std-voronoi-point@46472c253e5c3d20",
 					"locked": true
 				},
 				"frame": "96d8d03d-1845-4a1e-b1e0-8238affb21ae"
@@ -195,7 +195,7 @@
 					"y": 877
 				},
 				"group": {
-					"definitionRef": "std-voronoi-bisector@18c82391759ba2",
+					"definitionRef": "std-voronoi-bisector@dc5a10f29c97cc56",
 					"locked": true
 				},
 				"frame": "96d8d03d-1845-4a1e-b1e0-8238affb21ae"
@@ -279,7 +279,7 @@
 					"y": 1829
 				},
 				"group": {
-					"definitionRef": "std-lattice-neighbor@00261a88c1423c",
+					"definitionRef": "std-lattice-neighbor@3788b541dbe1aa83",
 					"locked": true
 				},
 				"frame": "e5ea1d89-f651-46fb-b4ea-0189cb1d8214"
@@ -330,7 +330,7 @@
 					"y": 1582
 				},
 				"group": {
-					"definitionRef": "std-lattice-neighbor@00261a88c1423c",
+					"definitionRef": "std-lattice-neighbor@3788b541dbe1aa83",
 					"locked": true
 				},
 				"frame": "e5ea1d89-f651-46fb-b4ea-0189cb1d8214"
@@ -354,7 +354,7 @@
 					"y": 1956
 				},
 				"group": {
-					"definitionRef": "std-voronoi-point@0bfee95a7f94f4",
+					"definitionRef": "std-voronoi-point@46472c253e5c3d20",
 					"locked": true
 				},
 				"frame": "e5ea1d89-f651-46fb-b4ea-0189cb1d8214"
@@ -415,7 +415,7 @@
 					"y": 2257
 				},
 				"group": {
-					"definitionRef": "std-voronoi-bisector@18c82391759ba2",
+					"definitionRef": "std-voronoi-bisector@dc5a10f29c97cc56",
 					"locked": true
 				},
 				"frame": "e5ea1d89-f651-46fb-b4ea-0189cb1d8214"

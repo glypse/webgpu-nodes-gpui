@@ -19,15 +19,9 @@ pub const MAX_ASSETS: usize = 4096;
 pub const MAX_ID_LENGTH: usize = 256;
 pub const MAX_LABEL_LENGTH: usize = 1024;
 pub const MAX_NOTE_LENGTH: usize = 64 * 1024;
-/// Longest Custom WGSL body, in UTF-16 code units (see [`js_length`]).
+/// Longest Custom WGSL body, in bytes.
 pub const MAX_CODE_LENGTH: usize = 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
 /// Bundles hold their media whole, so unlike the rest this is about what fits in memory.
 pub const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_ASSET_SIDE: u32 = 65536;
-
-/// The length of `text` in UTF-16 code units: the unit the limits above count in,
-/// so a file is judged the same by either editor.
-pub fn js_length(text: &str) -> usize {
-    text.encode_utf16().count()
-}

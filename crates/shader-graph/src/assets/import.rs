@@ -6,9 +6,8 @@ use std::io::Cursor;
 use image::{ImageDecoder as _, ImageReader, metadata::Orientation};
 use thiserror::Error;
 
-use super::asset::{Asset, AssetFile, AssetKind, VideoFile, asset_file, asset_kind_of, asset_name};
+use super::asset::{Asset, AssetFile, AssetKind, VideoFile, asset_file, asset_kind_of, asset_name, valid_side};
 use super::bundle::asset_hash;
-use crate::graph::MAX_ASSET_SIDE;
 
 /// A file picked to import: its name and media type as the platform gave them, and its bytes.
 #[derive(Clone, Copy, Debug)]
@@ -22,6 +21,8 @@ pub struct ImportFile<'a> {
 pub enum ImportError {
     #[error("it isn't an image or video this editor can read.")]
     Unreadable,
+    #[error("the video can't be read: {0}.")]
+    UnreadableVideo(String),
     #[error("the project has too many assets.")]
     TooManyAssets,
 }
@@ -72,9 +73,8 @@ pub fn describe_asset(id: &str, file: ImportFile, probe: &dyn VideoProbe) -> Res
             Ok(Asset::Image(common(width, height)))
         }
         AssetKind::Video => {
-            let info = probe.probe(file.bytes).map_err(|_| ImportError::Unreadable)?;
-            let side = 1..=MAX_ASSET_SIDE;
-            if !side.contains(&info.width) || !side.contains(&info.height) {
+            let info = probe.probe(file.bytes).map_err(ImportError::UnreadableVideo)?;
+            if !valid_side(info.width) || !valid_side(info.height) {
                 return Err(ImportError::Unreadable);
             }
             let video = VideoFile {
@@ -93,13 +93,16 @@ fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
     let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
     let mut decoder = reader.into_decoder().ok()?;
     let (width, height) = decoder.dimensions();
+    let orientation = decoder.orientation().unwrap_or_else(|e| {
+        log::warn!("an image's orientation can't be read, so it's shown as stored: {e}");
+        Orientation::NoTransforms
+    });
     let turned = matches!(
-        decoder.orientation().ok()?,
+        orientation,
         Orientation::Rotate90 | Orientation::Rotate270 | Orientation::Rotate90FlipH | Orientation::Rotate270FlipH
     );
     let (width, height) = if turned { (height, width) } else { (width, height) };
-    let side = 1..=MAX_ASSET_SIDE;
-    (side.contains(&width) && side.contains(&height)).then_some((width, height))
+    (valid_side(width) && valid_side(height)).then_some((width, height))
 }
 
 #[cfg(test)]
@@ -163,6 +166,9 @@ mod tests {
 
     #[test]
     fn refuses_a_video_the_probe_cant_read() {
-        assert_eq!(describe_asset("v", file("c.mp4", "video/mp4", b""), &NoVideos), Err(ImportError::Unreadable));
+        assert_eq!(
+            describe_asset("v", file("c.mp4", "video/mp4", b""), &NoVideos),
+            Err(ImportError::UnreadableVideo("videos can't be read here".to_owned()))
+        );
     }
 }
