@@ -23,13 +23,18 @@ mod windows;
 
 use gpui::{App, AppContext as _, Global, KeyBinding, Menu, MenuItem, actions};
 
+use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
 use clap::Parser as _;
-use gpui::{AsyncApp, WindowHandle};
+use gpui::{AsyncApp, WindowHandle, WindowingRequest};
 use preferences::ToggleDeveloperTools;
+use shader_graph::graph::{GraphModel, GraphNode, GraphProject};
+use shader_graph::layout::LayoutOptions;
 use shell::{
     ExportFrame, ExportVideo, ImportGroups, ImportMedia, MenuActualSizePreview, MenuFitPreview,
     MenuZoomPreviewIn, MenuZoomPreviewOut, NewProject, OpenPreferences, OpenProject,
@@ -170,6 +175,14 @@ fn main() -> ExitCode {
     let cli = cli::Cli::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     guard::install_panic_hook();
+    match cli.layout_project.as_deref() {
+        Some([input, output]) => return layout_project_headless(input, output),
+        Some(_) => {
+            eprintln!("webgpu-nodes: --layout-project takes an input and an output path");
+            return ExitCode::FAILURE;
+        }
+        None => {}
+    }
     if cli.records()
         && let Err(error) = probe::install(cli.profile.as_deref())
     {
@@ -253,6 +266,62 @@ fn main() -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// `--layout-project`: lays out the bare-JSON project at `input` with the node
+/// sizes the editor draws and writes it to `output`. No window is shown.
+fn layout_project_headless(input: &Path, output: &Path) -> ExitCode {
+    let project = match read_bare_project(input) {
+        Ok(project) => project,
+        Err(error) => {
+            eprintln!("webgpu-nodes: {}: {error:#}", input.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let (input_name, output) = (input.display().to_string(), output.to_path_buf());
+    gpui_platform::application()
+        .with_assets(theme::Assets)
+        .with_windowing(WindowingRequest::Headless)
+        .run(move |cx| {
+            theme::init(cx);
+            preferences::init(cx);
+            let status = match layout_in_app(project, &output, cx) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("webgpu-nodes: laying out {input_name}: {error:#}");
+                    1
+                }
+            };
+            // Quitting goes through NSApplication's terminate, which exits with status 0.
+            std::process::exit(status);
+        });
+    eprintln!("webgpu-nodes: the layout did not finish");
+    ExitCode::FAILURE
+}
+
+fn read_bare_project(path: &Path) -> anyhow::Result<GraphProject> {
+    let bytes = project::read_capped(path).context("reading the file")?;
+    let text = std::str::from_utf8(&bytes).context("it isn't bare JSON")?;
+    Ok(GraphProject::from_json(text)?)
+}
+
+fn layout_in_app(project: GraphProject, output: &Path, cx: &mut App) -> anyhow::Result<()> {
+    let mut model = GraphModel::new(project);
+    let definitions = model.layout_definitions();
+    // The app quits straight after, so the measuring window is left to it.
+    let measured = editor::measure_documents(model.project(), &definitions, cx)
+        .context("measuring the nodes")?
+        .geometry;
+    let measure = |doc: &str, node: &GraphNode| measured.get(doc)?.get(&node.id).cloned();
+    let options = LayoutOptions {
+        measure: Some(&measure),
+        ..Default::default()
+    };
+    model
+        .layout_project(&options)
+        .context("arranging the nodes")?;
+    fs::write(output, model.project().to_json())
+        .with_context(|| format!("writing {}", output.display()))
 }
 
 /// Quits once the `--seconds` or `--frames` bound is reached, after taking the

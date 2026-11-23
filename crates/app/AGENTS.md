@@ -3,11 +3,11 @@
 Purpose: the gpui window app (node editor, preview, timeline, code view, properties, output windows). Read `docs/probing.md` for screenshot/profile/bounded-run usage.
 
 ## Module map (`src/`)
-- `main.rs`: entry point. Parses CLI, installs probe, starts gpui, inits `theme`, `preferences`, `shell`, `windows`, `editor`; builds the menu bar (`menus()`, `refresh_menus`, `set_playing`); `wind_down` for bounded runs and `--screenshot`.
-- `cli.rs`: clap `Cli` (all flags), `Size`, `--zoom` parser. `records()` turns probing on; `bounded()` makes the app quit itself.
+- `main.rs`: entry point. Parses CLI, installs probe, starts gpui, inits `theme`, `preferences`, `shell`, `windows`, `editor`; builds the menu bar (`menus()`, `refresh_menus`, `set_playing`); `wind_down` for bounded runs and `--screenshot`. `layout_project_headless` runs `--layout-project` with no window shown.
+- `cli.rs`: clap `Cli` (all flags, including `--layout-project IN OUT`), `Size`, `--zoom` parser. `records()` turns probing on; `bounded()` makes the app quit itself.
 - `shell.rs`: `Shell`, the root view of a project window. Owns the screen, playback, editor, properties panel, file path, discard prompts. Defines `Panel` (screen areas), `Start`, most app actions, default layout, keymap (`init`).
 - `windows.rs`: window registry (`Registry` global), opening project/preferences/output windows, find/activate, owner-closed handling.
-- `editor.rs` (+ `editor/handle.rs`, `editor/widget_edits.rs`): the graph `Editor` model entity, undo/redo, layout actions, add menu, popups; emits `EditorEvent`. `handle.rs` is the model shared by several graph areas (each with its own group path and selection).
+- `editor.rs` (+ `editor/handle.rs`, `editor/widget_edits.rs`, `editor/measure.rs`): the graph `Editor` model entity, undo/redo, layout actions, add menu, popups; emits `EditorEvent`. `handle.rs` is the model shared by several graph areas (each with its own group path and selection). `measure.rs` measures the nodes of documents the editor isn't showing.
 - `graph/`: graph-area widgets: node cards, sockets, fields, sheet, frames, zones, breadcrumbs, add/type pickers, popovers.
 - `playback.rs`: `Playback` entity: compiles the shader in the background, runs the clock, uniforms, previews' render sizes, frame/PNG export. Emits `PlaybackEvent::Changed`.
 - `preview.rs`: `PreviewArea` (zoom/fit/actual size) and `PreviewToolbar`.
@@ -43,6 +43,9 @@ Purpose: the gpui window app (node editor, preview, timeline, code view, propert
 - Shader compile runs off the UI thread; the previous program stays shown until the new one is ready.
 - Background work reports back over an `async_channel` (the worker's callback try-sends into a capacity-1 channel, the UI task receives and reads the state): no timers polling for results.
 - Bounded runs: `--frames` quits after `STALL` (5 s) with no new frame; `--seconds` is wall time from launch. Profile summary is printed from `on_app_quit`.
+- Node sizes for layout come from painting, not estimates: the active document's nodes are read from the flow (`Editor::drawn_geometry`); other documents are shown in an `Editor` in a window with `show: false` (`measure_documents`), at zoom 1 with no fit, and drawn until the geometry stops changing. Estimates (`estimated_geometry`) are only for nodes missing from the measurements, e.g. a document no group node leads to.
+- Closing a window while the platform still has a frame pending logs "window not found" from the platform. `Measurements::close` is used where the app keeps running; `--layout-project` leaves its window to the exit.
+- `--layout-project` sets its own exit status inside the gpui run closure: gpui's quit calls `NSApplication terminate:`, which exits with status 0 on macOS, so the status returned from `main` after `run` is never seen.
 - Project load: a zip bundle's assets are verified against the project; altered ones are dropped with a warning.
 - `--screenshot` exit status is non-zero if the PNG wasn't written.
 

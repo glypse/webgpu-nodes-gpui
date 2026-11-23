@@ -46,6 +46,18 @@ pub struct Cli {
     /// Zoom the first graph area to FACTOR on startup (1 is 100%), centred on its nodes.
     #[arg(long, value_name = "FACTOR", value_parser = parse_zoom)]
     pub zoom: Option<f32>,
+
+    /// Lay out every document of the bare-JSON project IN with the node sizes the
+    /// editor draws, write it as bare JSON to OUT, and exit. No window is shown.
+    #[arg(
+        long,
+        value_names = ["IN", "OUT"],
+        num_args = 2,
+        conflicts_with_all = [
+            "project", "play", "seconds", "frames", "screenshot", "window", "profile", "output", "zoom",
+        ],
+    )]
+    pub layout_project: Option<Vec<PathBuf>>,
 }
 
 fn parse_zoom(text: &str) -> Result<f32, String> {
@@ -134,6 +146,27 @@ mod tests {
     fn rejects_bad_window_sizes() {
         assert!(Cli::try_parse_from(["webgpu-nodes", "--window", "800"]).is_err());
         assert!(Cli::try_parse_from(["webgpu-nodes", "--window", "0x600"]).is_err());
+    }
+
+    #[test]
+    fn parses_layout_project_with_input_and_output() {
+        let cli = Cli::try_parse_from(["webgpu-nodes", "--layout-project", "in.json", "out.json"])
+            .expect("parses");
+        assert_eq!(
+            cli.layout_project,
+            Some(vec![PathBuf::from("in.json"), PathBuf::from("out.json")])
+        );
+        assert!(Cli::try_parse_from(["webgpu-nodes", "--layout-project", "in.json"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "webgpu-nodes",
+                "scene.json",
+                "--layout-project",
+                "in.json",
+                "out.json",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

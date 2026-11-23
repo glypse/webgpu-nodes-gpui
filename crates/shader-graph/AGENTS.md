@@ -18,7 +18,7 @@ Headless shader graph: document model, type inference, CPU evaluation and WGSL c
 - Library versions: only the latest version of each library entry is stored until Beta; from Beta on, changed library entries keep their previous versions (`OLDER_SOURCES`) so saved projects load them. A ref resolves only to its exact stored id and version.
 - `src/catalog.rs`: add-menu entries (nodes, groups, zones, links) and search.
 - `src/assets/`: project asset metadata (`asset.rs`), bundles beside project JSON (`bundle.rs`), import description (`import.rs`).
-- `src/layout/`: auto-layout via ELK. `compute.rs` (`compute_layout`), `elk.rs` (the only call into `elk-layout`), `geometry.rs` (node sizes and handle offsets), `branches.rs` (splits branching outputs at reroutes).
+- `src/layout/`: auto-layout via ELK. `compute.rs` (`compute_layout`), `elk.rs` (the only call into `elk-layout`), `geometry.rs` (node sizes and handle offsets; `estimate_node_geometry` is the fallback when a front end can't measure a node), `branches.rs` (splits branching outputs at reroutes). `GraphModel::layout_definitions` lists the documents a project layout arranges; `path_to_definition` gives the group path that shows a document.
 - `src/color/`, `src/curve.rs`, `src/ramp.rs`: thin wrappers over `graph-math` plus widget descriptions.
 - `src/testing.rs` (cfg(test)): `TestGraph` builder and `validate_wgsl` (naga).
 - `src/tests/` (cfg(test)): unit tests, one file per area. `tests/gpu_color.rs`: integration test on a real GPU.
