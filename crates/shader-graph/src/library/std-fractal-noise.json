@@ -3,7 +3,7 @@
 	"name": "Fractal Noise",
 	"aliases": ["Noise Texture", "fBm", "FBM", "Multifractal", "Ridged Noise", "Simplex fBm", "Perlin Noise", "Clouds"],
 	"category": "texture",
-	"dependencies": ["std-noise-coordinates@e40ba35d8573e4af", "std-noise-distortion@adf9353ddf5afc4a", "std-fractal-noise-octaves@5086dc4db0dd5e7d"],
+	"dependencies": ["std-noise-coordinates@e40ba35d8573e4af", "std-noise-distortion@85785ca8141790c9", "std-fractal-noise-octaves@149cc3084cf13ea8"],
 	"definition": {
 		"nodes": [
 			{
@@ -63,7 +63,7 @@
 					"y": 382
 				},
 				"group": {
-					"definitionRef": "std-noise-distortion@adf9353ddf5afc4a",
+					"definitionRef": "std-noise-distortion@85785ca8141790c9",
 					"locked": true
 				},
 				"frame": "e72fec5e-0121-44cd-ba85-bd037693d36c"
@@ -102,7 +102,7 @@
 					"y": 382
 				},
 				"group": {
-					"definitionRef": "std-fractal-noise-octaves@5086dc4db0dd5e7d",
+					"definitionRef": "std-fractal-noise-octaves@149cc3084cf13ea8",
 					"locked": true
 				},
 				"frame": "c796d421-dbdf-4158-a932-ba8c150f1be4"
@@ -198,7 +198,7 @@
 					"y": 1125
 				},
 				"group": {
-					"definitionRef": "std-fractal-noise-octaves@5086dc4db0dd5e7d",
+					"definitionRef": "std-fractal-noise-octaves@149cc3084cf13ea8",
 					"locked": true
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"
@@ -246,7 +246,7 @@
 					"y": 539
 				},
 				"group": {
-					"definitionRef": "std-fractal-noise-octaves@5086dc4db0dd5e7d",
+					"definitionRef": "std-fractal-noise-octaves@149cc3084cf13ea8",
 					"locked": true
 				},
 				"frame": "06a8ffcf-60f9-49d9-8c68-76babc29a45a"

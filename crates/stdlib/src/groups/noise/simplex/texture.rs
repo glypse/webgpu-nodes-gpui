@@ -316,23 +316,14 @@ fn fractal_octave(
     let weight = body.state("Weight");
     let total = body.state("Total Amplitude");
     let first = compare(g, octave.iteration, g.constant(WgslType::I32, 0.0), "==");
+    let weighted = g.op("mul", (n, octave.amplitude)).first();
     let fbm = g.frame(Frame::new("fBm").note("The octaves' sum."), || {
-        g.op("add", (value, g.op("mul", (n, octave.amplitude))))
-            .first()
+        g.op("add", (value, weighted)).first()
     });
     let multifractal = g.frame(
         Frame::new("Multifractal")
             .note("Their product: each scales what's there by 1 ± its weight."),
-        || {
-            g.op(
-                "mul",
-                (
-                    value,
-                    g.op("add", (g.op("mul", (n, octave.amplitude)), 1.0)),
-                ),
-            )
-            .first()
-        },
+        || g.op("mul", (value, g.op("add", (weighted, 1.0)))).first(),
     );
     let (hybrid_value, hybrid_weight) = g.frame(
         Frame::new("Hybrid Multifractal").note(
