@@ -71,6 +71,12 @@ impl GroupSpec {
         self
     }
 
+    /// Listed under `path` of its category's add menu, in the main search results.
+    pub fn section(mut self, path: &[&'static str]) -> Self {
+        self.section = path.to_vec();
+        self
+    }
+
     /// Listed in the Helpers section of its category (under `path`), and after the main search results.
     pub fn helper(mut self, path: &[&'static str]) -> Self {
         self.section = std::iter::once("Helpers")

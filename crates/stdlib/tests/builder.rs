@@ -404,3 +404,11 @@ fn wgsl_that_does_not_compile_is_reported() {
     .expect("builds");
     assert!(!validate::validate_groups(&groups, &["test-single"]).is_empty());
 }
+
+#[test]
+fn a_section_is_listed_without_the_helpers_section() {
+    let spec =
+        GroupSpec::new("test-section", "Section", "texture", &[], &[], |_| {}).section(&["Blur"]);
+    assert_eq!(spec.section, vec!["Blur"]);
+    assert_eq!(spec.search_section, None);
+}
