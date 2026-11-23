@@ -2,6 +2,7 @@
 
 use crate::builder::GroupSpec;
 
+mod blur;
 mod color;
 mod coordinates;
 mod helpers;
@@ -16,5 +17,6 @@ pub fn all() -> Vec<GroupSpec> {
     groups.extend(color::all());
     groups.extend(coordinates::all());
     groups.extend(texture::all());
+    groups.extend(blur::all());
     groups
 }
