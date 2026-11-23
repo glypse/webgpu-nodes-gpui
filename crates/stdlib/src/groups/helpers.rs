@@ -75,3 +75,8 @@ pub fn component_sum(g: &GroupBuilder<'_>, vector: impl Into<Operand>) -> Ref {
         .add()
         .out("sum")
 }
+
+/// `x` clamped to `lo..=hi`.
+pub fn clamp_range(g: &GroupBuilder<'_>, x: impl Into<Operand>, lo: f64, hi: f64) -> Ref {
+    g.op("clamp", (x, lo, hi)).first()
+}

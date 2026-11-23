@@ -14,7 +14,7 @@
 					"note": "Red, green and blue, as given."
 				},
 				"position": {
-					"x": 4244,
+					"x": 4234,
 					"y": 234
 				}
 			},
@@ -27,7 +27,7 @@
 					}
 				},
 				"position": {
-					"x": 4508,
+					"x": 4498,
 					"y": 312
 				},
 				"frame": "1960118c-69c8-49b0-aa30-7dd78629649a"
@@ -39,7 +39,7 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 4268,
+					"x": 4258,
 					"y": 372
 				},
 				"frame": "1960118c-69c8-49b0-aa30-7dd78629649a"
@@ -65,7 +65,7 @@
 				},
 				"position": {
 					"x": 264,
-					"y": 1146
+					"y": 1211
 				},
 				"frame": "df46ed72-7d18-473b-85bd-d283379ddb6c"
 			},
@@ -77,7 +77,7 @@
 				},
 				"position": {
 					"x": 24,
-					"y": 1206
+					"y": 1271
 				},
 				"frame": "df46ed72-7d18-473b-85bd-d283379ddb6c"
 			},
@@ -87,7 +87,7 @@
 				"data": {},
 				"position": {
 					"x": 504,
-					"y": 1056
+					"y": 1121
 				},
 				"frame": "df46ed72-7d18-473b-85bd-d283379ddb6c"
 			},
@@ -99,8 +99,8 @@
 					"note": "Each channel's distance around the hue circle,\nmixed in by saturation and scaled by value."
 				},
 				"position": {
-					"x": 759,
-					"y": 750
+					"x": 749,
+					"y": 785
 				},
 				"frame": "df46ed72-7d18-473b-85bd-d283379ddb6c"
 			},
@@ -118,8 +118,8 @@
 					}
 				},
 				"position": {
-					"x": 783,
-					"y": 1001
+					"x": 773,
+					"y": 916
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -128,8 +128,8 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 1023,
-					"y": 1061
+					"x": 1013,
+					"y": 1091
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -138,8 +138,8 @@
 				"type": "fract",
 				"data": {},
 				"position": {
-					"x": 1263,
-					"y": 1026
+					"x": 1253,
+					"y": 1061
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -148,8 +148,8 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 1503,
-					"y": 996
+					"x": 1493,
+					"y": 1031
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -168,8 +168,8 @@
 					}
 				},
 				"position": {
-					"x": 1263,
-					"y": 846
+					"x": 1253,
+					"y": 881
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -182,8 +182,8 @@
 					}
 				},
 				"position": {
-					"x": 1743,
-					"y": 966
+					"x": 1733,
+					"y": 1001
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -192,8 +192,8 @@
 				"type": "abs",
 				"data": {},
 				"position": {
-					"x": 1983,
-					"y": 936
+					"x": 1973,
+					"y": 971
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -206,8 +206,8 @@
 					}
 				},
 				"position": {
-					"x": 2223,
-					"y": 906
+					"x": 2213,
+					"y": 941
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -221,8 +221,8 @@
 					}
 				},
 				"position": {
-					"x": 2463,
-					"y": 876
+					"x": 2453,
+					"y": 911
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
 			},
@@ -235,7 +235,7 @@
 					}
 				},
 				"position": {
-					"x": 2703,
+					"x": 2693,
 					"y": 1026
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
@@ -245,7 +245,7 @@
 				"type": "mul",
 				"data": {},
 				"position": {
-					"x": 2943,
+					"x": 2933,
 					"y": 1141
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
@@ -255,7 +255,7 @@
 				"type": "max",
 				"data": {},
 				"position": {
-					"x": 3183,
+					"x": 3173,
 					"y": 1111
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
@@ -275,7 +275,7 @@
 					}
 				},
 				"position": {
-					"x": 2943,
+					"x": 2933,
 					"y": 961
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
@@ -288,7 +288,7 @@
 					"note": "sRGB's transfer function undone: HSV picks display colours."
 				},
 				"position": {
-					"x": 3495,
+					"x": 3485,
 					"y": 618
 				},
 				"frame": "df46ed72-7d18-473b-85bd-d283379ddb6c"
@@ -298,7 +298,7 @@
 				"type": "add",
 				"data": {},
 				"position": {
-					"x": 3759,
+					"x": 3749,
 					"y": 996
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -318,7 +318,7 @@
 					}
 				},
 				"position": {
-					"x": 3519,
+					"x": 3509,
 					"y": 1026
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -332,7 +332,7 @@
 					}
 				},
 				"position": {
-					"x": 3999,
+					"x": 3989,
 					"y": 966
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -346,7 +346,7 @@
 					}
 				},
 				"position": {
-					"x": 4239,
+					"x": 4229,
 					"y": 936
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -360,7 +360,7 @@
 					}
 				},
 				"position": {
-					"x": 4239,
+					"x": 4229,
 					"y": 1146
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -377,7 +377,7 @@
 					}
 				},
 				"position": {
-					"x": 4239,
+					"x": 4229,
 					"y": 696
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -387,7 +387,7 @@
 				"type": "switch",
 				"data": {},
 				"position": {
-					"x": 4479,
+					"x": 4469,
 					"y": 876
 				},
 				"frame": "de91c0dd-21ee-49f9-81e8-9105e4451027"
@@ -400,8 +400,8 @@
 					"note": "Lightness, chroma and hue (in degrees), mapped into the display's gamut."
 				},
 				"position": {
-					"x": 4004,
-					"y": 1416
+					"x": 3994,
+					"y": 1457
 				}
 			},
 			{
@@ -413,8 +413,8 @@
 					}
 				},
 				"position": {
-					"x": 4268,
-					"y": 1494
+					"x": 4258,
+					"y": 1535
 				},
 				"frame": "8f6fb67a-c0e8-4530-a538-fed485f02ea7"
 			},
@@ -425,8 +425,8 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 4028,
-					"y": 1554
+					"x": 4018,
+					"y": 1595
 				},
 				"frame": "8f6fb67a-c0e8-4530-a538-fed485f02ea7"
 			},
@@ -435,8 +435,8 @@
 				"type": "node-group",
 				"data": {},
 				"position": {
-					"x": 4508,
-					"y": 1494
+					"x": 4498,
+					"y": 1535
 				},
 				"group": {
 					"definitionRef": "std-oklch-gamut-map@2e03ba72572cf5e2",
@@ -449,7 +449,7 @@
 				"type": "match",
 				"data": {},
 				"position": {
-					"x": 4892,
+					"x": 4884,
 					"y": 252
 				}
 			},
@@ -460,7 +460,7 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 4532,
+					"x": 4522,
 					"y": 132
 				}
 			},
@@ -471,7 +471,7 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 5309,
+					"x": 5301,
 					"y": 0
 				}
 			},
@@ -482,7 +482,7 @@
 					"label": "Alpha"
 				},
 				"position": {
-					"x": 5309,
+					"x": 5301,
 					"y": 102
 				}
 			},
@@ -491,7 +491,7 @@
 				"type": "separate-vector",
 				"data": {},
 				"position": {
-					"x": 5333,
+					"x": 5325,
 					"y": 162
 				},
 				"frame": "c8310b65-02e4-4215-99a4-6d91cede2087"
@@ -505,7 +505,7 @@
 					}
 				},
 				"position": {
-					"x": 5593,
+					"x": 5585,
 					"y": 222
 				},
 				"frame": "c8310b65-02e4-4215-99a4-6d91cede2087"
@@ -517,7 +517,7 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 5333,
+					"x": 5325,
 					"y": 372
 				},
 				"frame": "c8310b65-02e4-4215-99a4-6d91cede2087"
@@ -529,7 +529,7 @@
 					"hideUnlinked": true
 				},
 				"position": {
-					"x": 5833,
+					"x": 5825,
 					"y": 252
 				},
 				"frame": "c8310b65-02e4-4215-99a4-6d91cede2087"
@@ -539,7 +539,7 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 3423,
+					"x": 3413,
 					"y": 1187
 				},
 				"frame": "a2962317-aaa4-4122-941b-2df093f88216"
@@ -549,7 +549,7 @@
 				"type": "reroute",
 				"data": {},
 				"position": {
-					"x": 5192,
+					"x": 5184,
 					"y": 328
 				}
 			}
