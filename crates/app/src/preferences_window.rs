@@ -3,11 +3,11 @@
 
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::{Disableable as _, Sizable as _};
 use guard::SafeListener as _;
 use theme::{ActiveTheme as _, IconName};
@@ -15,33 +15,93 @@ use theme::{ActiveTheme as _, IconName};
 use crate::preferences::{self, Preferences, ThemePreference};
 use crate::properties::{field, segmented, segmented_with_icons};
 
+/// An installed font family, drawn in its own face.
+#[derive(Clone)]
+struct FontChoice(SharedString);
+
+impl SelectItem for FontChoice {
+    type Value = SharedString;
+
+    fn title(&self) -> SharedString {
+        self.0.clone()
+    }
+
+    fn display_title(&self) -> Option<gpui::AnyElement> {
+        Some(
+            div()
+                .font_family(self.0.clone())
+                .child(self.0.clone())
+                .into_any_element(),
+        )
+    }
+
+    fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div().font_family(self.0.clone()).child(self.0.clone())
+    }
+
+    fn value(&self) -> &SharedString {
+        &self.0
+    }
+}
+
+/// Installed family names, deduplicated and sorted case-insensitively. Names starting
+/// with a dot are the platform's hidden system faces.
+fn family_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut names: Vec<String> = names
+        .into_iter()
+        .filter(|name| !name.trim().is_empty() && !name.starts_with('.'))
+        .collect();
+    names.sort_by_cached_key(|name| (name.to_lowercase(), name.clone()));
+    names.dedup();
+    names
+}
+
 /// The preferences window's contents.
 pub struct PreferencesDialog {
     focus: FocusHandle,
-    font: Entity<InputState>,
+    font: Entity<SelectState<SearchableVec<FontChoice>>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl PreferencesDialog {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let font_text = cx.global::<Preferences>().font.clone();
+        let current = cx.global::<Preferences>().font_family();
+        let mut families = family_names(cx.text_system().all_font_names());
+        // A saved family that isn't installed here stays visible instead of silently changing.
+        if let Some(name) = &current
+            && !families.contains(name)
+        {
+            families.insert(0, name.clone());
+        }
+        let selected = current
+            .as_ref()
+            .and_then(|name| families.iter().position(|f| f == name));
+        let items = SearchableVec::new(
+            families
+                .into_iter()
+                .map(|f| FontChoice(f.into()))
+                .collect::<Vec<_>>(),
+        );
         let font = cx.new(|cx| {
-            let mut input = InputState::new(window, cx).placeholder(theme::INTERFACE_FONT);
-            input.set_value(font_text, window, cx);
-            input
+            SelectState::new(
+                items,
+                selected.map(gpui_component::IndexPath::new),
+                window,
+                cx,
+            )
+            .searchable(true)
         });
-        // Applied on Enter or when the field loses focus, not on each keystroke, since each one saves the file.
-        let subscriptions =
-            vec![
-                cx.subscribe_in(&font, window, |_, input, event: &InputEvent, window, cx| {
-                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                        let text = input.read(cx).value().trim().to_owned();
-                        guard::guard("interface font", || {
-                            preferences::update(window, cx, |p| p.font = text);
-                        });
-                    }
-                }),
-            ];
+        let subscriptions = vec![cx.subscribe_in(
+            &font,
+            window,
+            |_, _, event: &SelectEvent<SearchableVec<FontChoice>>, window, cx| {
+                let SelectEvent::Confirm(choice) = event;
+                let name = choice.as_ref().map(ToString::to_string).unwrap_or_default();
+                guard::guard("interface font", || {
+                    preferences::update(window, cx, |p| p.font = name);
+                });
+            },
+        )];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self {
@@ -96,19 +156,17 @@ impl Render for PreferencesDialog {
 
             let font_field = field(
                 "Interface font",
-                Some("A font family, e.g. “Inter”. Leave empty for the default.".to_owned()),
+                Some("Any installed font. Reset for the default.".to_owned()),
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
                     .child(
-                        div()
-                            .w(px(320.0))
-                            .px_1()
-                            .border_1()
-                            .border_color(c.input)
-                            .rounded(theme.radius.md)
-                            .child(Input::new(&self.font).appearance(false)),
+                        div().w(px(320.0)).child(
+                            Select::new(&self.font)
+                                .placeholder(theme::INTERFACE_FONT)
+                                .search_placeholder("Search fonts"),
+                        ),
                     )
                     .child(
                         Button::new("reset-font")
@@ -118,7 +176,7 @@ impl Render for PreferencesDialog {
                             .disabled(current.font.is_empty())
                             .on_click(cx.safe_listener(|this, _: &ClickEvent, window, cx| {
                                 this.font
-                                    .update(cx, |f, cx| f.set_value(String::new(), window, cx));
+                                    .update(cx, |f, cx| f.set_selected_index(None, window, cx));
                                 preferences::update(window, cx, |p| p.font.clear());
                             })),
                     ),
@@ -186,6 +244,16 @@ mod tests {
         cx.update(preferences::init);
         let (_, cx) = cx.add_window_view(PreferencesDialog::new);
         cx.clone()
+    }
+
+    #[test]
+    fn family_names_are_deduplicated_and_sorted_ignoring_case() {
+        let names =
+            ["zeta", "Alpha", "beta", "alpha", "Alpha", ".SF", "", "Beta"].map(String::from);
+        assert_eq!(
+            family_names(names),
+            ["Alpha", "alpha", "Beta", "beta", "zeta"]
+        );
     }
 
     #[gpui::test]

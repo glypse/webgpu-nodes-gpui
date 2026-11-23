@@ -21,7 +21,7 @@ pub enum ThemePreference {
 #[serde(default)]
 pub struct Preferences {
     pub theme: ThemePreference,
-    /// A font-family list for the interface; empty for the default.
+    /// One font family name for the interface; empty for the default.
     pub font: String,
     /// Unset, developer tools start on in debug builds only.
     pub developer_tools: Option<bool>,
@@ -85,16 +85,9 @@ impl Preferences {
         }
     }
 
-    /// The first family of the list: GPUI takes one family name, not a comma-separated list.
     pub fn font_family(&self) -> Option<String> {
-        let first = self
-            .font
-            .split(',')
-            .next()?
-            .trim()
-            .trim_matches(['"', '\''])
-            .trim();
-        (!first.is_empty()).then(|| first.to_owned())
+        let family = self.font.trim();
+        (!family.is_empty()).then(|| family.to_owned())
     }
 
     fn appearance(&self, window: &Window) -> Appearance {
@@ -183,19 +176,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_font_is_the_first_family_of_the_list() {
+    fn the_font_is_one_family_name_or_the_default() {
         let p = |font: &str| Preferences {
             font: font.to_owned(),
             ..Preferences::default()
         };
-        assert_eq!(
-            p("Inter, system-ui").font_family().as_deref(),
-            Some("Inter")
-        );
-        assert_eq!(
-            p("\"Fira Sans\", sans-serif").font_family().as_deref(),
-            Some("Fira Sans")
-        );
+        assert_eq!(p(" Fira Sans ").font_family().as_deref(), Some("Fira Sans"));
         assert_eq!(p("  ").font_family(), None);
         assert_eq!(Preferences::default().font_family(), None);
     }

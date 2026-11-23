@@ -14,7 +14,7 @@ Purpose: the gpui window app (node editor, preview, timeline, code view, propert
 - `timeline.rs`: timeline bar, readout and timing controls.
 - `code_view.rs`: shows the generated WGSL.
 - `properties.rs`: `PropertiesPanel` (`Section`: Canvas, Time, Colour, Output); Canvas/Time/Colour save with the project settings, Output is the video export.
-- `video_export.rs`: `OutputSettings` (stored with the project) and `ExportJob` (thread from the `export` crate, polled for progress).
+- `video_export.rs`: `OutputSettings` (stored with the project) and `ExportJob` (thread from the `export` crate; woken by its progress callback over a channel).
 - `output.rs`: output window view (just the playback's last frame).
 - `preferences.rs`: user prefs file in the config dir (`dirs::config_dir()/webgpu-nodes/preferences.json`); `preferences_window.rs` is its window.
 - `project.rs`: reads/writes project files: bare JSON or zip bundle (`project.json` + assets); last-opened path in the config dir.
@@ -37,8 +37,11 @@ Purpose: the gpui window app (node editor, preview, timeline, code view, propert
 
 ## Invariants (seen in code)
 - Output-window settings are not in the editor's undo history; `Shell::saved_output` tracks them separately for unsaved-change detection.
+- Saving: `Shell::save_to` collects the project on the UI thread, writes on the background executor, then applies the saved marker taken at the start; a save request while one runs is ignored (`Shell::saving`).
+- Widget drags (`Editor::gesture_edit`) end lazily: the model closes the gesture on the next different edit, undo/redo or save.
 - `Shell::confirming` stops repeated discard prompts; quitting goes through `shell::request_quit` (deferred, so the focused window finishes its update first).
 - Shader compile runs off the UI thread; the previous program stays shown until the new one is ready.
+- Background work reports back over an `async_channel` (the worker's callback try-sends into a capacity-1 channel, the UI task receives and reads the state): no timers polling for results.
 - Bounded runs: `--frames` quits after `STALL` (5 s) with no new frame; `--seconds` is wall time from launch. Profile summary is printed from `on_app_quit`.
 - Project load: a zip bundle's assets are verified against the project; altered ones are dropped with a warning.
 - `--screenshot` exit status is non-zero if the PNG wasn't written.
