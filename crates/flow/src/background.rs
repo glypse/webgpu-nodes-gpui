@@ -130,6 +130,7 @@ impl Layout {
         })
     }
 
+    #[cfg(test)]
     fn tile(&self) -> (f32, f32) {
         (
             self.periods.0 as f32 * self.gap.0,
@@ -146,11 +147,14 @@ fn tile_origins(length: f32, phase: f32, tile: f32) -> impl Iterator<Item = f32>
         .take_while(move |o| *o < length)
 }
 
-fn sprite_origins(w: f32, h: f32, layout: &Layout) -> impl Iterator<Item = (f32, f32)> {
-    let (tx, ty) = layout.tile();
-    let (phase_x, phase_y) = layout.phase;
-    tile_origins(w, phase_x, tx)
-        .flat_map(move |x| tile_origins(h, phase_y, ty).map(move |y| (x, y)))
+fn sprite_origins(
+    w: f32,
+    h: f32,
+    phase: (f32, f32),
+    tile: (f32, f32),
+) -> impl Iterator<Item = (f32, f32)> {
+    tile_origins(w, phase.0, tile.0)
+        .flat_map(move |x| tile_origins(h, phase.1, tile.1).map(move |y| (x, y)))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -190,6 +194,7 @@ impl TileKey {
 struct CachedTile {
     key: TileKey,
     texture: DynamicTexture,
+    texels: (usize, usize),
 }
 
 /// Holds the baked pattern tile between frames. Pan only moves the sprites
@@ -223,7 +228,7 @@ impl BackgroundCache {
             self.bake(window, key);
         }
         match &self.tile {
-            Some(tile) => paint_tiles(window, bounds, tile.texture, &layout),
+            Some(tile) => paint_tiles(window, bounds, tile, &layout),
             None => paint_marks(window, bounds, vp, opts, &layout, color),
         }
     }
@@ -242,7 +247,13 @@ impl BackgroundCache {
         };
         let extent = size(DevicePixels(ew), DevicePixels(eh));
         match window.create_dynamic_texture(extent, &bytes, (tw * 4) as u32) {
-            Ok(texture) => self.tile = Some(CachedTile { key, texture }),
+            Ok(texture) => {
+                self.tile = Some(CachedTile {
+                    key,
+                    texture,
+                    texels: (tw, th),
+                })
+            }
             Err(err) => {
                 log::warn!(
                     "background pattern texture unavailable, drawing marks individually: {err:#}"
@@ -265,23 +276,56 @@ impl Drop for BackgroundCache {
     }
 }
 
-fn paint_tiles(
-    window: &mut Window,
-    bounds: Bounds<Pixels>,
-    texture: DynamicTexture,
-    layout: &Layout,
-) {
-    let (tx, ty) = layout.tile();
-    let w = f32::from(bounds.size.width);
-    let h = f32::from(bounds.size.height);
-    for (x, y) in sprite_origins(w, h, layout) {
-        let origin = point(bounds.origin.x + px(x), bounds.origin.y + px(y));
-        if let Err(err) =
-            window.paint_dynamic_texture(Bounds::new(origin, size(px(tx), px(ty))), texture)
-        {
+/// Paints the tile 1:1 on whole device pixels. The pattern therefore pans in
+/// device-pixel steps, but is never resampled, which would blur it and beat
+/// against the pixel grid.
+fn paint_tiles(window: &mut Window, bounds: Bounds<Pixels>, tile: &CachedTile, layout: &Layout) {
+    let scale = window.scale_factor();
+    let (tw, th) = (tile.texels.0 as f32, tile.texels.1 as f32);
+    let (ox, oy) = (
+        f32::from(bounds.origin.x) * scale,
+        f32::from(bounds.origin.y) * scale,
+    );
+    let phase = (
+        (ox + layout.phase.0 * scale).round() - ox,
+        (oy + layout.phase.1 * scale).round() - oy,
+    );
+    let (w, h) = (
+        f32::from(bounds.size.width) * scale,
+        f32::from(bounds.size.height) * scale,
+    );
+    let extent = size(px(tw / scale), px(th / scale));
+    for (x, y) in sprite_origins(w, h, phase, (tw, th)) {
+        let origin = point(
+            bounds.origin.x + px(x / scale),
+            bounds.origin.y + px(y / scale),
+        );
+        if let Err(err) = window.paint_dynamic_texture(Bounds::new(origin, extent), tile.texture) {
             log::warn!("background pattern tile not painted: {err:#}");
             return;
         }
+    }
+}
+
+/// Mark centres along one axis of a tile, `periods + 1` of them so the marks
+/// straddling the far edge are drawn too. Centres sit on `grid + k` device
+/// pixels: every mark then rasterises identically, where fractional positions
+/// would give each a different coverage and beat into moiré.
+fn mark_centers(periods: u32, pitch: f32, len: f32, grid: f32) -> Vec<f32> {
+    let mut centers: Vec<f32> = (0..periods)
+        .map(|j| (j as f32 * pitch - grid + 0.5).floor() + grid)
+        .collect();
+    centers.push(grid + len);
+    centers
+}
+
+/// Centre grid for a mark `width` device px across: odd widths centre on a
+/// pixel, even widths on a pixel edge.
+fn center_grid(width: f32) -> f32 {
+    if width.round() as i64 % 2 == 1 {
+        0.5
+    } else {
+        0.0
     }
 }
 
@@ -291,13 +335,21 @@ fn rasterize(key: &TileKey, (tw, th): (usize, usize)) -> Vec<u8> {
     let (w, h) = (tw as f32, th as f32);
     let pitch = (w / key.periods.0 as f32, h / key.periods.1 as f32);
     let scale = key.scale;
-    let line = key.line.max(1.0) * scale;
+    let line = (key.line * scale).round().max(1.0);
+    let centers = |width: f32| {
+        let grid = center_grid(width);
+        (
+            mark_centers(key.periods.0, pitch.0, w, grid),
+            mark_centers(key.periods.1, pitch.1, h, grid),
+        )
+    };
     match key.variant {
         BackgroundVariant::Dots => {
-            let r = key.mark.max(1.0) * scale / 2.0;
-            for j in 0..=key.periods.0 {
-                for i in 0..=key.periods.1 {
-                    let (cx, cy) = (j as f32 * pitch.0, i as f32 * pitch.1);
+            let d = (key.mark * scale).max(1.0);
+            let r = d / 2.0;
+            let (xs, ys) = centers(d);
+            for &cy in &ys {
+                for &cx in &xs {
                     canvas.fill(
                         cx - r - 1.0,
                         cx + r + 1.0,
@@ -313,21 +365,20 @@ fn rasterize(key: &TileKey, (tw, th): (usize, usize)) -> Vec<u8> {
         }
         BackgroundVariant::Cross => {
             let arm = key.mark * scale / 2.0;
-            for j in 0..=key.periods.0 {
-                for i in 0..=key.periods.1 {
-                    let (cx, cy) = (j as f32 * pitch.0, i as f32 * pitch.1);
+            let (xs, ys) = centers(line);
+            for &cy in &ys {
+                for &cx in &xs {
                     canvas.fill_rect(cx - arm, cx + arm, cy - line / 2.0, cy + line / 2.0);
                     canvas.fill_rect(cx - line / 2.0, cx + line / 2.0, cy - arm, cy + arm);
                 }
             }
         }
         BackgroundVariant::Lines => {
-            for j in 0..=key.periods.0 {
-                let cx = j as f32 * pitch.0;
+            let (xs, ys) = centers(line);
+            for &cx in &xs {
                 canvas.fill_rect(cx - line / 2.0, cx + line / 2.0, 0.0, h);
             }
-            for i in 0..=key.periods.1 {
-                let cy = i as f32 * pitch.1;
+            for &cy in &ys {
                 canvas.fill_rect(0.0, w, cy - line / 2.0, cy + line / 2.0);
             }
         }
@@ -461,7 +512,9 @@ mod tests {
 
     /// Sprites the baked-tile path paints for a canvas.
     fn tile_sprites(w: f32, h: f32, vp: &Viewport, opts: &BackgroundOptions) -> usize {
-        Layout::new(w, h, vp, opts).map_or(0, |layout| sprite_origins(w, h, &layout).count())
+        Layout::new(w, h, vp, opts).map_or(0, |layout| {
+            sprite_origins(w, h, layout.phase, layout.tile()).count()
+        })
     }
 
     #[test]
@@ -550,5 +603,24 @@ mod tests {
         assert_eq!(alpha(100, 100), 255);
         assert_eq!(alpha(110, 110), 0);
         assert_eq!(alpha(100, 110), 0);
+    }
+
+    #[test]
+    fn dots_rasterise_identically_at_a_fractional_pitch() {
+        let key = |periods, gap: f32| TileKey {
+            variant: BackgroundVariant::Dots,
+            gap: (gap, gap),
+            periods: (periods, periods),
+            mark: 3.0,
+            line: 1.0,
+            color: gpui::black(),
+            scale: 1.0,
+        };
+        let alpha_sum = |key: &TileKey| -> u32 {
+            let t = key.texels();
+            rasterize(key, t).chunks(4).map(|px| u32::from(px[3])).sum()
+        };
+        let one = alpha_sum(&key(1, 20.0));
+        assert_eq!(alpha_sum(&key(26, 19.6)), one * 26 * 26);
     }
 }
