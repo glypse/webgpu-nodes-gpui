@@ -47,8 +47,8 @@ pub enum Profile {
 /// The weight of each tap of a kernel, its constants computed once per kernel.
 #[derive(Clone, Copy)]
 enum Weights {
-    Gaussian { two_variance: Ref, floor: Ref },
-    Box { taps: Ref },
+    Gaussian { negative_two_variance: Ref, floor: Ref },
+    Box { reach: Ref },
 }
 
 impl Weights {
@@ -64,17 +64,24 @@ impl Weights {
                     let sigma = g.op("max", (g.op("div", (taps, 3.0)), 0.0001)).first();
                     let variance = g.op("mul", (sigma, sigma)).first();
                     let two_variance = g.op("mul", (variance, 2.0)).first();
+                    // Negated once here rather than per tap: IEEE negation is
+                    // exact, so x / -y is -(x / y) to the bit.
+                    let negative_two_variance = g.op("negate", two_variance).first();
                     let past = g.op("add", (taps, 1.0)).first();
                     let squared = g.op("mul", (past, past)).first();
-                    let falloff = g.op("negate", g.op("div", (squared, two_variance))).first();
+                    let falloff = g.op("div", (squared, negative_two_variance)).first();
                     let floor = g.op("exp", falloff).first();
                     Self::Gaussian {
-                        two_variance,
+                        negative_two_variance,
                         floor,
                     }
                 },
             ),
-            Profile::Box => Self::Box { taps },
+            // Equal weights out to the radius, the outermost taps weighted by its
+            // fraction, so a radius growing smoothly blurs smoothly.
+            Profile::Box => Self::Box {
+                reach: g.op("add", (taps, 1.0)).first(),
+            },
         }
     }
 
@@ -82,18 +89,15 @@ impl Weights {
     fn at(self, g: &GroupBuilder<'_>, k: Ref) -> Ref {
         match self {
             Self::Gaussian {
-                two_variance,
+                negative_two_variance,
                 floor,
             } => {
                 let squared = g.op("mul", (k, k)).first();
-                let falloff = g.op("negate", g.op("div", (squared, two_variance))).first();
+                let falloff = g.op("div", (squared, negative_two_variance)).first();
                 let weight = g.op("exp", falloff).first();
                 g.op("max", (g.op("sub", (weight, floor)), 0.0)).first()
             }
-            // Equal weights out to the radius, the outermost taps weighted by its
-            // fraction, so a radius growing smoothly blurs smoothly.
-            Self::Box { taps } => {
-                let reach = g.op("add", (taps, 1.0)).first();
+            Self::Box { reach } => {
                 g.op("clamp", (g.op("sub", (reach, g.op("abs", k))), 0.0, 1.0))
                     .first()
             }
