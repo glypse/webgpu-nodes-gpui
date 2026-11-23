@@ -62,8 +62,13 @@ fn main() -> Result<()> {
             selected.push(group.spec.id);
         }
     }
+    let latest: BTreeMap<String, String> = built
+        .iter()
+        .map(|g| (g.spec.id.to_owned(), g.reference.clone()))
+        .collect();
     if selected.is_empty() {
         println!("Every library file matches its description: nothing to build.");
+        report(&files::update_refs(&latest, &[], cli.dry)?);
         return Ok(());
     }
     for group in built.iter().filter(|g| selected.contains(&g.spec.id)) {
@@ -98,11 +103,11 @@ fn main() -> Result<()> {
             files::write_group(group)?;
         }
     }
-    let latest: BTreeMap<String, String> = built
-        .iter()
-        .map(|g| (g.spec.id.to_owned(), g.reference.clone()))
-        .collect();
-    let rewritten = files::update_refs(&latest, &old, cli.dry)?;
+    report(&files::update_refs(&latest, &old, cli.dry)?);
+    Ok(())
+}
+
+fn report(rewritten: &files::Rewritten) {
     for (old, new) in &rewritten.renames {
         println!("{old} -> {new}");
     }
@@ -112,5 +117,4 @@ fn main() -> Result<()> {
     for path in &rewritten.scenes {
         println!("refs updated in {}", path.display());
     }
-    Ok(())
 }

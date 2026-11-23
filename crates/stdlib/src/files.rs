@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use shader_graph::assets::{BundleError, BundleKind, pack_bundle, unpack_bundle};
 use thiserror::Error;
 
 use crate::build::BuiltGroup;
@@ -18,6 +19,8 @@ pub enum FilesError {
     Io { path: PathBuf, source: io::Error },
     #[error("{path}: {source}")]
     Json { path: PathBuf, source: JsonError },
+    #[error("{path}: {source}")]
+    Bundle { path: PathBuf, source: BundleError },
     #[error("{0} has no SOURCES list to register a library file in")]
     NoSources(PathBuf),
 }
@@ -248,23 +251,63 @@ pub fn update_refs(
     if let Ok(entries) = fs::read_dir(&scenes) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_none_or(|e| e != "json") {
+            let bundle = path
+                .extension()
+                .is_some_and(|e| e == BundleKind::Project.extension());
+            if !bundle && path.extension().is_none_or(|e| e != "json") {
                 continue;
             }
-            let text = fs::read_to_string(&path).map_err(io_error(&path))?;
-            let mut updated = text.clone();
-            for (old, new) in &result.renames {
-                updated = updated.replace(&format!("\"{old}\""), &format!("\"{new}\""));
-            }
-            if updated != text {
+            let renamed = if bundle {
+                rename_in_bundle(&path, &latest)?
+            } else {
+                let text = fs::read_to_string(&path).map_err(io_error(&path))?;
+                let updated = rename_in_text(&text, &latest);
+                (updated != text).then(|| updated.into_bytes())
+            };
+            if let Some(bytes) = renamed {
                 if !dry {
-                    fs::write(&path, updated).map_err(io_error(&path))?;
+                    fs::write(&path, bytes).map_err(io_error(&path))?;
                 }
                 result.scenes.push(path);
             }
         }
     }
     Ok(result)
+}
+
+/// `text` with every ref to an older version of a group in `latest` (id to ref) made current.
+fn rename_in_text(text: &str, latest: &BTreeMap<String, String>) -> String {
+    let mut updated = text.to_owned();
+    for reference in refs_in(text, latest) {
+        let current = shader_graph::library::parse_ref(reference)
+            .and_then(|(id, _)| latest.get(id))
+            .filter(|new| new.as_str() != reference);
+        if let Some(new) = current {
+            updated = updated.replace(&format!("\"{reference}\""), &format!("\"{new}\""));
+        }
+    }
+    updated
+}
+
+/// A project bundle with its refs made current (see `rename_in_text`), `None` if none changed.
+pub fn rename_in_bundle(
+    path: &Path,
+    latest: &BTreeMap<String, String>,
+) -> Result<Option<Vec<u8>>, FilesError> {
+    let bundle_error = |e: BundleError| FilesError::Bundle {
+        path: path.to_owned(),
+        source: e,
+    };
+    let bytes = fs::read(path).map_err(io_error(path))?;
+    let bundle = unpack_bundle(&bytes, BundleKind::Project).map_err(bundle_error)?;
+    let json = rename_in_text(&bundle.json, latest);
+    if json == bundle.json {
+        return Ok(None);
+    }
+    let files = bundle.files.iter().map(|(p, d)| (p.as_str(), d.as_slice()));
+    pack_bundle(BundleKind::Project, &json, files)
+        .map(Some)
+        .map_err(bundle_error)
 }
 
 fn text_ref(id: &str, text: &str) -> Result<String, FilesError> {
