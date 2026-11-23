@@ -7,15 +7,22 @@ mod tests {
     use shader_graph::graph::GraphModel;
 
     fn assert_compiles(file: &str) {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenes").join(file);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("scenes")
+            .join(file);
         let loaded = crate::project::read(&path).unwrap_or_else(|e| panic!("{file}: {e:#}"));
-        let program = GraphModel::new(loaded.project).generate().unwrap_or_else(|e| panic!("{file}: {e}"));
+        let program = GraphModel::new(loaded.project)
+            .generate()
+            .unwrap_or_else(|e| panic!("{file}: {e}"));
         let code = program.program.code;
         let module = naga::front::wgsl::parse_str(&code)
             .unwrap_or_else(|e| panic!("{file}: {}\n{code}", e.emit_to_string(&code)));
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-            .validate(&module)
-            .unwrap_or_else(|e| panic!("{file}: {e:?}"));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{file}: {e:?}"));
     }
 
     #[test]

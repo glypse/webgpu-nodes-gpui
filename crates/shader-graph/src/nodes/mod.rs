@@ -21,7 +21,9 @@ pub use custom::*;
 pub use dynamic::*;
 pub use media::*;
 pub use render_texture::*;
-pub use standard::{COMPONENT_COUNT, COMPONENT_COUNT_INPUT, FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE};
+pub use standard::{
+    COMPONENT_COUNT, COMPONENT_COUNT_INPUT, FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE,
+};
 pub use texture::*;
 
 use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR};
@@ -56,7 +58,10 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     let mut all = Vec::new();
     all.extend(standard::input_nodes());
     let mut math = standard::math_nodes();
-    let after_pow = math.iter().position(|d| d.type_id == "pow").map_or(math.len(), |i| i + 1);
+    let after_pow = math
+        .iter()
+        .position(|d| d.type_id == "pow")
+        .map_or(math.len(), |i| i + 1);
     math.insert(after_pow, curve::curve_node());
     all.extend(math);
     all.extend(standard::vector_nodes());
@@ -77,8 +82,14 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     all.extend(texture::texture_nodes());
     all.push(build_render_texture_descriptor(&NodeData::default()));
     let mut misc = standard::misc_nodes();
-    let after_reroute = misc.iter().position(|d| d.type_id == "reroute").map_or(0, |i| i + 1);
-    misc.insert(after_reroute, build_custom_wgsl_descriptor(&NodeData::default()));
+    let after_reroute = misc
+        .iter()
+        .position(|d| d.type_id == "reroute")
+        .map_or(0, |i| i + 1);
+    misc.insert(
+        after_reroute,
+        build_custom_wgsl_descriptor(&NodeData::default()),
+    );
     all.extend(misc);
     all.extend(dev::dev_nodes());
     let ordered: Vec<_> = all
@@ -88,7 +99,10 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
             Arc::new(d)
         })
         .collect();
-    let by_type = ordered.iter().map(|d| (d.type_id.clone(), d.clone())).collect();
+    let by_type = ordered
+        .iter()
+        .map(|d| (d.type_id.clone(), d.clone()))
+        .collect();
     Registry { ordered, by_type }
 });
 
@@ -109,7 +123,9 @@ pub fn is_known_node_type(node_type: &str) -> bool {
 
 /// Default node data for a registered type.
 pub fn default_data_for_type(node_type: &str) -> NodeData {
-    registered(node_type).map(|d| d.default_data.clone()).unwrap_or_default()
+    registered(node_type)
+        .map(|d| d.default_data.clone())
+        .unwrap_or_default()
 }
 
 /// A node's descriptor: registered, or built from the node and its document.
@@ -141,7 +157,11 @@ pub fn resolve_descriptor(node: &GraphNode, project: &GraphProject) -> Arc<NodeD
         RENDER_TEXTURE => Arc::new(build_render_texture_descriptor(&node.data)),
         MATCH => {
             let variants = doc()
-                .and_then(|d| EnumDocument::of(d).enum_at(&node.id, MATCH_SELECTOR).map(<[_]>::to_vec))
+                .and_then(|d| {
+                    EnumDocument::of(d)
+                        .enum_at(&node.id, MATCH_SELECTOR)
+                        .map(<[_]>::to_vec)
+                })
                 .unwrap_or_default();
             Arc::new(build_match_descriptor(&variants))
         }

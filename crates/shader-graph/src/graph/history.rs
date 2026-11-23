@@ -25,11 +25,19 @@ impl Default for History {
 
 impl History {
     pub fn new(limit: usize) -> Self {
-        Self { past: Vec::new(), future: Vec::new(), current: None, limit }
+        Self {
+            past: Vec::new(),
+            future: Vec::new(),
+            current: None,
+            limit,
+        }
     }
 
     pub fn counts(&self) -> HistoryCounts {
-        HistoryCounts { undo: self.past.len(), redo: self.future.len() }
+        HistoryCounts {
+            undo: self.past.len(),
+            redo: self.future.len(),
+        }
     }
 
     pub fn can_undo(&self) -> bool {

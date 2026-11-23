@@ -20,16 +20,14 @@ mod theme;
 pub use background::{BackgroundOptions, BackgroundVariant};
 pub use edge_path::{EdgePath, PathParams, Position, Segment, StepOptions};
 pub use flow::{
-    ConnectionLineStyle, ConnectionValidator,
-    FitViewOptions, Flow, FlowEvent, FlowOptions, Layer, LayerContext, Layers, Portal,
-    PortalRender, SelectionMode, StrokeKind,
+    ConnectionLineStyle, ConnectionValidator, FitViewOptions, Flow, FlowEvent, FlowOptions, Layer,
+    LayerContext, Layers, Portal, PortalRender, SelectionMode, StrokeKind,
 };
 pub use geometry::{Extent, Rect, Viewport, Xy};
 pub use model::{
-    Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeColor, EdgeKind, EdgeTag,
-    EdgeLabel, EdgeStyle, HandleType, Id, Node, NodeChange, add_edge,
-    apply_edge_changes, apply_node_changes, connected_edges, edge_id, incomers, outgoers,
-    reconnect_edge,
+    Connection, ConnectionMode, ConnectionState, Edge, EdgeChange, EdgeColor, EdgeKind, EdgeLabel,
+    EdgeStyle, EdgeTag, HandleType, Id, Node, NodeChange, add_edge, apply_edge_changes,
+    apply_node_changes, connected_edges, edge_id, incomers, outgoers, reconnect_edge,
 };
 pub use node::{Handle, HandleState, NodeConnections, NodeProps};
 pub use panels::{ControlButton, ControlsOptions, MiniMapOptions, Panel, PanelPosition};

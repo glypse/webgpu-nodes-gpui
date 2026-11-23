@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use super::{FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE};
 use crate::graph::REROUTE;
-use crate::types::{CpuCtx, InputValue, CpuFn, ScalarKind, Value, WgslType};
+use crate::types::{CpuCtx, CpuFn, InputValue, ScalarKind, Value, WgslType};
 use std::sync::Arc;
 
 /// Components of the widest node input.
@@ -35,7 +35,9 @@ pub fn fit(value: &[f64], width: usize) -> Value {
     if value.len() == 1 {
         return vec![value[0]; width];
     }
-    (0..width).map(|i| value.get(i).copied().unwrap_or(0.0)).collect()
+    (0..width)
+        .map(|i| value.get(i).copied().unwrap_or(0.0))
+        .collect()
 }
 
 /// An integer result of kind `kind`, wrapped to its 32 bits.
@@ -58,14 +60,19 @@ pub fn as_kind(kind: ScalarKind, n: f64) -> f64 {
 
 /// The value an unlinked input holds, as `ty`.
 pub fn stored_value(stored: Option<&InputValue>, ty: WgslType) -> Value {
-    let components: Vec<f64> = (0..ty.components()).map(|i| stored.map_or(0.0, |v| v.component(i))).collect();
+    let components: Vec<f64> = (0..ty.components())
+        .map(|i| stored.map_or(0.0, |v| v.component(i)))
+        .collect();
     coerce(&components, ty)
 }
 
 /// A value as `ty`: its width and kind.
 pub fn coerce(value: &[f64], ty: WgslType) -> Value {
     let kind = ty.kind();
-    fit(value, ty.components()).into_iter().map(|n| as_kind(kind, n)).collect()
+    fit(value, ty.components())
+        .into_iter()
+        .map(|n| as_kind(kind, n))
+        .collect()
 }
 
 /// WGSL's `round`: halves go to the even neighbour.
@@ -75,7 +82,11 @@ pub fn round_half_even(n: f64) -> f64 {
 
 /// WGSL's `sign`: 0 for 0.
 pub fn sign(n: f64) -> f64 {
-    if n.is_nan() || n == 0.0 { n } else { n.signum() }
+    if n.is_nan() || n == 0.0 {
+        n
+    } else {
+        n.signum()
+    }
 }
 
 fn is_integer(ty: WgslType) -> bool {
@@ -104,7 +115,11 @@ pub fn unary_int_cpu(
     Arc::new(move |ctx: &CpuCtx<'_>| {
         let ty = ctx.output_type;
         let mapped: Value = match integer.filter(|_| is_integer(ty)) {
-            Some(g) => ctx.input("e").into_iter().map(|n| wrap_int(ty.kind(), g(n as i64))).collect(),
+            Some(g) => ctx
+                .input("e")
+                .into_iter()
+                .map(|n| wrap_int(ty.kind(), g(n as i64)))
+                .collect(),
             None => ctx.input("e").into_iter().map(&f).collect(),
         };
         result(coerce(&mapped, ty))
@@ -188,7 +203,12 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
         "sub" => binary_cpu("a", "b", |a, b| a - b, Some(i64::wrapping_sub)),
         "div" => binary_cpu("a", "b", |a, b| if b == 0.0 { 0.0 } else { a / b }, None),
         "mod" => binary_cpu("a", "b", |a, b| if b == 0.0 { 0.0 } else { a % b }, None),
-        "pow" => binary_cpu("e1", "e2", |a, b| if b == 0.0 { 1.0 } else { a.powf(b) }, None),
+        "pow" => binary_cpu(
+            "e1",
+            "e2",
+            |a, b| if b == 0.0 { 1.0 } else { a.powf(b) },
+            None,
+        ),
         "step" => binary_cpu("e1", "e2", |edge, x| f64::from(u8::from(x >= edge)), None),
         "atan2" => binary_cpu("e1", "e2", f64::atan2, None),
         "clamp" => nary_cpu(&["e", "low", "high"], |n| n[2].min(n[1].max(n[0]))),
@@ -205,7 +225,9 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
             let diff = zip(&[ctx.input("e1"), ctx.input("e2")], |n| n[0] - n[1]);
             result(vec![length(&diff) as f32 as f64])
         }),
-        "length" => Arc::new(|ctx: &CpuCtx<'_>| result(vec![length(&ctx.input("e1")) as f32 as f64])),
+        "length" => {
+            Arc::new(|ctx: &CpuCtx<'_>| result(vec![length(&ctx.input("e1")) as f32 as f64]))
+        }
         "normalize" => Arc::new(|ctx: &CpuCtx<'_>| {
             let v = ctx.input("e");
             let len = length(&v);
@@ -214,7 +236,11 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
         }),
         "cross" => Arc::new(|ctx: &CpuCtx<'_>| {
             let (a, d) = (fit(&ctx.input("e1"), 3), fit(&ctx.input("e2"), 3));
-            let v = [a[1] * d[2] - a[2] * d[1], a[2] * d[0] - a[0] * d[2], a[0] * d[1] - a[1] * d[0]];
+            let v = [
+                a[1] * d[2] - a[2] * d[1],
+                a[2] * d[0] - a[0] * d[2],
+                a[0] * d[1] - a[1] * d[0],
+            ];
             result(coerce(&v, WgslType::Vec3f))
         }),
         "separate-vector" => Arc::new(|ctx: &CpuCtx<'_>| {
@@ -237,11 +263,17 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
                 ">" => |a, b| a > b,
                 _ => |a, b| a < b,
             };
-            let v = zip(&[ctx.input("a"), ctx.input("b")], |n| f64::from(u8::from(op(n[0], n[1]))));
+            let v = zip(&[ctx.input("a"), ctx.input("b")], |n| {
+                f64::from(u8::from(op(n[0], n[1])))
+            });
             result(coerce(&v, ctx.output_type))
         }),
         "switch" => Arc::new(|ctx: &CpuCtx<'_>| {
-            let values = [ctx.input("condition"), ctx.input("false"), ctx.input("true")];
+            let values = [
+                ctx.input("condition"),
+                ctx.input("false"),
+                ctx.input("true"),
+            ];
             let v = zip(&values, |n| if n[0] != 0.0 { n[2] } else { n[1] });
             result(coerce(&v, ctx.output_type))
         }),
@@ -263,12 +295,19 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
         "reduce-boolean" => Arc::new(|ctx: &CpuCtx<'_>| {
             let values = ctx.input("e");
             let any = setting(ctx, "op", "any") == "any";
-            let reduced =
-                if any { values.iter().any(|n| *n != 0.0) } else { values.iter().all(|n| *n != 0.0) };
+            let reduced = if any {
+                values.iter().any(|n| *n != 0.0)
+            } else {
+                values.iter().all(|n| *n != 0.0)
+            };
             result(vec![f64::from(u8::from(reduced))])
         }),
         FALLBACK => Arc::new(|ctx: &CpuCtx<'_>| {
-            let chosen = if ctx.is_present(FALLBACK_VALUE) { FALLBACK_VALUE } else { FALLBACK_DEFAULT };
+            let chosen = if ctx.is_present(FALLBACK_VALUE) {
+                FALLBACK_VALUE
+            } else {
+                FALLBACK_DEFAULT
+            };
             result(coerce(&ctx.input(chosen), ctx.output_type))
         }),
         "bitwise" => Arc::new(|ctx: &CpuCtx<'_>| {
@@ -300,7 +339,10 @@ pub(super) fn standard_cpu(type_id: &str) -> Option<CpuFn> {
         "declare" => Arc::new(|ctx: &CpuCtx<'_>| {
             output(
                 "value",
-                ctx.resolved_inputs.iter().map(|i| ctx.input(&i.id).first().copied().unwrap_or(0.0)).collect(),
+                ctx.resolved_inputs
+                    .iter()
+                    .map(|i| ctx.input(&i.id).first().copied().unwrap_or(0.0))
+                    .collect(),
             )
         }),
         REROUTE => Arc::new(|ctx: &CpuCtx<'_>| output("out", ctx.input("in"))),

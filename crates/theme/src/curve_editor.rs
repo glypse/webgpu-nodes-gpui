@@ -1,9 +1,9 @@
 use gpui::{
-    AppContext as _, Bounds, ClickEvent, Context, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
-    Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, ParentElement as _, PathBuilder, Pixels, Point, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, canvas, div,
-    fill, point, prelude::FluentBuilder as _, px, size,
+    AppContext as _, Bounds, ClickEvent, Context, DragMoveEvent, Empty, Entity, EventEmitter,
+    FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers,
+    MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, PathBuilder, Pixels, Point,
+    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    canvas, div, fill, point, prelude::FluentBuilder as _, px, size,
 };
 use graph_math::curve::{
     CurvePoint, CurvePointKind, HandleSide, Vec2, add_curve_point, curve_presets, curve_segments,
@@ -12,7 +12,10 @@ use graph_math::curve::{
 };
 use guard::SafeListener as _;
 
-use gpui_component::{Disableable as _, Selectable as _, Size, Sizable as _, button::{Button, ButtonVariants as _}};
+use gpui_component::{
+    Disableable as _, Selectable as _, Sizable as _, Size,
+    button::{Button, ButtonVariants as _},
+};
 
 use crate::{ActiveTheme as _, IconName, NumberEvent, NumberField, tagged_button};
 
@@ -724,7 +727,8 @@ impl Render for CurveEditor {
                             if let (Some(point), Some(index)) = (&active, selected) {
                                 let at = plane.project(Vec2::new(point.x, point.y));
                                 for handle_side in sides(&points, index) {
-                                    let handle = plane.project(part_at(point, side_part(handle_side)));
+                                    let handle =
+                                        plane.project(part_at(point, side_part(handle_side)));
                                     stroke_path(
                                         window,
                                         origin,
@@ -861,10 +865,8 @@ impl Render for CurveEditor {
                                             .iter()
                                             .enumerate()
                                             .map(|(i, (x, y))| {
-                                                let p = Vec2::new(
-                                                    f64::from(*x * z),
-                                                    f64::from(*y * z),
-                                                );
+                                                let p =
+                                                    Vec2::new(f64::from(*x * z), f64::from(*y * z));
                                                 if i == 0 {
                                                     PathStep::Move(p)
                                                 } else {
@@ -939,23 +941,26 @@ impl Render for CurveEditor {
                     || "curve-delete".into(),
                 ));
 
-            let coordinates =
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0 * z))
-                    .children(self.fields.iter().zip(PARTS).map(|(row, (_, label))| {
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0 * z))
-                            .text_size(theme.text.xs * z)
-                            .child(div().w(px(36.0 * z)).flex_none().text_color(muted).child(label))
-                            .children(
-                                row.iter()
-                                    .map(|field| div().flex_1().min_w_0().child(field.clone())),
-                            )
-                    }));
+            let coordinates = div().flex().flex_col().gap(px(2.0 * z)).children(
+                self.fields.iter().zip(PARTS).map(|(row, (_, label))| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0 * z))
+                        .text_size(theme.text.xs * z)
+                        .child(
+                            div()
+                                .w(px(36.0 * z))
+                                .flex_none()
+                                .text_color(muted)
+                                .child(label),
+                        )
+                        .children(
+                            row.iter()
+                                .map(|field| div().flex_1().min_w_0().child(field.clone())),
+                        )
+                }),
+            );
 
             div()
                 .flex()

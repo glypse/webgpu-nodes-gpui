@@ -15,7 +15,10 @@ pub const LAYOUT_FRAME: &str = "layout-frame";
 pub const FRAME_PADDING: f32 = 24.0;
 
 /// Room an empty frame keeps under its header, to drop nodes in.
-pub const EMPTY_FRAME_SIZE: Size = Size { width: 240.0, height: 120.0 };
+pub const EMPTY_FRAME_SIZE: Size = Size {
+    width: 240.0,
+    height: 120.0,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Size {
@@ -52,14 +55,20 @@ impl Bounds {
 /// The smallest box holding every one of `boxes`.
 pub fn union_of(boxes: &[Bounds]) -> Option<Bounds> {
     let (first, rest) = boxes.split_first()?;
-    let (mut left, mut top, mut right, mut bottom) = (first.x, first.y, first.right(), first.bottom());
+    let (mut left, mut top, mut right, mut bottom) =
+        (first.x, first.y, first.right(), first.bottom());
     for b in rest {
         left = left.min(b.x);
         top = top.min(b.y);
         right = right.max(b.right());
         bottom = bottom.max(b.bottom());
     }
-    Some(Bounds { x: left, y: top, width: right - left, height: bottom - top })
+    Some(Bounds {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
 }
 
 /// Colours a frame can be drawn in.
@@ -107,18 +116,26 @@ impl FrameTint {
     pub fn label(self) -> String {
         let id = self.id();
         let mut chars = id.chars();
-        chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
+        chars
+            .next()
+            .map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
     }
 }
 
 /// The tint of a frame node's data.
 pub fn frame_tint(data: &NodeData) -> Option<FrameTint> {
-    data.extra.get("tint").and_then(Value::as_str).and_then(FrameTint::from_id)
+    data.extra
+        .get("tint")
+        .and_then(Value::as_str)
+        .and_then(FrameTint::from_id)
 }
 
 /// The note of a frame node's data.
 pub fn frame_note(data: &NodeData) -> Option<&str> {
-    data.extra.get("note").and_then(Value::as_str).filter(|n| !n.is_empty())
+    data.extra
+        .get("note")
+        .and_then(Value::as_str)
+        .filter(|n| !n.is_empty())
 }
 
 pub fn set_frame_tint(data: &mut NodeData, tint: Option<FrameTint>) {
@@ -203,7 +220,11 @@ pub struct FrameItem<'a> {
 
 impl<'a> From<&'a GraphNode> for FrameItem<'a> {
     fn from(n: &'a GraphNode) -> Self {
-        Self { id: &n.id, is_frame: n.is(LAYOUT_FRAME), frame: n.frame.as_deref() }
+        Self {
+            id: &n.id,
+            is_frame: n.is(LAYOUT_FRAME),
+            frame: n.frame.as_deref(),
+        }
     }
 }
 
@@ -243,10 +264,20 @@ pub fn analyze_frame_items<'a>(items: impl IntoIterator<Item = FrameItem<'a>>) -
 
     let mut frames: HashMap<String, Frame> = frame_ids
         .iter()
-        .map(|&id| (id.to_owned(), Frame { id: id.to_owned(), ..Frame::default() }))
+        .map(|&id| {
+            (
+                id.to_owned(),
+                Frame {
+                    id: id.to_owned(),
+                    ..Frame::default()
+                },
+            )
+        })
         .collect();
     for node in &items {
-        let Some(frame) = frame_of.get(node.id) else { continue };
+        let Some(frame) = frame_of.get(node.id) else {
+            continue;
+        };
         if let Some(f) = frames.get_mut(frame) {
             f.children.push(node.id.to_owned());
         }
@@ -276,7 +307,10 @@ pub fn estimate_frame_header(label: &str, note: Option<&str>) -> Size {
         .iter()
         .map(|l| l.chars().count() as f32 * 7.0)
         .fold(label.chars().count() as f32 * 9.0, f32::max);
-    Size { width: longest.min(480.0) + 24.0, height: 36.0 + 18.0 * lines.len() as f32 }
+    Size {
+        width: longest.min(480.0) + 24.0,
+        height: 36.0 + 18.0 * lines.len() as f32,
+    }
 }
 
 /// The box of every frame: around what it holds (nested frames' boxes
@@ -293,7 +327,9 @@ pub fn frame_rects(
     let mut deepest_first: Vec<&Frame> = analysis.frames.values().collect();
     deepest_first.sort_by(|a, b| b.depth.cmp(&a.depth).then_with(|| a.id.cmp(&b.id)));
     for frame in deepest_first {
-        let Some(own) = rect_of(&frame.id) else { continue };
+        let Some(own) = rect_of(&frame.id) else {
+            continue;
+        };
         let head = header(&frame.id);
         let mut inner: Vec<Bounds> = frame
             .children
@@ -347,7 +383,11 @@ mod tests {
         assert_eq!(inner.parent.as_deref(), Some("outer"));
         assert_eq!(inner.depth, 1);
         assert_eq!(analysis.frames["outer"].children, ["inner", "b"]);
-        let held: Vec<&str> = analysis.frames["outer"].descendants.iter().map(String::as_str).collect();
+        let held: Vec<&str> = analysis.frames["outer"]
+            .descendants
+            .iter()
+            .map(String::as_str)
+            .collect();
         assert_eq!(held, ["a", "b", "inner"]);
         assert_eq!(analysis.frame_of["a"], "inner");
     }
@@ -369,7 +409,12 @@ mod tests {
     fn rects_of<'a>(nodes: &'a [GraphNode]) -> impl Fn(&str) -> Option<Bounds> + 'a {
         |id| {
             let n = nodes.iter().find(|n| n.id == id)?;
-            Some(Bounds { x: n.position.x, y: n.position.y, width: 50.0, height: 40.0 })
+            Some(Bounds {
+                x: n.position.x,
+                y: n.position.y,
+                width: 50.0,
+                height: 40.0,
+            })
         }
     }
 
@@ -383,7 +428,10 @@ mod tests {
         let rects = frame_rects(
             &analyze_frames(&nodes),
             rects_of(&nodes),
-            |_| Size { width: 80.0, height: 30.0 },
+            |_| Size {
+                width: 80.0,
+                height: 30.0,
+            },
             |_| Vec::new(),
         );
         assert_eq!(
@@ -403,7 +451,10 @@ mod tests {
         let rects = frame_rects(
             &analyze_frames(&nodes),
             rects_of(&nodes),
-            |_| Size { width: 80.0, height: 30.0 },
+            |_| Size {
+                width: 80.0,
+                height: 30.0,
+            },
             |_| Vec::new(),
         );
         assert_eq!(rects["f"].x, 5.0);
@@ -420,7 +471,10 @@ mod tests {
         let rects = frame_rects(
             &analyze_frames(&nodes),
             rects_of(&nodes),
-            |_| Size { width: 10.0, height: 30.0 },
+            |_| Size {
+                width: 10.0,
+                height: 30.0,
+            },
             |_| Vec::new(),
         );
         assert!(rects["outer"].x < rects["inner"].x);

@@ -154,7 +154,10 @@ impl EdgeStyle {
     }
 
     pub fn gradient(from: Hsla, to: Hsla) -> Self {
-        Self { color: EdgeColor::Gradient(from, to), ..Self::solid(from) }
+        Self {
+            color: EdgeColor::Gradient(from, to),
+            ..Self::solid(from)
+        }
     }
 
     pub fn width(mut self, width: f32) -> Self {
@@ -263,7 +266,6 @@ impl Edge {
         self.kind = kind;
         self
     }
-
 }
 
 /// The default edge id for a connection. Each part is length-prefixed (or `-`
@@ -287,11 +289,25 @@ pub fn edge_id(c: &Connection) -> Id {
 
 #[derive(Clone)]
 pub enum NodeChange {
-    Position { id: Id, position: Option<Xy>, dragging: Option<bool> },
-    Select { id: Id, selected: bool },
-    Remove { id: Id },
-    Add { node: Node },
-    Replace { id: Id, node: Node },
+    Position {
+        id: Id,
+        position: Option<Xy>,
+        dragging: Option<bool>,
+    },
+    Select {
+        id: Id,
+        selected: bool,
+    },
+    Remove {
+        id: Id,
+    },
+    Add {
+        node: Node,
+    },
+    Replace {
+        id: Id,
+        node: Node,
+    },
 }
 
 #[derive(Clone)]
@@ -341,7 +357,11 @@ pub fn apply_node_changes(changes: &[NodeChange], nodes: Vec<Node>) -> Vec<Node>
                     }
                 }
             }
-            NodeChange::Position { id, position, dragging } => {
+            NodeChange::Position {
+                id,
+                position,
+                dragging,
+            } => {
                 if let Some(&i) = index.get(id) {
                     let n = &mut nodes[i];
                     if let Some(p) = position {
@@ -414,16 +434,27 @@ pub fn add_edge(connection: &Connection, mut edges: Vec<Edge>) -> Vec<Edge> {
 /// Edges with an end on any of the given nodes.
 pub fn connected_edges<'a>(node_ids: &[Id], edges: &'a [Edge]) -> Vec<&'a Edge> {
     let ids: HashSet<&Id> = node_ids.iter().collect();
-    edges.iter().filter(|e| ids.contains(&e.source) || ids.contains(&e.target)).collect()
+    edges
+        .iter()
+        .filter(|e| ids.contains(&e.source) || ids.contains(&e.target))
+        .collect()
 }
 
 pub fn incomers<'a>(id: &Id, nodes: &'a [Node], edges: &[Edge]) -> Vec<&'a Node> {
-    let sources: HashSet<&Id> = edges.iter().filter(|e| e.target == *id).map(|e| &e.source).collect();
+    let sources: HashSet<&Id> = edges
+        .iter()
+        .filter(|e| e.target == *id)
+        .map(|e| &e.source)
+        .collect();
     nodes.iter().filter(|n| sources.contains(&n.id)).collect()
 }
 
 pub fn outgoers<'a>(id: &Id, nodes: &'a [Node], edges: &[Edge]) -> Vec<&'a Node> {
-    let targets: HashSet<&Id> = edges.iter().filter(|e| e.source == *id).map(|e| &e.target).collect();
+    let targets: HashSet<&Id> = edges
+        .iter()
+        .filter(|e| e.source == *id)
+        .map(|e| &e.target)
+        .collect();
     nodes.iter().filter(|n| targets.contains(&n.id)).collect()
 }
 
@@ -516,8 +547,14 @@ mod tests {
             target: target.into(),
             target_handle: None,
         };
-        assert_ne!(edge_id(&split("a", "bc", "d")), edge_id(&split("ab", "c", "d")));
-        assert_ne!(edge_id(&split("a", "-", "d")), edge_id(&split("a", "", "d")));
+        assert_ne!(
+            edge_id(&split("a", "bc", "d")),
+            edge_id(&split("ab", "c", "d"))
+        );
+        assert_ne!(
+            edge_id(&split("a", "-", "d")),
+            edge_id(&split("a", "", "d"))
+        );
     }
 
     #[test]
@@ -530,13 +567,19 @@ mod tests {
                     position: Some(Xy::new(5.0, 6.0)),
                     dragging: Some(true),
                 },
-                NodeChange::Select { id: "b".into(), selected: true },
+                NodeChange::Select {
+                    id: "b".into(),
+                    selected: true,
+                },
                 NodeChange::Remove { id: "a".into() },
                 NodeChange::Add { node: node("c") },
             ],
             nodes,
         );
-        assert_eq!(nodes.iter().map(|n| n.id.as_ref()).collect::<Vec<_>>(), ["b", "c"]);
+        assert_eq!(
+            nodes.iter().map(|n| n.id.as_ref()).collect::<Vec<_>>(),
+            ["b", "c"]
+        );
         assert!(nodes[0].selected);
     }
 
@@ -544,7 +587,13 @@ mod tests {
     fn edge_changes_apply() {
         let edges = add_edge(&conn("a", "b"), Vec::new());
         let id = edges[0].id.clone();
-        let edges = apply_edge_changes(&[EdgeChange::Select { id: id.clone(), selected: true }], edges);
+        let edges = apply_edge_changes(
+            &[EdgeChange::Select {
+                id: id.clone(),
+                selected: true,
+            }],
+            edges,
+        );
         assert!(edges[0].selected);
         assert!(apply_edge_changes(&[EdgeChange::Remove { id }], edges).is_empty());
     }
@@ -574,7 +623,11 @@ mod tests {
         assert_eq!(edges[0].target.as_ref(), "c");
         // Reconnecting onto an existing connection merges them.
         let edges = add_edge(&conn("a", "b"), edges);
-        let moved = edges.iter().find(|e| e.target.as_ref() == "c").unwrap().clone();
+        let moved = edges
+            .iter()
+            .find(|e| e.target.as_ref() == "c")
+            .unwrap()
+            .clone();
         assert_eq!(reconnect_edge(&moved, &conn("a", "b"), edges).len(), 1);
     }
 }

@@ -32,9 +32,15 @@ pub fn pick_and_import<T: 'static>(
     cx: &mut Context<T>,
 ) {
     let (editor, playback) = (editor.clone(), playback.clone());
-    pick_files(true, window, cx, read_bundles, move |(bundles, problems), window, cx| {
-        import_bundles(&editor, &playback, bundles, problems, window, cx);
-    });
+    pick_files(
+        true,
+        window,
+        cx,
+        read_bundles,
+        move |(bundles, problems), window, cx| {
+            import_bundles(&editor, &playback, bundles, problems, window, cx);
+        },
+    );
 }
 
 /// Reads and parses the bundles at `paths`. Those that can't be used are returned as problems.
@@ -82,9 +88,14 @@ fn import_bundles(
         return;
     }
 
-    let groups: Vec<GroupsFile> = bundles.iter().map(|(_, bundle)| bundle.file.clone()).collect();
+    let groups: Vec<GroupsFile> = bundles
+        .iter()
+        .map(|(_, bundle)| bundle.file.clone())
+        .collect();
     let mut result = None;
-    editor.update(cx, |e, cx| e.edit(cx, |m| result = Some(m.import_groups(&groups))));
+    editor.update(cx, |e, cx| {
+        e.edit(cx, |m| result = Some(m.import_groups(&groups)))
+    });
     match result {
         Some(Ok(import)) => {
             // Each asset's file is moved out of its bundle: an added asset is the only one reading that path.
@@ -105,7 +116,10 @@ fn import_bundles(
                 });
             }
             if !import.missing.is_empty() {
-                log::warn!("imported groups have missing dependencies: {:?}", import.missing);
+                log::warn!(
+                    "imported groups have missing dependencies: {:?}",
+                    import.missing
+                );
                 problems.push(format!(
                     "{} imported groups rely on groups that weren't in the bundles.",
                     import.missing.len()
@@ -124,7 +138,9 @@ fn import_bundles(
 #[cfg(test)]
 mod tests {
     use shader_graph::assets::{Asset, AssetFile, asset_hash, pack_bundle};
-    use shader_graph::graph::{GraphDocument, GraphModel, GraphNode, GraphProject, GroupRef, NODE_GROUP, Point};
+    use shader_graph::graph::{
+        GraphDocument, GraphModel, GraphNode, GraphProject, GroupRef, NODE_GROUP, Point,
+    };
 
     use super::*;
 
@@ -145,7 +161,11 @@ mod tests {
     fn exported(bytes: &[u8]) -> (GroupsExport, AssetFiles) {
         let mut node = GraphNode::new("image", Point::default());
         node.data.asset = Some("a1".to_owned());
-        let doc = GraphDocument { nodes: vec![node], label: Some("Photo group".into()), ..GraphDocument::default() };
+        let doc = GraphDocument {
+            nodes: vec![node],
+            label: Some("Photo group".into()),
+            ..GraphDocument::default()
+        };
         let mut project = GraphProject::default();
         project.definitions.insert("g".to_owned(), doc);
         project.assets.push(image("a1", bytes));
@@ -162,7 +182,10 @@ mod tests {
         let read = read_groups(&bytes).expect("reads");
         assert_eq!(read.file.groups.len(), 1);
         assert_eq!(read.file.assets.len(), 1);
-        assert_eq!(read.files.get("assets/images/a1.png").map(Vec::as_slice), Some(&[1u8, 2, 3][..]));
+        assert_eq!(
+            read.files.get("assets/images/a1.png").map(Vec::as_slice),
+            Some(&[1u8, 2, 3][..])
+        );
     }
 
     #[test]
@@ -177,12 +200,30 @@ mod tests {
     #[test]
     fn an_exported_group_nesting_another_brings_it_along() {
         let mut project = GraphProject::default();
-        project.definitions.insert("inner".to_owned(), GraphDocument { label: Some("Inner".into()), ..GraphDocument::default() });
+        project.definitions.insert(
+            "inner".to_owned(),
+            GraphDocument {
+                label: Some("Inner".into()),
+                ..GraphDocument::default()
+            },
+        );
         let mut node = GraphNode::new(NODE_GROUP, Point::default());
-        node.group = Some(GroupRef { definition_ref: "inner".to_owned(), locked: false });
-        project.definitions.insert("outer".to_owned(), GraphDocument { nodes: vec![node], ..GraphDocument::default() });
-        let export = GraphModel::new(project).export_group("outer").expect("exports");
-        let read = read_groups(&pack_bundle(BundleKind::Groups, &export.json, []).expect("packs")).expect("reads");
+        node.group = Some(GroupRef {
+            definition_ref: "inner".to_owned(),
+            locked: false,
+        });
+        project.definitions.insert(
+            "outer".to_owned(),
+            GraphDocument {
+                nodes: vec![node],
+                ..GraphDocument::default()
+            },
+        );
+        let export = GraphModel::new(project)
+            .export_group("outer")
+            .expect("exports");
+        let read = read_groups(&pack_bundle(BundleKind::Groups, &export.json, []).expect("packs"))
+            .expect("reads");
         let ids: Vec<&str> = read.file.groups.iter().map(|g| g.id.as_str()).collect();
         assert_eq!(ids, ["outer", "inner"]);
     }

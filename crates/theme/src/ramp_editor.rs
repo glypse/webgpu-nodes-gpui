@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gpui::{
-    AppContext as _, Bounds, ClickEvent, Context, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
-    Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, canvas, div, fill, point,
-    prelude::FluentBuilder as _, px, size,
+    AppContext as _, Bounds, ClickEvent, Context, DragMoveEvent, Empty, Entity, EventEmitter,
+    FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers,
+    MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, canvas, div,
+    fill, point, prelude::FluentBuilder as _, px, size,
 };
 use graph_math::color::{ColorSpace, Rgba as LinearRgba};
 use graph_math::ramp::{
@@ -15,11 +15,12 @@ use graph_math::ramp::{
 };
 use guard::SafeListener as _;
 
-use gpui_component::{Disableable as _, Size, Sizable as _, button::{Button, ButtonVariants as _}};
-
-use crate::{
-    ActiveTheme as _, IconName, NumberEvent, NumberField, linear_to_hsla, tagged_button,
+use gpui_component::{
+    Disableable as _, Sizable as _, Size,
+    button::{Button, ButtonVariants as _},
 };
+
+use crate::{ActiveTheme as _, IconName, NumberEvent, NumberField, linear_to_hsla, tagged_button};
 
 /// How close the pointer must be to grab a stop on a double click, at zoom 1.
 const GRAB: f32 = 6.0;
@@ -362,7 +363,8 @@ impl RampEditor {
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
         if self.zoom != zoom {
             self.zoom = zoom;
-            self.position.update(cx, |field, cx| field.set_zoom(zoom, cx));
+            self.position
+                .update(cx, |field, cx| field.set_zoom(zoom, cx));
             cx.notify();
         }
     }
@@ -601,9 +603,11 @@ impl Render for RampEditor {
                         "Remove the selected stop",
                         self.stops.len() <= 1,
                     )
-                    .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| {
-                        this.remove_selected(cx);
-                    })),
+                    .on_click(cx.safe_listener(
+                        |this, _: &ClickEvent, _, cx| {
+                            this.remove_selected(cx);
+                        },
+                    )),
                     || "ramp-remove".into(),
                 ))
                 .child(div().flex_1())

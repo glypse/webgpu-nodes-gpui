@@ -4,14 +4,18 @@ use std::collections::BTreeMap;
 
 use crate::codegen::ShaderOptions;
 use crate::graph::{
-    FRAG_OUTPUT, GraphDocument, GraphEdge, GraphModel, GraphNode, GraphProject, GroupRef, Point, ROOT_ID,
+    FRAG_OUTPUT, GraphDocument, GraphEdge, GraphModel, GraphNode, GraphProject, GroupRef, Point,
+    ROOT_ID,
 };
 use crate::testing::validate_wgsl;
 use crate::types::{InputValue, NodeData, WgslType};
 
 /// A node at the origin.
 pub fn node(id: &str, node_type: &str) -> GraphNode {
-    GraphNode { id: id.to_owned(), ..GraphNode::new(node_type, Point::default()) }
+    GraphNode {
+        id: id.to_owned(),
+        ..GraphNode::new(node_type, Point::default())
+    }
 }
 
 pub fn with_data(mut n: GraphNode, data: NodeData) -> GraphNode {
@@ -21,13 +25,22 @@ pub fn with_data(mut n: GraphNode, data: NodeData) -> GraphNode {
 
 /// A node holding `values` for its inputs.
 pub fn with_values(n: GraphNode, values: &[(&str, InputValue)]) -> GraphNode {
-    with_data(n, NodeData { values: values.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect(), ..Default::default() })
+    with_data(
+        n,
+        NodeData {
+            values: values.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect(),
+            ..Default::default()
+        },
+    )
 }
 
 /// A node of `definition_ref`'s group.
 pub fn instance(id: &str, definition_ref: &str, data: NodeData) -> GraphNode {
     GraphNode {
-        group: Some(GroupRef { definition_ref: definition_ref.to_owned(), locked: false }),
+        group: Some(GroupRef {
+            definition_ref: definition_ref.to_owned(),
+            locked: false,
+        }),
         ..with_data(node(id, "node-group"), data)
     }
 }
@@ -36,7 +49,10 @@ pub fn instance(id: &str, definition_ref: &str, data: NodeData) -> GraphNode {
 pub fn declare(id: &str, ty: WgslType, values: &[(&str, f64)]) -> GraphNode {
     let mut data = NodeData::default();
     data.types.insert("declare".to_owned(), ty);
-    data.values = values.iter().map(|(k, v)| ((*k).to_owned(), InputValue::from(*v))).collect();
+    data.values = values
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), InputValue::from(*v)))
+        .collect();
     with_data(node(id, "declare"), data)
 }
 
@@ -45,7 +61,10 @@ pub fn types(entries: &[(&str, WgslType)]) -> BTreeMap<String, WgslType> {
 }
 
 pub fn values(entries: &[(&str, f64)]) -> BTreeMap<String, InputValue> {
-    entries.iter().map(|(k, v)| ((*k).to_owned(), InputValue::from(*v))).collect()
+    entries
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), InputValue::from(*v)))
+        .collect()
 }
 
 /// `(source, source handle, target, target handle)`.
@@ -69,7 +88,9 @@ pub fn edges(links: &[Link]) -> Vec<GraphEdge> {
 /// A one-document project with `nodes` and `links`, plus a fragment output with id "out".
 pub fn root_project(nodes: Vec<GraphNode>, links: &[Link]) -> GraphProject {
     let root = GraphDocument {
-        nodes: std::iter::once(node("out", FRAG_OUTPUT)).chain(nodes).collect(),
+        nodes: std::iter::once(node("out", FRAG_OUTPUT))
+            .chain(nodes)
+            .collect(),
         edges: edges(links),
         ..Default::default()
     };
@@ -82,7 +103,11 @@ pub fn model_for(nodes: Vec<GraphNode>, links: &[Link]) -> GraphModel {
 
 /// The shader of the root document with every value compiled in.
 pub fn shader(model: &GraphModel) -> String {
-    model.generate_with(&ShaderOptions::default()).expect("generates").program.code
+    model
+        .generate_with(&ShaderOptions::default())
+        .expect("generates")
+        .program
+        .code
 }
 
 /// The shader, which must be valid WGSL.

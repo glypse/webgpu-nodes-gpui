@@ -6,7 +6,9 @@ use crate::testing::validate_wgsl;
 use crate::types::{InputValue, NodeData, WgslType, is_connection_compatible};
 
 /// Every setting combination of a node.
-fn setting_variants(settings: &[crate::types::NodeSetting]) -> Vec<Vec<(&'static str, &'static str)>> {
+fn setting_variants(
+    settings: &[crate::types::NodeSetting],
+) -> Vec<Vec<(&'static str, &'static str)>> {
     settings.iter().fold(vec![vec![]], |variants, setting| {
         variants
             .iter()
@@ -37,19 +39,30 @@ fn every_node_generates_valid_wgsl_for_every_input_type() {
         for settings in setting_variants(&descriptor.settings) {
             for source_type in &source_types {
                 let mut data: NodeData = descriptor.default_data.clone();
-                data.settings = settings.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+                data.settings = settings
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                    .collect();
                 let mut n = node("n", &descriptor.type_id);
                 n.data = data;
                 let mut nodes = vec![n];
                 let mut links: Vec<Link> = Vec::new();
-                let input_ids: Vec<(String, Vec<WgslType>)> =
-                    descriptor.inputs.iter().map(|i| (i.id.clone(), i.types.clone())).collect();
+                let input_ids: Vec<(String, Vec<WgslType>)> = descriptor
+                    .inputs
+                    .iter()
+                    .map(|i| (i.id.clone(), i.types.clone()))
+                    .collect();
                 if let Some(ty) = source_type {
                     nodes.push(declare("src", *ty, &[("x", 1.0), ("y", 2.0)]));
                     let mut any = false;
                     for (id, types) in &input_ids {
                         if types.iter().any(|t| is_connection_compatible(*ty, *t)) {
-                            links.push(("src", "value", "n", Box::leak(id.clone().into_boxed_str())));
+                            links.push((
+                                "src",
+                                "value",
+                                "n",
+                                Box::leak(id.clone().into_boxed_str()),
+                            ));
                             any = true;
                         }
                     }
@@ -58,12 +71,23 @@ fn every_node_generates_valid_wgsl_for_every_input_type() {
                     }
                 }
                 if let Some(first) = descriptor.outputs.first() {
-                    links.push(("n", Box::leak(first.id.clone().into_boxed_str()), "out", "color"));
+                    links.push((
+                        "n",
+                        Box::leak(first.id.clone().into_boxed_str()),
+                        "out",
+                        "color",
+                    ));
                 }
                 let model = model_for(nodes, &links);
                 let name = format!("{}({settings:?}) <- {source_type:?}", descriptor.type_id);
                 cases += 1;
-                for options in [ShaderOptions::default(), ShaderOptions { uniform_scopes: vec![ROOT_ID.to_owned()], ..Default::default() }] {
+                for options in [
+                    ShaderOptions::default(),
+                    ShaderOptions {
+                        uniform_scopes: vec![ROOT_ID.to_owned()],
+                        ..Default::default()
+                    },
+                ] {
                     match model.generate_with(&options) {
                         Err(e) => failures.push(format!("{name}: {e:?}")),
                         Ok(program) => {
@@ -78,7 +102,12 @@ fn every_node_generates_valid_wgsl_for_every_input_type() {
         }
     }
     assert!(cases > 500, "only {cases} cases");
-    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -94,7 +123,11 @@ fn formats_every_kind_of_literal() {
 
 fn output_model(ty: WgslType) -> GraphModel {
     model_for(
-        vec![declare("d", ty, &[("x", 0.25), ("y", 0.5), ("z", 0.75), ("w", 0.5)])],
+        vec![declare(
+            "d",
+            ty,
+            &[("x", 0.25), ("y", 0.5), ("z", 0.75), ("w", 0.5)],
+        )],
         &[("d", "value", "out", "color")],
     )
 }
@@ -120,7 +153,10 @@ fn the_output_widens_narrower_values_to_an_opaque_vec3f() {
 fn a_fallback_takes_its_default_outside_groups_when_nothing_feeds_the_value() {
     let model = model_for(
         vec![node("f", "fallback"), node("t", "time")],
-        &[("t", "seconds", "f", "default"), ("f", "result", "out", "color")],
+        &[
+            ("t", "seconds", "f", "default"),
+            ("f", "result", "out", "color"),
+        ],
     );
     assert!(shader(&model).contains("let v_f = v_t_seconds;"));
 }
@@ -129,18 +165,29 @@ mod aspect_uv {
     use super::*;
     use crate::codegen::ident_suffix;
     use crate::library::{LibraryEntry, entries};
-    use crate::types::{InputControl, GroupHandleDef};
+    use crate::types::{GroupHandleDef, InputControl};
 
     fn entry() -> &'static LibraryEntry {
-        entries().iter().find(|e| e.id == "std-aspect-uv").expect("in the library")
+        entries()
+            .iter()
+            .find(|e| e.id == "std-aspect-uv")
+            .expect("in the library")
     }
 
     fn handle(side: &[GroupHandleDef], label: &str) -> String {
-        side.iter().find(|h| h.label == label).map(|h| h.id.clone()).expect("a handle of that label")
+        side.iter()
+            .find(|h| h.label == label)
+            .map(|h| h.id.clone())
+            .expect("a handle of that label")
     }
 
     fn var_of(node_type: &str) -> String {
-        let nodes: Vec<_> = entry().definition.nodes.iter().filter(|n| n.node_type == node_type).collect();
+        let nodes: Vec<_> = entry()
+            .definition
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == node_type)
+            .collect();
         assert_eq!(nodes.len(), 1, "one {node_type}");
         format!("v_{}", ident_suffix(&nodes[0].id))
     }
@@ -175,18 +222,35 @@ mod aspect_uv {
     #[test]
     fn falls_back_to_the_fragment_uv_when_unlinked() {
         let i = ids();
-        let model = model_for(vec![aspect("a", &[(&i.mode, 1.0)])], &[("a", leak(&i.out), "out", "color")]);
+        let model = model_for(
+            vec![aspect("a", &[(&i.mode, 1.0)])],
+            &[("a", leak(&i.out), "out", "color")],
+        );
         let code = valid_shader(&model);
-        assert!(code.contains(&format!("let v_a = {}__d0__e1_1(", i.function)), "{code}");
-        assert!(code.contains(&format!("let {} = {};", var_of("fallback"), var_of("uv"))), "{code}");
-        assert!(!code.contains(&format!("fn {}__e1_1(", i.function)), "{code}");
+        assert!(
+            code.contains(&format!("let v_a = {}__d0__e1_1(", i.function)),
+            "{code}"
+        );
+        assert!(
+            code.contains(&format!("let {} = {};", var_of("fallback"), var_of("uv"))),
+            "{code}"
+        );
+        assert!(
+            !code.contains(&format!("fn {}__e1_1(", i.function)),
+            "{code}"
+        );
     }
 
     #[test]
     fn uses_linked_coordinates_one_function_per_linked_and_unlinked_combination() {
         let i = ids();
         let model = model_for(
-            vec![node("u", "uv"), aspect("a", &[]), aspect("b", &[]), node("sum", "add")],
+            vec![
+                node("u", "uv"),
+                aspect("a", &[]),
+                aspect("b", &[]),
+                node("sum", "add"),
+            ],
             &[
                 ("u", "uv", "a", leak(&i.uv)),
                 ("a", leak(&i.out), "sum", "operands"),
@@ -195,16 +259,31 @@ mod aspect_uv {
             ],
         );
         let code = valid_shader(&model);
-        assert!(code.contains(&format!("fn {}__e1_0(", i.function)), "{code}");
-        assert!(code.contains(&format!("fn {}__d0__e1_0(", i.function)), "{code}");
+        assert!(
+            code.contains(&format!("fn {}__e1_0(", i.function)),
+            "{code}"
+        );
+        assert!(
+            code.contains(&format!("fn {}__d0__e1_0(", i.function)),
+            "{code}"
+        );
         let ident = i.function.trim_start_matches("group_");
-        assert_eq!(code.split(&format!("struct GroupOutputs_{ident} ")).count(), 2, "{code}");
+        assert_eq!(
+            code.split(&format!("struct GroupOutputs_{ident} ")).count(),
+            2,
+            "{code}"
+        );
     }
 
     #[test]
     fn only_computes_the_scale_of_the_picked_mode() {
         let i = ids();
-        let at = |mode| model_for(vec![aspect("a", &[(&i.mode, mode)])], &[("a", leak(&i.out), "out", "color")]);
+        let at = |mode| {
+            model_for(
+                vec![aspect("a", &[(&i.mode, mode)])],
+                &[("a", leak(&i.out), "out", "color")],
+            )
+        };
         let stretch = valid_shader(&at(2.0));
         assert!(!stretch.contains("runtime_frame.resolution"), "{stretch}");
         assert!(shader(&at(1.0)).contains("runtime_frame.resolution"));
@@ -216,10 +295,17 @@ mod aspect_uv {
         let model = model_for(vec![aspect("a", &[])], &[]);
         let inputs = model.resolve_node_inputs("a");
         let mode = inputs.iter().find(|x| x.id == i.mode).expect("mode");
-        let Some(InputControl::Enum { variants }) = &mode.control else { panic!("an enum") };
+        let Some(InputControl::Enum { variants }) = &mode.control else {
+            panic!("an enum")
+        };
         let labels: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
         assert_eq!(labels, ["Contain (Fit)", "Cover (Fill)", "Stretch"]);
-        assert!(inputs.iter().find(|x| x.id == i.uv).is_some_and(|x| x.fallback));
+        assert!(
+            inputs
+                .iter()
+                .find(|x| x.id == i.uv)
+                .is_some_and(|x| x.fallback)
+        );
         assert!(!mode.fallback);
     }
 
@@ -228,7 +314,10 @@ mod aspect_uv {
         let i = ids();
         let model = model_for(
             vec![node("t", "time"), aspect("a", &[])],
-            &[("t", "seconds", "a", leak(&i.mode)), ("a", leak(&i.out), "out", "color")],
+            &[
+                ("t", "seconds", "a", leak(&i.mode)),
+                ("a", leak(&i.out), "out", "color"),
+            ],
         );
         let code = valid_shader(&model);
         assert!(code.contains("u32(v_t_seconds))"), "{code}");

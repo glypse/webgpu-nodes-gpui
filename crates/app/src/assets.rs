@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Image, ImageFormat, ImageSource, Pixels, Point,
-    InteractiveElement as _, IntoElement, ParentElement as _, PathPromptOptions, PromptLevel, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, StyleRefinement, Subscription, WeakEntity, Window,
-    StyledImage as _, ObjectFit, div, img, px,
+    AnyElement, App, AppContext as _, Context, Entity, Image, ImageFormat, ImageSource,
+    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, PathPromptOptions, Pixels,
+    Point, PromptLevel, Render, SharedString, StatefulInteractiveElement as _, StyleRefinement,
+    Styled as _, StyledImage as _, Subscription, WeakEntity, Window, div, img, px,
 };
+use gpui_component::Sizable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
-use gpui_component::Sizable as _;
 use runtime::{MediaStatus, SystemVideoProbe};
 use shader_graph::assets::{Asset, AssetKind, ImportFile, describe_asset};
 use shader_graph::graph::GraphModel;
@@ -36,8 +36,15 @@ impl PickedFile {
     pub fn read(path: &Path) -> Result<Self, String> {
         let name = crate::project::file_name(path);
         let bytes = read_capped(path).map_err(|e| format!("{name}: {e}"))?;
-        let mime = mime_guess::from_path(path).first_or_octet_stream().essence_str().to_owned();
-        Ok(Self { name, mime, bytes: Arc::new(bytes) })
+        let mime = mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .essence_str()
+            .to_owned();
+        Ok(Self {
+            name,
+            mime,
+            bytes: Arc::new(bytes),
+        })
     }
 }
 
@@ -53,9 +60,15 @@ pub fn import(model: &mut GraphModel, picked: &[PickedFile]) -> Imports {
     let mut imports = Imports::default();
     model.batched(|model| {
         for file in picked {
-            let input = ImportFile { name: &file.name, mime: &file.mime, bytes: &file.bytes };
+            let input = ImportFile {
+                name: &file.name,
+                mime: &file.mime,
+                bytes: &file.bytes,
+            };
             match model.import_file(input, &SystemVideoProbe) {
-                Ok(imported) => imports.files.push((imported.asset.id().to_owned(), file.bytes.clone())),
+                Ok(imported) => imports
+                    .files
+                    .push((imported.asset.id().to_owned(), file.bytes.clone())),
                 Err(error) => imports.problems.push(format!("{}: {error}", file.name)),
             }
         }
@@ -85,10 +98,20 @@ pub fn pick_files<T: 'static, R: Send + 'static>(
     read: impl FnOnce(&[PathBuf]) -> R + Send + 'static,
     then: impl FnOnce(R, &mut Window, &mut App) + 'static,
 ) {
-    let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple, prompt: None });
+    let paths = cx.prompt_for_paths(PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple,
+        prompt: None,
+    });
     cx.spawn_in(window, async move |_, cx| {
-        let Ok(Ok(Some(paths))) = paths.await else { return };
-        let outcome = cx.background_executor().spawn(async move { read(&paths) }).await;
+        let Ok(Ok(Some(paths))) = paths.await else {
+            return;
+        };
+        let outcome = cx
+            .background_executor()
+            .spawn(async move { read(&paths) })
+            .await;
         cx.update(|window, cx| then(outcome, window, cx)).ok();
     })
     .detach();
@@ -127,10 +150,19 @@ fn import_into(
         })
     });
     if let (Some(node), Some((id, _))) = (node, imports.files.first()) {
-        let reads_it = editor.model().node(node).and_then(|n| n.data.asset.as_deref()) == Some(id.as_str());
+        let reads_it = editor
+            .model()
+            .node(node)
+            .and_then(|n| n.data.asset.as_deref())
+            == Some(id.as_str());
         if !reads_it {
-            let name = editor.model().asset(id).map_or_else(String::new, |a| a.name().to_owned());
-            imports.problems.push(format!("{name}: this node can't read it, being of another kind."));
+            let name = editor
+                .model()
+                .asset(id)
+                .map_or_else(String::new, |a| a.name().to_owned());
+            imports.problems.push(format!(
+                "{name}: this node can't read it, being of another kind."
+            ));
         }
     }
     let files = imports.files.clone();
@@ -179,7 +211,9 @@ fn import_read(
     cx: &mut App,
 ) {
     let (picked, mut problems) = read;
-    let imports = editor.update(cx, |e, cx| import_into(e, playback, &picked, node, window, cx));
+    let imports = editor.update(cx, |e, cx| {
+        import_into(e, playback, &picked, node, window, cx)
+    });
     problems.extend(imports.problems);
     report_problems(window, &problems, cx);
 }
@@ -213,7 +247,13 @@ pub fn report_problems(window: &mut Window, problems: &[String], cx: &mut App) {
     for problem in problems {
         let _ = write!(detail, "\n• {problem}");
     }
-    drop(window.prompt(PromptLevel::Warning, "Some files couldn't be used", Some(&detail), &["OK"], cx));
+    drop(window.prompt(
+        PromptLevel::Warning,
+        "Some files couldn't be used",
+        Some(&detail),
+        &["OK"],
+        cx,
+    ));
 }
 
 /// The media type of an image file's bytes, for showing them.
@@ -322,19 +362,23 @@ impl Tile {
         });
         input.update(cx, |input, cx| input.focus(window, cx));
         let id = self.asset.id().to_owned();
-        let subscription = cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, _window, cx| {
-            guard::guard("rename asset", || match event {
-                InputEvent::PressEnter { .. } | InputEvent::Blur => {
-                    let text = input.read(cx).value().to_string();
-                    this.rename = None;
-                    if let Some(panel) = this.panel.upgrade() {
-                        panel.update(cx, |panel, cx| panel.rename(&id, &text, cx));
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            move |this, input, event: &InputEvent, _window, cx| {
+                guard::guard("rename asset", || match event {
+                    InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                        let text = input.read(cx).value().to_string();
+                        this.rename = None;
+                        if let Some(panel) = this.panel.upgrade() {
+                            panel.update(cx, |panel, cx| panel.rename(&id, &text, cx));
+                        }
+                        cx.notify();
                     }
-                    cx.notify();
-                }
-                _ => {}
-            });
-        });
+                    _ => {}
+                });
+            },
+        );
         self.rename = Some((input, subscription));
         cx.notify();
     }
@@ -353,16 +397,24 @@ impl Render for Tile {
                 Some(MediaStatus::Failed(message)) => Some(message.clone()),
                 _ => None,
             };
-            let preview: AnyElement = match (&self.thumbnail, self.asset.kind(), missing || failed) {
-                (_, _, true) => Icon::new(IconName::Warning).size(px(20.0)).into_any_element(),
+            let preview: AnyElement = match (&self.thumbnail, self.asset.kind(), missing || failed)
+            {
+                (_, _, true) => Icon::new(IconName::Warning)
+                    .size(px(20.0))
+                    .into_any_element(),
                 (Some(image), AssetKind::Image, false) => img(ImageSource::Image(image.clone()))
                     .size_full()
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
-                _ => Icon::new(IconName::FilmStrip).size(px(20.0)).into_any_element(),
+                _ => Icon::new(IconName::FilmStrip)
+                    .size(px(20.0))
+                    .into_any_element(),
             };
             let name: AnyElement = match &self.rename {
-                Some((input, _)) => Input::new(input).small().appearance(false).into_any_element(),
+                Some((input, _)) => Input::new(input)
+                    .small()
+                    .appearance(false)
+                    .into_any_element(),
                 None => div()
                     .truncate()
                     .child(self.asset.name().to_owned())
@@ -371,7 +423,10 @@ impl Render for Tile {
             let tile_weak = cx.entity().downgrade();
             let click_tile = tile_weak.clone();
             let tile_id = format!("asset-{id}");
-            let drag = AssetDrag { id: id.clone(), name: self.asset.name().to_owned() };
+            let drag = AssetDrag {
+                id: id.clone(),
+                name: self.asset.name().to_owned(),
+            };
             div()
                 .id(SharedString::from(tile_id))
                 .debug_selector(|| "asset-tile".into())
@@ -383,7 +438,9 @@ impl Render for Tile {
                 .rounded_md()
                 .hover(|s| s.bg(theme.colors.accent.opacity(0.5)))
                 .on_drag(drag, |drag, _, _, cx| {
-                    cx.new(|_| AssetDragPreview { name: SharedString::from(drag.name.clone()) })
+                    cx.new(|_| AssetDragPreview {
+                        name: SharedString::from(drag.name.clone()),
+                    })
                 })
                 .on_click(move |event, window, cx| {
                     guard::guard("asset tile click", || {
@@ -432,22 +489,34 @@ impl Render for Tile {
                     let (replace_id, delete_id) = (id.clone(), id.clone());
                     let rename_tile = tile_weak.clone();
                     menu.min_w(px(176.0))
-                        .item(PopupMenuItem::new("Rename").on_click(popup::on_select(move |window, cx| {
-                            if let Some(tile) = rename_tile.upgrade() {
-                                tile.update(cx, |tile, cx| tile.start_rename(window, cx));
-                            }
-                        })))
-                        .item(PopupMenuItem::new("Replace file…").on_click(popup::on_select(move |window, cx| {
-                            if let Some(panel) = replace_panel.upgrade() {
-                                panel.update(cx, |panel, cx| panel.replace(&replace_id, window, cx));
-                            }
-                        })))
+                        .item(PopupMenuItem::new("Rename").on_click(popup::on_select(
+                            move |window, cx| {
+                                if let Some(tile) = rename_tile.upgrade() {
+                                    tile.update(cx, |tile, cx| tile.start_rename(window, cx));
+                                }
+                            },
+                        )))
+                        .item(
+                            PopupMenuItem::new("Replace file…").on_click(popup::on_select(
+                                move |window, cx| {
+                                    if let Some(panel) = replace_panel.upgrade() {
+                                        panel.update(cx, |panel, cx| {
+                                            panel.replace(&replace_id, window, cx)
+                                        });
+                                    }
+                                },
+                            )),
+                        )
                         .separator()
-                        .item(PopupMenuItem::new("Delete").on_click(popup::on_select(move |window, cx| {
-                            if let Some(panel) = delete_panel.upgrade() {
-                                panel.update(cx, |panel, cx| panel.delete(&delete_id, window, cx));
-                            }
-                        })))
+                        .item(PopupMenuItem::new("Delete").on_click(popup::on_select(
+                            move |window, cx| {
+                                if let Some(panel) = delete_panel.upgrade() {
+                                    panel.update(cx, |panel, cx| {
+                                        panel.delete(&delete_id, window, cx)
+                                    });
+                                }
+                            },
+                        )))
                 })
         })
     }
@@ -473,12 +542,23 @@ fn media_signature(playback: &Playback) -> MediaSignature {
     playback
         .asset_files()
         .iter()
-        .map(|(id, bytes)| (id.clone(), Arc::as_ptr(bytes) as usize, playback.media_status(id)))
+        .map(|(id, bytes)| {
+            (
+                id.clone(),
+                Arc::as_ptr(bytes) as usize,
+                playback.media_status(id),
+            )
+        })
         .collect()
 }
 
 impl AssetsPanel {
-    pub fn new(editor: Entity<Editor>, playback: Entity<Playback>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        editor: Entity<Editor>,
+        playback: Entity<Playback>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |this, _, event: &EditorEvent, _, cx| {
                 guard::guard("assets edited", || {
@@ -496,8 +576,13 @@ impl AssetsPanel {
                 });
             }),
         ];
-        let mut panel =
-            Self { editor, playback, tiles: Vec::new(), files_seen: Vec::new(), _subscriptions: subscriptions };
+        let mut panel = Self {
+            editor,
+            playback,
+            tiles: Vec::new(),
+            files_seen: Vec::new(),
+            _subscriptions: subscriptions,
+        };
         panel.refresh(cx);
         panel
     }
@@ -512,8 +597,11 @@ impl AssetsPanel {
         let files = self.playback.read(cx).asset_files().clone();
         self.files_seen = media_signature(self.playback.read(cx));
         let before: Vec<_> = self.tiles.iter().map(|t| t.entity_id()).collect();
-        let mut existing: HashMap<String, Entity<Tile>> =
-            self.tiles.drain(..).map(|tile| (tile.read(cx).asset.id().to_owned(), tile)).collect();
+        let mut existing: HashMap<String, Entity<Tile>> = self
+            .tiles
+            .drain(..)
+            .map(|tile| (tile.read(cx).asset.id().to_owned(), tile))
+            .collect();
         let mut tiles = Vec::with_capacity(assets.len());
         for asset in &assets {
             let usage = usages.get(asset.id()).copied().unwrap_or(0);
@@ -522,7 +610,15 @@ impl AssetsPanel {
             let tile = existing.remove(asset.id()).unwrap_or_else(|| {
                 let panel = me.clone();
                 let asset = asset.clone();
-                cx.new(|_| Tile { panel, asset, file: None, usage: 0, status: None, thumbnail: None, rename: None })
+                cx.new(|_| Tile {
+                    panel,
+                    asset,
+                    file: None,
+                    usage: 0,
+                    status: None,
+                    thumbnail: None,
+                    rename: None,
+                })
             });
             tile.update(cx, |tile, cx| tile.set(asset, file, usage, status, cx));
             tiles.push(tile);
@@ -536,18 +632,41 @@ impl AssetsPanel {
     fn rename(&mut self, id: &str, name: &str, cx: &mut Context<Self>) {
         let name = name.to_owned();
         let id = id.to_owned();
-        self.editor.update(cx, |e, cx| e.edit(cx, |m| m.rename_asset(&id, &name)));
+        self.editor
+            .update(cx, |e, cx| e.edit(cx, |m| m.rename_asset(&id, &name)));
     }
 
     fn delete(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let usage = self.editor.read(cx).model().asset_usages().get(id).copied().unwrap_or(0);
-        let name = self.editor.read(cx).model().asset(id).map(|a| a.name().to_owned()).unwrap_or_default();
+        let usage = self
+            .editor
+            .read(cx)
+            .model()
+            .asset_usages()
+            .get(id)
+            .copied()
+            .unwrap_or(0);
+        let name = self
+            .editor
+            .read(cx)
+            .model()
+            .asset(id)
+            .map(|a| a.name().to_owned())
+            .unwrap_or_default();
         if usage == 0 {
             self.remove(id, cx);
             return;
         }
-        let detail = format!("{}, which will read a transparent image instead.\nUndo brings it back.", usage_text(usage));
-        let answer = window.prompt(PromptLevel::Warning, &format!("Delete {name}?"), Some(&detail), &["Delete", "Cancel"], cx);
+        let detail = format!(
+            "{}, which will read a transparent image instead.\nUndo brings it back.",
+            usage_text(usage)
+        );
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            &format!("Delete {name}?"),
+            Some(&detail),
+            &["Delete", "Cancel"],
+            cx,
+        );
         let id = id.to_owned();
         cx.spawn_in(window, async move |this, cx| {
             if answer.await == Ok(0) {
@@ -559,7 +678,8 @@ impl AssetsPanel {
 
     fn remove(&mut self, id: &str, cx: &mut Context<Self>) {
         let id = id.to_owned();
-        self.editor.update(cx, |e, cx| e.edit(cx, |m| m.remove_asset(&id)));
+        self.editor
+            .update(cx, |e, cx| e.edit(cx, |m| m.remove_asset(&id)));
     }
 
     /// Gives the asset another file of its kind, keeping its id, from a file the user picks.
@@ -590,7 +710,15 @@ fn replace_file(
     cx: &mut App,
 ) {
     let kind = editor.read(cx).model().asset(id).map(Asset::kind);
-    let replacement = describe_asset(id, ImportFile { name: &file.name, mime: &file.mime, bytes: &file.bytes }, &SystemVideoProbe);
+    let replacement = describe_asset(
+        id,
+        ImportFile {
+            name: &file.name,
+            mime: &file.mime,
+            bytes: &file.bytes,
+        },
+        &SystemVideoProbe,
+    );
     match (kind, replacement) {
         (Some(kind), Ok(asset)) if asset.kind() == kind => {
             editor.update(cx, |e, cx| e.edit(cx, |m| m.replace_asset(asset)));
@@ -604,7 +732,10 @@ fn replace_file(
         }
         _ => report_problems(
             window,
-            &[format!("{}: it can't replace this asset, being unreadable or of another kind.", file.name)],
+            &[format!(
+                "{}: it can't replace this asset, being unreadable or of another kind.",
+                file.name
+            )],
             cx,
         ),
     }
@@ -658,7 +789,15 @@ impl Render for AssetsPanel {
                 .flex_col()
                 .bg(theme.colors.background)
                 .child(div().flex().justify_end().p_1().child(import))
-                .child(div().id("assets-body").flex_1().min_h_0().overflow_y_scroll().p_2().child(body))
+                .child(
+                    div()
+                        .id("assets-body")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .p_2()
+                        .child(body),
+                )
         })
     }
 }
@@ -679,25 +818,37 @@ mod tests {
     fn png(width: u32) -> Vec<u8> {
         let image = image::RgbaImage::from_pixel(width, 1, image::Rgba([9, 9, 9, 255]));
         let mut out = std::io::Cursor::new(Vec::new());
-        image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+        image
+            .write_to(&mut out, image::ImageFormat::Png)
+            .expect("encodes");
         out.into_inner()
     }
 
     fn picked(name: &str, bytes: Vec<u8>) -> PickedFile {
-        PickedFile { name: name.into(), mime: "image/png".into(), bytes: Arc::new(bytes) }
+        PickedFile {
+            name: name.into(),
+            mime: "image/png".into(),
+            bytes: Arc::new(bytes),
+        }
     }
 
     #[test]
     fn importing_adds_the_assets_and_is_one_undo_step() {
         let mut model = GraphModel::default();
-        let imports = import(&mut model, &[picked("a.png", png(1)), picked("b.png", png(2))]);
+        let imports = import(
+            &mut model,
+            &[picked("a.png", png(1)), picked("b.png", png(2))],
+        );
         assert_eq!(model.assets().len(), 2);
         assert_eq!(imports.files.len(), 2);
         assert!(imports.problems.is_empty());
         assert!(model.has_unsaved_changes());
 
         assert!(model.undo());
-        assert!(model.assets().is_empty(), "one undo takes back the whole import");
+        assert!(
+            model.assets().is_empty(),
+            "one undo takes back the whole import"
+        );
         assert!(!model.has_unsaved_changes());
     }
 
@@ -713,11 +864,19 @@ mod tests {
     #[test]
     fn a_file_that_cant_be_imported_is_reported_and_adds_nothing() {
         let mut model = GraphModel::default();
-        let notes = PickedFile { name: "notes.txt".into(), mime: "text/plain".into(), bytes: Arc::new(b"hi".to_vec()) };
+        let notes = PickedFile {
+            name: "notes.txt".into(),
+            mime: "text/plain".into(),
+            bytes: Arc::new(b"hi".to_vec()),
+        };
         let imports = import(&mut model, &[notes]);
         assert!(imports.files.is_empty());
         assert_eq!(imports.problems.len(), 1);
-        assert!(imports.problems[0].starts_with("notes.txt: "), "{:?}", imports.problems);
+        assert!(
+            imports.problems[0].starts_with("notes.txt: "),
+            "{:?}",
+            imports.problems
+        );
         assert!(model.assets().is_empty());
         assert!(!model.has_unsaved_changes());
     }
@@ -728,9 +887,15 @@ mod tests {
         let imports = import(&mut model, &[picked("a.png", png(1))]);
         let id = imports.files[0].0.clone();
         model.rename_asset(&id, "  Sky  ");
-        assert_eq!(model.asset(&id).map(|a| a.name().to_owned()), Some("Sky".to_owned()));
+        assert_eq!(
+            model.asset(&id).map(|a| a.name().to_owned()),
+            Some("Sky".to_owned())
+        );
         model.rename_asset(&id, "   ");
-        assert_eq!(model.asset(&id).map(|a| a.name().to_owned()), Some("Sky".to_owned()));
+        assert_eq!(
+            model.asset(&id).map(|a| a.name().to_owned()),
+            Some("Sky".to_owned())
+        );
         model.remove_asset(&id);
         assert!(model.asset(&id).is_none());
     }
@@ -758,7 +923,12 @@ mod tests {
     /// An editor, playback and the Assets panel over them, in a window.
     fn panel(
         cx: &mut gpui::TestAppContext,
-    ) -> (Entity<Editor>, Entity<Playback>, Entity<AssetsPanel>, gpui::VisualTestContext) {
+    ) -> (
+        Entity<Editor>,
+        Entity<Playback>,
+        Entity<AssetsPanel>,
+        gpui::VisualTestContext,
+    ) {
         cx.update(theme::init);
         let (editor, vcx) = cx.add_window_view(Editor::new);
         let playback = vcx.new(|_| Playback::new());
@@ -778,18 +948,30 @@ mod tests {
         let (editor, playback, _panel, mut vcx) = panel(cx);
         let node = editor.update(&mut vcx, |e, cx| {
             let mut id = String::new();
-            e.edit(cx, |m| id = m.add_node(IMAGE, Point::new(0.0, 0.0)).expect("adds"));
+            e.edit(cx, |m| {
+                id = m.add_node(IMAGE, Point::new(0.0, 0.0)).expect("adds")
+            });
             id
         });
-        let dir = std::env::temp_dir().join(format!("wgnodes-import-for-node-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wgnodes-import-for-node-{}", std::process::id()));
         let path = scratch_png(&dir, "Photo.png", 3);
 
         vcx.update(|window, cx| {
-            import_read(&editor, &playback, read_paths(std::slice::from_ref(&path)), Some(&node), window, cx)
+            import_read(
+                &editor,
+                &playback,
+                read_paths(std::slice::from_ref(&path)),
+                Some(&node),
+                window,
+                cx,
+            )
         });
         vcx.run_until_parked();
         let read = |vcx: &mut gpui::VisualTestContext| {
-            editor.read_with(vcx, |e, _| e.model().node(&node).and_then(|n| n.data.asset.clone()))
+            editor.read_with(vcx, |e, _| {
+                e.model().node(&node).and_then(|n| n.data.asset.clone())
+            })
         };
         assert!(read(&mut vcx).is_some(), "the node reads the imported file");
         assert_eq!(asset_count(&editor, &mut vcx), 1);
@@ -807,11 +989,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wgnodes-import-{}", std::process::id()));
         let path = scratch_png(&dir, "Photo.png", 3);
 
-        vcx.update(|window, cx| import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx));
+        vcx.update(|window, cx| {
+            import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx)
+        });
         vcx.run_until_parked();
         assert_eq!(asset_count(&editor, &mut vcx), 1);
-        assert_eq!(panel.read_with(&vcx, |p, _| p.tiles.len()), 1, "the grid shows the new asset");
-        assert_eq!(playback.read_with(&vcx, |p, _| p.asset_files().len()), 1, "its file is kept");
+        assert_eq!(
+            panel.read_with(&vcx, |p, _| p.tiles.len()),
+            1,
+            "the grid shows the new asset"
+        );
+        assert_eq!(
+            playback.read_with(&vcx, |p, _| p.asset_files().len()),
+            1,
+            "its file is kept"
+        );
         assert!(editor.read_with(&vcx, |e, _| e.has_unsaved_changes()));
 
         editor.update(&mut vcx, |e, cx| e.undo(cx));
@@ -828,8 +1020,12 @@ mod tests {
         let path = scratch_png(&dir, "Photo.png", 3);
         let copy = scratch_png(&dir.join("again"), "Copy.png", 3);
 
-        vcx.update(|window, cx| import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx));
-        vcx.update(|window, cx| import_paths(&editor, &playback, std::slice::from_ref(&copy), window, cx));
+        vcx.update(|window, cx| {
+            import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx)
+        });
+        vcx.update(|window, cx| {
+            import_paths(&editor, &playback, std::slice::from_ref(&copy), window, cx)
+        });
         vcx.run_until_parked();
         assert_eq!(asset_count(&editor, &mut vcx), 1);
         fs::remove_dir_all(dir).ok();
@@ -840,13 +1036,21 @@ mod tests {
         let (editor, playback, panel, mut vcx) = panel(cx);
         let dir = std::env::temp_dir().join(format!("wgnodes-rename-{}", std::process::id()));
         let path = scratch_png(&dir, "Photo.png", 3);
-        vcx.update(|window, cx| import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx));
+        vcx.update(|window, cx| {
+            import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx)
+        });
         vcx.run_until_parked();
         let id = editor.read_with(&vcx, |e, _| e.model().assets()[0].id().to_owned());
 
         panel.update(&mut vcx, |p, cx| p.rename(&id, "Sky", cx));
         vcx.run_until_parked();
-        assert_eq!(editor.read_with(&vcx, |e, _| e.model().asset(&id).map(|a| a.name().to_owned())), Some("Sky".into()));
+        assert_eq!(
+            editor.read_with(&vcx, |e, _| e
+                .model()
+                .asset(&id)
+                .map(|a| a.name().to_owned())),
+            Some("Sky".into())
+        );
 
         panel.update(&mut vcx, |p, cx| p.remove(&id, cx));
         vcx.run_until_parked();
@@ -861,7 +1065,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wgnodes-replace-{}", std::process::id()));
         let path = scratch_png(&dir, "Photo.png", 3);
         let other = scratch_png(&dir.join("other"), "Other.png", 5);
-        vcx.update(|window, cx| import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx));
+        vcx.update(|window, cx| {
+            import_paths(&editor, &playback, std::slice::from_ref(&path), window, cx)
+        });
         vcx.run_until_parked();
         let (id, hash) = editor.read_with(&vcx, |e, _| {
             let asset = e.model().assets()[0].clone();
@@ -874,7 +1080,11 @@ mod tests {
         let (count, new_hash, size) = editor.read_with(&vcx, |e, _| {
             let model = e.model();
             let asset = model.asset(&id).expect("the asset keeps its id");
-            (model.assets().len(), asset.hash().to_owned(), asset.file_info().width)
+            (
+                model.assets().len(),
+                asset.hash().to_owned(),
+                asset.file_info().width,
+            )
         });
         assert_eq!(count, 1);
         assert_ne!(new_hash, hash);
@@ -882,4 +1092,3 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 }
-

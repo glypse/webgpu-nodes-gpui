@@ -8,26 +8,48 @@ use crate::types::{ColorDisplay, GroupHandleDef, TypeOwner, WgslType};
 /// `owner` within the types its variable may take, or `None` once it owns
 /// none of them, or all: either way it hides nothing.
 pub(super) fn fit_type_owner(owner: &TypeOwner, allowed: &[WgslType]) -> Option<TypeOwner> {
-    let types: Vec<WgslType> = allowed.iter().copied().filter(|t| owner.types.contains(t)).collect();
-    (!types.is_empty() && types.len() != allowed.len())
-        .then(|| TypeOwner { variable: owner.variable.clone(), types })
+    let types: Vec<WgslType> = allowed
+        .iter()
+        .copied()
+        .filter(|t| owner.types.contains(t))
+        .collect();
+    (!types.is_empty() && types.len() != allowed.len()).then(|| TypeOwner {
+        variable: owner.variable.clone(),
+        types,
+    })
 }
 
 impl GraphModel {
     /// Edit a vec3f / vec4f group input as a colour, or as numbers with `None`.
-    pub fn set_handle_display(&mut self, definition_ref: &str, handle_id: &str, display: Option<ColorDisplay>) {
-        self.update_handle(definition_ref, GroupSide::Input, handle_id, |h| h.display = display);
+    pub fn set_handle_display(
+        &mut self,
+        definition_ref: &str,
+        handle_id: &str,
+        display: Option<ColorDisplay>,
+    ) {
+        self.update_handle(definition_ref, GroupSide::Input, handle_id, |h| {
+            h.display = display
+        });
     }
 
     /// Show a group input only while one of the group's type variables has
     /// one of some types, or whatever the types with `None`.
-    pub fn set_handle_type_owner(&mut self, definition_ref: &str, handle_id: &str, type_owner: Option<TypeOwner>) {
-        let Some(def) = self.project.document(definition_ref) else { return };
+    pub fn set_handle_type_owner(
+        &mut self,
+        definition_ref: &str,
+        handle_id: &str,
+        type_owner: Option<TypeOwner>,
+    ) {
+        let Some(def) = self.project.document(definition_ref) else {
+            return;
+        };
         let variables = def.type_variables.clone();
         let owner = match &type_owner {
             None => None,
             Some(o) => {
-                let Some(variable) = variables.iter().find(|v| v.id == o.variable) else { return };
+                let Some(variable) = variables.iter().find(|v| v.id == o.variable) else {
+                    return;
+                };
                 if !variable.types.iter().any(|t| o.types.contains(t)) {
                     return;
                 }
@@ -43,14 +65,23 @@ impl GraphModel {
     /// Decide which variants of a group's enum input are offered by the type
     /// of one of the group's type variables, all of them to begin with; or,
     /// with `None`, offer them whatever the types.
-    pub fn set_variants_by(&mut self, definition_ref: &str, handle_id: &str, variable_id: Option<&str>) {
-        let Some(def) = self.project.document(definition_ref) else { return };
+    pub fn set_variants_by(
+        &mut self,
+        definition_ref: &str,
+        handle_id: &str,
+        variable_id: Option<&str>,
+    ) {
+        let Some(def) = self.project.document(definition_ref) else {
+            return;
+        };
         if variable_id.is_some_and(|id| !def.type_variables.iter().any(|v| v.id == id)) {
             return;
         }
         let by = variable_id.map(str::to_owned);
         self.update_handle(definition_ref, GroupSide::Input, handle_id, |h| {
-            let Some(variants) = &mut h.variants else { return };
+            let Some(variants) = &mut h.variants else {
+                return;
+            };
             for v in variants {
                 v.types = None;
             }
@@ -69,21 +100,35 @@ impl GraphModel {
         ty: WgslType,
         offered: bool,
     ) {
-        let Some(def) = self.project.document(definition_ref) else { return };
+        let Some(def) = self.project.document(definition_ref) else {
+            return;
+        };
         let variables = def.type_variables.clone();
         self.update_handle(definition_ref, GroupSide::Input, handle_id, |h| {
-            let Some(variable) = variables.iter().find(|v| Some(&v.id) == h.variants_by.as_ref()) else {
+            let Some(variable) = variables
+                .iter()
+                .find(|v| Some(&v.id) == h.variants_by.as_ref())
+            else {
                 return;
             };
             let variants = h.variants.clone().unwrap_or_default();
-            if !offered && !variants.iter().any(|v| v.value != value && offered_for(v, Some(ty))) {
+            if !offered
+                && !variants
+                    .iter()
+                    .any(|v| v.value != value && offered_for(v, Some(ty)))
+            {
                 return;
             }
             let all = variant_types(h, variable);
             if let Some(variants) = &mut h.variants {
                 for v in variants.iter_mut().filter(|v| v.value == value) {
-                    let mut others: Vec<WgslType> =
-                        v.types.clone().unwrap_or_else(|| all.clone()).into_iter().filter(|t| *t != ty).collect();
+                    let mut others: Vec<WgslType> = v
+                        .types
+                        .clone()
+                        .unwrap_or_else(|| all.clone())
+                        .into_iter()
+                        .filter(|t| *t != ty)
+                        .collect();
                     if offered {
                         others.push(ty);
                     }
@@ -104,7 +149,13 @@ impl GraphModel {
 
     /// Keep a group input's value within `min` and `max` while edited on
     /// group nodes (`None` for no bound).
-    pub fn set_handle_range(&mut self, definition_ref: &str, handle_id: &str, min: Option<f64>, max: Option<f64>) {
+    pub fn set_handle_range(
+        &mut self,
+        definition_ref: &str,
+        handle_id: &str,
+        min: Option<f64>,
+        max: Option<f64>,
+    ) {
         self.update_handle(definition_ref, GroupSide::Input, handle_id, |h| {
             h.min = min;
             h.max = max;
@@ -115,7 +166,11 @@ impl GraphModel {
 /// Fit what inputs and variants say of types to the variables of `def`, as they now are.
 pub(super) fn fit_type_owners(def: &mut GraphDocument) {
     let variables = def.type_variables.clone();
-    if !def.inputs.iter().any(|h| h.type_owner.is_some() || h.variants_by.is_some()) {
+    if !def
+        .inputs
+        .iter()
+        .any(|h| h.type_owner.is_some() || h.variants_by.is_some())
+    {
         return;
     }
     for h in &mut def.inputs {
@@ -134,13 +189,16 @@ impl GraphModel {
     pub(super) fn drop_stale_case_links(&mut self) {
         let keys: Vec<String> = self.project.definitions.keys().cloned().collect();
         for key in keys {
-            let Some(doc) = self.project.document(&key) else { continue };
+            let Some(doc) = self.project.document(&key) else {
+                continue;
+            };
             let stale: Vec<String> = doc
                 .edges
                 .iter()
                 .filter(|e| crate::enums::is_case_handle(&e.target_handle))
                 .filter(|e| {
-                    let Some(node) = doc.node(&e.target).filter(|n| n.is(crate::enums::MATCH)) else {
+                    let Some(node) = doc.node(&e.target).filter(|n| n.is(crate::enums::MATCH))
+                    else {
                         return false;
                     };
                     !crate::nodes::resolve_descriptor(node, &self.project)
@@ -150,7 +208,12 @@ impl GraphModel {
                 })
                 .map(|e| e.id.clone())
                 .collect();
-            if let Some(doc) = self.project.definitions.get_mut(&key).filter(|_| !stale.is_empty()) {
+            if let Some(doc) = self
+                .project
+                .definitions
+                .get_mut(&key)
+                .filter(|_| !stale.is_empty())
+            {
                 doc.edges.retain(|e| !stale.contains(&e.id));
             }
         }

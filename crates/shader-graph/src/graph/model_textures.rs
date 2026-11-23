@@ -16,7 +16,10 @@ impl GraphModel {
     /// What the project's links do with textures, as it's compiled now: the
     /// same sources codegen reads.
     pub fn pass_analysis(&self) -> PassAnalysis<'_> {
-        PassAnalysis::new(CodegenGraph { project: &self.project, resolver: &self.resolver })
+        PassAnalysis::new(CodegenGraph {
+            project: &self.project,
+            resolver: &self.resolver,
+        })
     }
 
     fn render_node_in_active(&self, node_id: &str) -> Option<&super::GraphNode> {
@@ -83,7 +86,11 @@ impl GraphModel {
     }
 
     pub fn remove_render_item(&mut self, node_id: &str, item_id: &str) {
-        let items = self.render_items_of(node_id).into_iter().filter(|i| i.id != item_id).collect();
+        let items = self
+            .render_items_of(node_id)
+            .into_iter()
+            .filter(|i| i.id != item_id)
+            .collect();
         self.set_render_items(node_id, items);
     }
 
@@ -100,7 +107,9 @@ impl GraphModel {
 
     /// Changes the format an item is kept in.
     pub fn set_render_item_format(&mut self, node_id: &str, item_id: &str, format: TextureFormat) {
-        self.edit_render_item(node_id, item_id, |i| i.format = Some(format.id().to_owned()));
+        self.edit_render_item(node_id, item_id, |i| {
+            i.format = Some(format.id().to_owned())
+        });
     }
 
     /// Changes the type of the values an item draws; links that no longer fit are removed.
@@ -110,7 +119,9 @@ impl GraphModel {
 
     fn edit_render_item(&mut self, node_id: &str, item_id: &str, edit: impl FnOnce(&mut ZoneItem)) {
         let mut items = self.render_items_of(node_id);
-        let Some(item) = items.iter_mut().find(|i| i.id == item_id) else { return };
+        let Some(item) = items.iter_mut().find(|i| i.id == item_id) else {
+            return;
+        };
         edit(item);
         self.set_render_items(node_id, items);
     }

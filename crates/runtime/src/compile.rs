@@ -51,44 +51,58 @@ impl CompileQueue {
         let worker = shared.clone();
         // If the thread doesn't start or stops, its sender is dropped and `done` disconnects; the
         // queue then reports the plan it was left with as an error.
-        let spawned = std::thread::Builder::new().name("shader compile".into()).spawn(move || {
-            loop {
-                let job = {
-                    let (slot, signal) = &*worker;
-                    let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
-                    loop {
-                        if slot.closed {
-                            return;
+        let spawned = std::thread::Builder::new()
+            .name("shader compile".into())
+            .spawn(move || {
+                loop {
+                    let job = {
+                        let (slot, signal) = &*worker;
+                        let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+                        loop {
+                            if slot.closed {
+                                return;
+                            }
+                            if let Some(job) = slot.pending.take() {
+                                break job;
+                            }
+                            slot = signal.wait(slot).unwrap_or_else(PoisonError::into_inner);
                         }
-                        if let Some(job) = slot.pending.take() {
-                            break job;
-                        }
-                        slot = signal.wait(slot).unwrap_or_else(PoisonError::into_inner);
+                    };
+                    let result = catch_unwind(AssertUnwindSafe(|| compile(&job.plan)))
+                        .unwrap_or_else(|_| {
+                            Err(ProgramError {
+                                diagnostics: vec![ProgramDiagnostic {
+                                    message: "the shader compiler crashed".to_owned(),
+                                    location: None,
+                                }],
+                                code: String::new(),
+                            })
+                        });
+                    if sender.send(Compiled { id: job.id, result }).is_err() {
+                        return;
                     }
-                };
-                let result = catch_unwind(AssertUnwindSafe(|| compile(&job.plan))).unwrap_or_else(|_| {
-                    Err(ProgramError {
-                        diagnostics: vec![ProgramDiagnostic { message: "the shader compiler crashed".to_owned(), location: None }],
-                        code: String::new(),
-                    })
-                });
-                if sender.send(Compiled { id: job.id, result }).is_err() {
-                    return;
+                    wake();
                 }
-                wake();
-            }
-        });
+            });
         if let Err(error) = spawned {
             log::error!("the shader compile thread didn't start: {error}");
         }
-        Self { shared, done, sent: 0, received: 0 }
+        Self {
+            shared,
+            done,
+            sent: 0,
+            received: 0,
+        }
     }
 
     /// Queues a plan, replacing the one waiting if it hasn't started. Returns its id.
     pub fn submit(&mut self, plan: RenderPlan) -> u64 {
         self.sent += 1;
         let (slot, signal) = &*self.shared;
-        slot.lock().unwrap_or_else(PoisonError::into_inner).pending = Some(Job { id: self.sent, plan });
+        slot.lock().unwrap_or_else(PoisonError::into_inner).pending = Some(Job {
+            id: self.sent,
+            plan,
+        });
         signal.notify_one();
         self.sent
     }
@@ -135,7 +149,10 @@ impl CompileQueue {
         Compiled {
             id: self.sent,
             result: Err(ProgramError {
-                diagnostics: vec![ProgramDiagnostic { message: "the shader compile thread stopped".to_owned(), location: None }],
+                diagnostics: vec![ProgramDiagnostic {
+                    message: "the shader compile thread stopped".to_owned(),
+                    location: None,
+                }],
                 code: String::new(),
             }),
         }
@@ -160,7 +177,12 @@ mod tests {
     use crate::renderer::tests::{CODE, plan};
 
     fn empty_plan() -> RenderPlan {
-        RenderPlan { resources: Vec::new(), passes: Vec::new(), uniforms: Vec::new(), frame: Default::default() }
+        RenderPlan {
+            resources: Vec::new(),
+            passes: Vec::new(),
+            uniforms: Vec::new(),
+            frame: Default::default(),
+        }
     }
 
     fn plan_marked(n: usize) -> RenderPlan {
@@ -171,7 +193,10 @@ mod tests {
 
     fn failing(plan: &RenderPlan) -> Result<Program, ProgramError> {
         Err(ProgramError {
-            diagnostics: vec![ProgramDiagnostic { message: plan.uniforms[0].0.clone(), location: None }],
+            diagnostics: vec![ProgramDiagnostic {
+                message: plan.uniforms[0].0.clone(),
+                location: None,
+            }],
             code: String::new(),
         })
     }
@@ -229,7 +254,11 @@ mod tests {
         let last = queue.wait_next().expect("the latest");
         assert_eq!(last.id, 4);
         assert_eq!(last.result.err().unwrap().diagnostics[0].message, "u4");
-        assert_eq!(compiled.load(Ordering::SeqCst), 2, "the plans in between were never compiled");
+        assert_eq!(
+            compiled.load(Ordering::SeqCst),
+            2,
+            "the plans in between were never compiled"
+        );
         assert!(!queue.busy());
     }
 

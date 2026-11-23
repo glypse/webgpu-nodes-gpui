@@ -36,7 +36,12 @@ impl Editor {
         self.after_edit(cx);
     }
 
-    pub(crate) fn set_curve(&mut self, node: &str, points: Vec<CurvePoint>, cx: &mut Context<Self>) {
+    pub(crate) fn set_curve(
+        &mut self,
+        node: &str,
+        points: Vec<CurvePoint>,
+        cx: &mut Context<Self>,
+    ) {
         let id = node.to_owned();
         self.gesture_edit(format!("curve-{node}"), cx, move |m, first| {
             m.edit_gesture(first, |project| {
@@ -54,7 +59,10 @@ impl Editor {
         added: BTreeMap<String, Rgba>,
         cx: &mut Context<Self>,
     ) {
-        let colors: BTreeMap<String, InputValue> = added.into_iter().map(|(id, c)| (id, vector_of(c))).collect();
+        let colors: BTreeMap<String, InputValue> = added
+            .into_iter()
+            .map(|(id, c)| (id, vector_of(c)))
+            .collect();
         let id = node.to_owned();
         self.gesture_edit(format!("ramp-{node}"), cx, move |m, first| {
             m.set_color_ramp_gesture(first, &id, &stops, &colors);
@@ -65,7 +73,9 @@ impl Editor {
     pub(crate) fn set_color_widget(&mut self, node: &str, next: [f64; 3], cx: &mut Context<Self>) {
         let writes: Vec<(String, f64)> = {
             let model = self.model.borrow();
-            let Some(binding) = model.node(node).and_then(|n| color_binding(&model, n)) else { return };
+            let Some(binding) = model.node(node).and_then(|n| color_binding(&model, n)) else {
+                return;
+            };
             binding
                 .inputs
                 .into_iter()
@@ -88,7 +98,13 @@ impl Editor {
     }
 
     /// A wheel drawn on a colour input edited its colour; its alpha is kept.
-    pub(crate) fn set_wheel_input(&mut self, node: &str, input: &str, rgb: [f64; 3], cx: &mut Context<Self>) {
+    pub(crate) fn set_wheel_input(
+        &mut self,
+        node: &str,
+        input: &str,
+        rgb: [f64; 3],
+        cx: &mut Context<Self>,
+    ) {
         let alpha = self
             .model
             .borrow()
@@ -96,7 +112,12 @@ impl Editor {
             .and_then(|n| n.data.values.get(input).map(|v| v.component(3)))
             .unwrap_or(1.0);
         let (id, handle) = (node.to_owned(), input.to_owned());
-        let color = Rgba { r: rgb[0], g: rgb[1], b: rgb[2], a: alpha };
+        let color = Rgba {
+            r: rgb[0],
+            g: rgb[1],
+            b: rgb[2],
+            a: alpha,
+        };
         self.gesture_edit(format!("wheel-{node}-{input}"), cx, move |m, first| {
             m.edit_gesture(first, |project| {
                 if let Some(data) = node_data_mut(project, &id) {
@@ -117,8 +138,16 @@ impl Editor {
         let (value, gamut) = {
             let model = self.model.borrow();
             let Some(n) = model.node(node) else { return };
-            let default = model.resolve_descriptor(n).default_data.values.get(input).copied();
-            (n.data.values.get(input).copied().or(default), gamut_of(model.settings().color_space))
+            let default = model
+                .resolve_descriptor(n)
+                .default_data
+                .values
+                .get(input)
+                .copied();
+            (
+                n.data.values.get(input).copied().or(default),
+                gamut_of(model.settings().color_space),
+            )
         };
         let alpha = ty == WgslType::Vec4f;
         let component = |i| value.as_ref().map_or(0.0, |v| v.component(i));
@@ -126,32 +155,46 @@ impl Editor {
             r: component(0),
             g: component(1),
             b: component(2),
-            a: if alpha { value.as_ref().map_or(1.0, |v| v.component(3)) } else { 1.0 },
+            a: if alpha {
+                value.as_ref().map_or(1.0, |v| v.component(3))
+            } else {
+                1.0
+            },
         };
         let picker = cx.new(|cx| ColorPicker::new(color, cx).alpha(alpha).gamut(gamut));
         let (node, input) = (node.to_owned(), input.to_owned());
-        let subscription = cx.subscribe(&picker, move |editor: &mut Editor, _, event: &ColorPickerEvent, cx| {
-            let ColorPickerEvent::Change(color) = *event;
-            guard::guard("color picker", || {
-                let (id, handle) = (node.clone(), input.clone());
-                // Edited as RGB, the alpha is kept (opaque if never set) for when the input becomes RGBA.
-                let kept = editor
-                    .model
-                    .borrow()
-                    .node(&node)
-                    .and_then(|n| n.data.values.get(&input).map(|v| v.component(3)))
-                    .unwrap_or(1.0);
-                let color = Rgba { a: if alpha { color.a } else { kept }, ..color };
-                editor.gesture_edit(format!("picker-{node}-{input}"), cx, move |m, first| {
-                    m.edit_gesture(first, |project| {
-                        if let Some(data) = node_data_mut(project, &id) {
-                            data.values.insert(handle, vector_of(color));
-                        }
+        let subscription = cx.subscribe(
+            &picker,
+            move |editor: &mut Editor, _, event: &ColorPickerEvent, cx| {
+                let ColorPickerEvent::Change(color) = *event;
+                guard::guard("color picker", || {
+                    let (id, handle) = (node.clone(), input.clone());
+                    // Edited as RGB, the alpha is kept (opaque if never set) for when the input becomes RGBA.
+                    let kept = editor
+                        .model
+                        .borrow()
+                        .node(&node)
+                        .and_then(|n| n.data.values.get(&input).map(|v| v.component(3)))
+                        .unwrap_or(1.0);
+                    let color = Rgba {
+                        a: if alpha { color.a } else { kept },
+                        ..color
+                    };
+                    editor.gesture_edit(format!("picker-{node}-{input}"), cx, move |m, first| {
+                        m.edit_gesture(first, |project| {
+                            if let Some(data) = node_data_mut(project, &id) {
+                                data.values.insert(handle, vector_of(color));
+                            }
+                        });
                     });
                 });
-            });
+            },
+        );
+        self.color_popup = Some(ColorPopup {
+            at,
+            picker,
+            _subscription: subscription,
         });
-        self.color_popup = Some(ColorPopup { at, picker, _subscription: subscription });
         cx.notify();
     }
 
@@ -169,12 +212,24 @@ impl Editor {
         self.edit(cx, |m| m.remove_render_item(node, item));
     }
 
-    pub(crate) fn set_render_item_format(&mut self, node: &str, item: &str, format: TextureFormat, cx: &mut Context<Self>) {
+    pub(crate) fn set_render_item_format(
+        &mut self,
+        node: &str,
+        item: &str,
+        format: TextureFormat,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.set_render_item_format(node, item, format));
     }
 
     /// Whether the model took the name; a refused one is put back by the field showing it.
-    pub(crate) fn rename_render_item(&mut self, node: &str, item: &str, name: &str, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn rename_render_item(
+        &mut self,
+        node: &str,
+        item: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let accepted = self.model_mut().rename_render_item(node, item, name);
         if accepted {
             self.after_edit(cx);
@@ -203,7 +258,10 @@ impl Editor {
         self.code_task = None;
         let changed = {
             let model = self.model.borrow();
-            !model.is_locked() && model.node(node).is_some_and(|n| n.data.code.as_deref().unwrap_or_default() != code)
+            !model.is_locked()
+                && model
+                    .node(node)
+                    .is_some_and(|n| n.data.code.as_deref().unwrap_or_default() != code)
         };
         if changed {
             self.edit(cx, |m| m.set_custom_code(node, &code));
@@ -211,7 +269,11 @@ impl Editor {
     }
 
     pub(crate) fn open_sockets(&mut self, node: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
-        self.sockets = Some(SocketsPopup { node: node.to_owned(), at, rejected: None });
+        self.sockets = Some(SocketsPopup {
+            node: node.to_owned(),
+            at,
+            rejected: None,
+        });
         cx.notify();
     }
 
@@ -221,20 +283,49 @@ impl Editor {
         });
     }
 
-    pub(crate) fn remove_custom_socket(&mut self, node: &str, input: bool, socket: &str, cx: &mut Context<Self>) {
+    pub(crate) fn remove_custom_socket(
+        &mut self,
+        node: &str,
+        input: bool,
+        socket: &str,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.remove_custom_socket(node, input, socket));
     }
 
-    pub(crate) fn move_custom_socket(&mut self, node: &str, input: bool, socket: &str, offset: isize, cx: &mut Context<Self>) {
+    pub(crate) fn move_custom_socket(
+        &mut self,
+        node: &str,
+        input: bool,
+        socket: &str,
+        offset: isize,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.move_custom_socket(node, input, socket, offset));
     }
 
-    pub(crate) fn set_custom_socket_type(&mut self, node: &str, input: bool, socket: &str, ty: WgslType, cx: &mut Context<Self>) {
+    pub(crate) fn set_custom_socket_type(
+        &mut self,
+        node: &str,
+        input: bool,
+        socket: &str,
+        ty: WgslType,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.set_custom_socket_type(node, input, socket, ty));
     }
 
-    pub(crate) fn rename_custom_socket(&mut self, node: &str, input: bool, socket: &str, label: &str, cx: &mut Context<Self>) {
-        let accepted = self.model_mut().rename_custom_socket(node, input, socket, label);
+    pub(crate) fn rename_custom_socket(
+        &mut self,
+        node: &str,
+        input: bool,
+        socket: &str,
+        label: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let accepted = self
+            .model_mut()
+            .rename_custom_socket(node, input, socket, label);
         if let Some(popup) = &mut self.sockets {
             popup.rejected = (!accepted).then(|| socket.to_owned());
         }

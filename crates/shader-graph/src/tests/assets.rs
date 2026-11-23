@@ -51,7 +51,10 @@ fn an_asset_is_added_once_and_only_if_it_is_what_an_import_makes() {
     bad.file_info_mut().id = "other".into();
     assert!(!model.add_asset(bad));
     assert_eq!(model.assets().len(), 1);
-    assert_eq!(model.asset_by_hash(&"a".repeat(64)).map(Asset::id), Some("a1"));
+    assert_eq!(
+        model.asset_by_hash(&"a".repeat(64)).map(Asset::id),
+        Some("a1")
+    );
 }
 
 #[test]
@@ -81,7 +84,11 @@ fn nodes_read_assets_of_their_own_kind() {
     g.model.add_asset(video());
     let (img, vid) = (g.add("image"), g.add("video"));
     g.model.set_node_asset(&img, Some("v1"));
-    assert_eq!(g.model.node(&img).and_then(|n| n.data.asset.clone()), None, "a video isn't an image");
+    assert_eq!(
+        g.model.node(&img).and_then(|n| n.data.asset.clone()),
+        None,
+        "a video isn't an image"
+    );
     g.model.set_node_asset(&img, Some("a1"));
     g.model.set_node_asset(&vid, Some("v1"));
     assert_eq!(g.model.asset_usages().get("a1"), Some(&1));
@@ -96,10 +103,29 @@ fn nodes_read_assets_of_their_own_kind() {
 fn a_video_plays_as_its_node_says() {
     let mut g = TestGraph::new();
     let vid = g.add("video");
-    g.model.set_video_playback(&vid, PlaybackChange { speed: Some(2.0), ..Default::default() });
-    g.model.set_video_playback(&vid, PlaybackChange { end: Some(VideoEnd::Hold), ..Default::default() });
-    let playback = g.model.node(&vid).and_then(|n| n.data.playback).expect("set");
-    assert_eq!((playback.start, playback.speed, playback.end), (0.0, 2.0, VideoEnd::Hold));
+    g.model.set_video_playback(
+        &vid,
+        PlaybackChange {
+            speed: Some(2.0),
+            ..Default::default()
+        },
+    );
+    g.model.set_video_playback(
+        &vid,
+        PlaybackChange {
+            end: Some(VideoEnd::Hold),
+            ..Default::default()
+        },
+    );
+    let playback = g
+        .model
+        .node(&vid)
+        .and_then(|n| n.data.playback)
+        .expect("set");
+    assert_eq!(
+        (playback.start, playback.speed, playback.end),
+        (0.0, 2.0, VideoEnd::Hold)
+    );
 }
 
 #[test]

@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use runtime::{FrameInputs, MediaSource, MediaStatus, PixelFormat, Presented, RenderOptions, Renderer, Size};
+use runtime::{
+    FrameInputs, MediaSource, MediaStatus, PixelFormat, Presented, RenderOptions, Renderer, Size,
+};
 use shader_graph::codegen::Program;
 
 use crate::encode::Encoder;
@@ -19,7 +21,12 @@ const MEDIA_POLL: Duration = Duration::from_millis(2);
 /// one while the previous is encoded. Must not exceed the renderer's readback depth.
 const FRAMES_IN_FLIGHT: usize = 2;
 
-pub fn run(scene: Scene, settings: Settings, path: PathBuf, shared: &Shared) -> Result<PathBuf, ExportError> {
+pub fn run(
+    scene: Scene,
+    settings: Settings,
+    path: PathBuf,
+    shared: &Shared,
+) -> Result<PathBuf, ExportError> {
     let outcome = encode(scene, settings, &path, shared);
     if outcome.is_err() {
         // A partial file is never left behind, whatever stopped the export.
@@ -32,7 +39,12 @@ pub fn run(scene: Scene, settings: Settings, path: PathBuf, shared: &Shared) -> 
     outcome.map(|()| path)
 }
 
-fn encode(scene: Scene, settings: Settings, path: &Path, shared: &Shared) -> Result<(), ExportError> {
+fn encode(
+    scene: Scene,
+    settings: Settings,
+    path: &Path,
+    shared: &Shared,
+) -> Result<(), ExportError> {
     let size = video_size(scene.size);
     let total = frame_count(&settings) as u64;
     let first = first_frame(&settings);
@@ -46,15 +58,32 @@ fn encode(scene: Scene, settings: Settings, path: &Path, shared: &Shared) -> Res
         .program
         .uniforms
         .iter()
-        .map(|(name, value)| (name.clone(), value.0.iter().map(|c| f64::from(*c)).collect()))
+        .map(|(name, value)| {
+            (
+                name.clone(),
+                value.0.iter().map(|c| f64::from(*c)).collect(),
+            )
+        })
         .collect();
     renderer.set_uniforms(&compiled, &uniforms);
     renderer.sync_media(&scene.media);
     wait_for_media(&mut renderer, &scene.media, shared)?;
 
     let mut encoder = Encoder::open(path, &settings, size)?;
-    let range = Range { size, first, total, fps };
-    draw_frames(&mut renderer, &compiled, simulates(&scene.program), range, &mut encoder, shared)?;
+    let range = Range {
+        size,
+        first,
+        total,
+        fps,
+    };
+    draw_frames(
+        &mut renderer,
+        &compiled,
+        simulates(&scene.program),
+        range,
+        &mut encoder,
+        shared,
+    )?;
     encoder.finish()
 }
 
@@ -67,7 +96,11 @@ struct Range {
 }
 
 fn simulates(program: &Program) -> bool {
-    program.plan.passes.iter().any(|pass| pass.simulation.is_some())
+    program
+        .plan
+        .passes
+        .iter()
+        .any(|pass| pass.simulation.is_some())
 }
 
 /// Simulations run from the start, so the frames before the export's first are drawn without being kept.
@@ -79,7 +112,12 @@ fn draw_frames(
     encoder: &mut Encoder,
     shared: &Shared,
 ) -> Result<(), ExportError> {
-    let Range { size, first, total, fps } = range;
+    let Range {
+        size,
+        first,
+        total,
+        fps,
+    } = range;
     let inputs = |frame: u64| FrameInputs {
         time: frame as f64 / fps,
         delta: 1.0 / fps,
@@ -136,7 +174,9 @@ fn write_oldest(
         Presented::Pixels(frame) => encoder.push(&frame.pixels)?,
         #[cfg(target_os = "macos")]
         Presented::Surfaces { .. } => {
-            return Err(ExportError::Render(anyhow::anyhow!("a readback came out as a surface")));
+            return Err(ExportError::Render(anyhow::anyhow!(
+                "a readback came out as a surface"
+            )));
         }
     }
     *written += 1;
@@ -151,7 +191,10 @@ fn wait_for_media(
 ) -> Result<(), ExportError> {
     loop {
         renderer.poll_media();
-        if !media.keys().any(|asset| renderer.media_status(asset) == MediaStatus::Loading) {
+        if !media
+            .keys()
+            .any(|asset| renderer.media_status(asset) == MediaStatus::Loading)
+        {
             return Ok(());
         }
         check_cancel(shared)?;

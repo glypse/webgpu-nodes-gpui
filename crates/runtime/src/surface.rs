@@ -8,9 +8,11 @@ use anyhow::{Context as _, Result};
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFType};
 use objc2_core_video::{
-    CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
-    CVPixelBufferGetWidth, CVPixelBufferPool, kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVReturnSuccess,
+    CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetIOSurface,
+    CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth, CVPixelBufferPool,
+    kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA,
+    kCVReturnSuccess,
 };
 use objc2_io_surface::IOSurfaceRef;
 use objc2_metal::{
@@ -55,13 +57,24 @@ impl SurfacePool {
         let mut pool = ptr::null_mut();
         // SAFETY: the attributes live for the call, and the output is writable.
         let status = unsafe {
-            CVPixelBufferPool::create(None, None, Some(attributes.as_opaque()), NonNull::from(&mut pool))
+            CVPixelBufferPool::create(
+                None,
+                None,
+                Some(attributes.as_opaque()),
+                NonNull::from(&mut pool),
+            )
         };
-        anyhow::ensure!(status == kCVReturnSuccess, "the surface pool wasn't created: status {status}");
+        anyhow::ensure!(
+            status == kCVReturnSuccess,
+            "the surface pool wasn't created: status {status}"
+        );
         let pool = NonNull::new(pool).context("the surface pool wasn't created")?;
         // SAFETY: the successful call hands over one retained reference.
         let pool = unsafe { CFRetained::from_raw(pool) };
-        Ok(Self { pool, textures: Vec::new() })
+        Ok(Self {
+            pool,
+            textures: Vec::new(),
+        })
     }
 
     /// The next surface the pool can give, with the texture drawing into it.
@@ -71,12 +84,16 @@ impl SurfacePool {
         let status = unsafe {
             CVPixelBufferPool::create_pixel_buffer(None, &self.pool, NonNull::from(&mut buffer))
         };
-        anyhow::ensure!(status == kCVReturnSuccess, "the surface pool gave no buffer: status {status}");
+        anyhow::ensure!(
+            status == kCVReturnSuccess,
+            "the surface pool gave no buffer: status {status}"
+        );
         let buffer = NonNull::new(buffer).context("the surface pool gave no buffer")?;
         // SAFETY: the successful call hands over one retained reference.
         let surface: Surface = unsafe { CFRetained::from_raw(buffer) };
 
-        let io_surface = CVPixelBufferGetIOSurface(Some(&surface)).context("the surface has no IOSurface")?;
+        let io_surface =
+            CVPixelBufferGetIOSurface(Some(&surface)).context("the surface has no IOSurface")?;
         let known = self
             .textures
             .iter()
@@ -92,13 +109,18 @@ impl SurfacePool {
 
 /// The surface's pixels as a wgpu texture, which the frame is drawn into.
 /// The texture keeps the IOSurface alive for as long as it is used.
-fn wrap(device: &wgpu::Device, surface: &CVPixelBuffer, io_surface: &IOSurfaceRef) -> Result<wgpu::Texture> {
+fn wrap(
+    device: &wgpu::Device,
+    surface: &CVPixelBuffer,
+    io_surface: &IOSurfaceRef,
+) -> Result<wgpu::Texture> {
     anyhow::ensure!(
         CVPixelBufferGetPixelFormatType(surface) == kCVPixelFormatType_32BGRA,
         "the surface isn't 32BGRA, so it can't be drawn"
     );
     let width = u32::try_from(CVPixelBufferGetWidth(surface)).context("the surface is too wide")?;
-    let height = u32::try_from(CVPixelBufferGetHeight(surface)).context("the surface is too tall")?;
+    let height =
+        u32::try_from(CVPixelBufferGetHeight(surface)).context("the surface is too tall")?;
     let raw_device = {
         // SAFETY: the device is only read for its Metal handle.
         let hal = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
@@ -120,7 +142,11 @@ fn wrap(device: &wgpu::Device, surface: &CVPixelBuffer, io_surface: &IOSurfaceRe
         .newTextureWithDescriptor_iosurface_plane(&descriptor, io_surface, 0)
         .context("the device can't wrap a surface")?;
 
-    let copy_size = wgpu::hal::CopyExtent { width, height, depth: 1 };
+    let copy_size = wgpu::hal::CopyExtent {
+        width,
+        height,
+        depth: 1,
+    };
     // SAFETY: the texture was made from a BGRA8 descriptor of `copy_size`, one layer and one mip
     // level, which is what the arguments below describe; wgpu takes the reference the texture holds.
     let hal = unsafe {
@@ -136,7 +162,11 @@ fn wrap(device: &wgpu::Device, surface: &CVPixelBuffer, io_surface: &IOSurfaceRe
     };
     let descriptor = wgpu::TextureDescriptor {
         label: Some("surface"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,

@@ -1,8 +1,9 @@
 //! Factories for the node shapes many types share.
 
 use crate::types::{
-    EnumVariant, FLOAT_TYPES, InputControl, InputValue, enum_value, NUMERIC_TYPES, NodeCategory, NodeData, NodeDescriptor, NodeInputDef,
-    NodeOutputDef, NodeSetting, ScalarKind, WgslCtx, WgslType, make_type,
+    EnumVariant, FLOAT_TYPES, InputControl, InputValue, NUMERIC_TYPES, NodeCategory, NodeData,
+    NodeDescriptor, NodeInputDef, NodeOutputDef, NodeSetting, ScalarKind, WgslCtx, WgslType,
+    enum_value, make_type,
 };
 
 /// An enum input's value while compiling: set by the calling group node, or
@@ -30,7 +31,12 @@ fn result_output() -> Vec<NodeOutputDef> {
 }
 
 /// One input `e` and one output, with no emitter.
-pub fn unary_node(ty: &str, label: &str, types: &[WgslType], category: NodeCategory) -> NodeDescriptor {
+pub fn unary_node(
+    ty: &str,
+    label: &str,
+    types: &[WgslType],
+    category: NodeCategory,
+) -> NodeDescriptor {
     NodeDescriptor::new(ty, label, category)
         .inputs(vec![NodeInputDef::new("e", "e", types)])
         .outputs(result_output())
@@ -45,22 +51,27 @@ pub fn unary_fn(
     types: &[WgslType],
     category: NodeCategory,
 ) -> NodeDescriptor {
-    unary_node(ty, label, types, category)
-        .wgsl(move |ctx| {
-            let e = ctx.promote_input("e");
-            vec![format!("let {} = {wgsl_fn}({e});", ctx.var_name)]
-        })
+    unary_node(ty, label, types, category).wgsl(move |ctx| {
+        let e = ctx.promote_input("e");
+        vec![format!("let {} = {wgsl_fn}({e});", ctx.var_name)]
+    })
 }
 
 /// A variadic operator joining its operands: add, multiply.
 pub fn variadic_op(ty: &str, label: &str, joiner: &'static str) -> NodeDescriptor {
     NodeDescriptor::new(ty, label, NodeCategory::Math)
-        .inputs(vec![NodeInputDef::new("operands", "operands", NUMERIC_TYPES).variadic()])
+        .inputs(vec![
+            NodeInputDef::new("operands", "operands", NUMERIC_TYPES).variadic(),
+        ])
         .outputs(result_output())
         .wgsl(move |ctx| {
             let list = ctx.operands("operands");
             if list.is_empty() {
-                return vec![format!("let {} = {};", ctx.var_name, ctx.output_type.zero())];
+                return vec![format!(
+                    "let {} = {};",
+                    ctx.var_name,
+                    ctx.output_type.zero()
+                )];
             }
             // Variadic operands are pre-converted to the resolved type.
             vec![format!("let {} = {};", ctx.var_name, list.join(joiner))]
@@ -70,14 +81,22 @@ pub fn variadic_op(ty: &str, label: &str, joiner: &'static str) -> NodeDescripto
 /// A variadic function folded over its operands: min, max.
 pub fn variadic_fn(ty: &str, label: &str, wgsl_fn: &'static str) -> NodeDescriptor {
     NodeDescriptor::new(ty, label, NodeCategory::Math)
-        .inputs(vec![NodeInputDef::new("operands", "operands", NUMERIC_TYPES).variadic()])
+        .inputs(vec![
+            NodeInputDef::new("operands", "operands", NUMERIC_TYPES).variadic(),
+        ])
         .outputs(result_output())
         .wgsl(move |ctx| {
             let list = ctx.operands("operands");
             let Some((first, rest)) = list.split_first() else {
-                return vec![format!("let {} = {};", ctx.var_name, ctx.output_type.zero())];
+                return vec![format!(
+                    "let {} = {};",
+                    ctx.var_name,
+                    ctx.output_type.zero()
+                )];
             };
-            let nested = rest.iter().fold(first.clone(), |acc, cur| format!("{wgsl_fn}({acc}, {cur})"));
+            let nested = rest
+                .iter()
+                .fold(first.clone(), |acc, cur| format!("{wgsl_fn}({acc}, {cur})"));
             vec![format!("let {} = {nested};", ctx.var_name)]
         })
 }
@@ -91,7 +110,12 @@ pub struct BinaryOptions {
 
 impl Default for BinaryOptions {
     fn default() -> Self {
-        Self { types: NUMERIC_TYPES, labels: None, ids: ["a", "b"], category: NodeCategory::Math }
+        Self {
+            types: NUMERIC_TYPES,
+            labels: None,
+            ids: ["a", "b"],
+            category: NodeCategory::Math,
+        }
     }
 }
 
@@ -120,8 +144,18 @@ pub fn binary_node(
 }
 
 /// Two inputs passed to a function: step, atan2, dot...
-pub fn binary_fn(ty: &str, label: &str, wgsl_fn: &'static str, opts: BinaryOptions) -> NodeDescriptor {
-    binary_node(ty, label, move |a, b, _| format!("{wgsl_fn}({a}, {b})"), opts)
+pub fn binary_fn(
+    ty: &str,
+    label: &str,
+    wgsl_fn: &'static str,
+    opts: BinaryOptions,
+) -> NodeDescriptor {
+    binary_node(
+        ty,
+        label,
+        move |a, b, _| format!("{wgsl_fn}({a}, {b})"),
+        opts,
+    )
 }
 
 /// `fn(a, b, c...)` over the given inputs: clamp, mix.
@@ -140,7 +174,11 @@ pub fn n_ary_fn(
         .defaults(NodeData::with_values(defaults.iter().copied()))
         .wgsl(move |ctx| {
             let args: Vec<String> = ids.iter().map(|id| ctx.promote_input(id)).collect();
-            vec![format!("let {} = {wgsl_fn}({});", ctx.var_name, args.join(", "))]
+            vec![format!(
+                "let {} = {wgsl_fn}({});",
+                ctx.var_name,
+                args.join(", ")
+            )]
         })
 }
 
@@ -155,7 +193,11 @@ pub fn uniform_reader(
     NodeDescriptor::new(ty, label, NodeCategory::Input)
         .outputs(vec![NodeOutputDef::new(output, output, output_type)])
         .wgsl(move |ctx| {
-            vec![format!("let {}: {} = {expr};", ctx.var_name, output_type.wgsl_name())]
+            vec![format!(
+                "let {}: {} = {expr};",
+                ctx.var_name,
+                output_type.wgsl_name()
+            )]
         })
 }
 
@@ -163,7 +205,12 @@ pub fn rounding_setting() -> NodeSetting {
     NodeSetting::new(
         "rounding",
         "Rounding",
-        &[("trunc", "Truncate"), ("floor", "Floor"), ("ceil", "Ceil"), ("round", "Round")],
+        &[
+            ("trunc", "Truncate"),
+            ("floor", "Floor"),
+            ("ceil", "Ceil"),
+            ("round", "Round"),
+        ],
     )
 }
 
@@ -184,7 +231,11 @@ pub fn convert_node(ty: &str, label: &str, kind: ScalarKind, rounding: bool) -> 
     }
     descriptor
         .cpu(move |ctx| {
-            let mode = if rounding { setting_mode(ctx.data.settings.get("rounding")) } else { "trunc" };
+            let mode = if rounding {
+                setting_mode(ctx.data.settings.get("rounding"))
+            } else {
+                "trunc"
+            };
             let round: fn(f64) -> f64 = match mode {
                 "floor" => f64::floor,
                 "ceil" => f64::ceil,
@@ -192,19 +243,22 @@ pub fn convert_node(ty: &str, label: &str, kind: ScalarKind, rounding: bool) -> 
                 _ => f64::trunc,
             };
             let e = ctx.input("e");
-            let rounded: Vec<f64> =
-                if rounding { e.into_iter().map(round).collect() } else { e };
+            let rounded: Vec<f64> = if rounding {
+                e.into_iter().map(round).collect()
+            } else {
+                e
+            };
             super::cpu::result(super::cpu::coerce(&rounded, ctx.output_type))
         })
         .wgsl(move |ctx| {
-        let source = ctx.input_type("e");
-        let mut expr = ctx.promote_input("e");
-        if rounding && source.kind() == ScalarKind::F32 {
-            expr = format!("{}({expr})", setting.value(&ctx.data));
-        }
-        let converted = crate::types::convert_var(&expr, source, ctx.output_type);
-        vec![format!("let {} = {converted};", ctx.var_name)]
-    })
+            let source = ctx.input_type("e");
+            let mut expr = ctx.promote_input("e");
+            if rounding && source.kind() == ScalarKind::F32 {
+                expr = format!("{}({expr})", setting.value(&ctx.data));
+            }
+            let converted = crate::types::convert_var(&expr, source, ctx.output_type);
+            vec![format!("let {} = {converted};", ctx.var_name)]
+        })
 }
 
 fn setting_mode(stored: Option<&String>) -> &str {

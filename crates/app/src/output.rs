@@ -6,9 +6,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use gpui::{
     AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Render, RenderImage, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Subscription, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowOptions,
-    canvas, div, img, px, size,
+    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Render, RenderImage,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, TitlebarOptions,
+    WeakEntity, Window, WindowBounds, WindowOptions, canvas, div, img, px, size,
 };
 use guard::SafeListener as _;
 
@@ -20,11 +20,19 @@ const DEFAULT_SIZE: (f32, f32) = (960.0, 540.0);
 
 /// Opens an output window showing `playback`'s frames. It reports its size to the playback as a
 /// preview area does, and is followed while it is the one last used.
-pub fn open(shell: &Entity<Shell>, playback: &Entity<Playback>, owner: AnyWindowHandle, cx: &mut App) -> Result<AnyWindowHandle> {
+pub fn open(
+    shell: &Entity<Shell>,
+    playback: &Entity<Playback>,
+    owner: AnyWindowHandle,
+    cx: &mut App,
+) -> Result<AnyWindowHandle> {
     let bounds = gpui::Bounds::centered(None, size(px(DEFAULT_SIZE.0), px(DEFAULT_SIZE.1)), cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions { title: Some("Output".into()), ..Default::default() }),
+        titlebar: Some(TitlebarOptions {
+            title: Some("Output".into()),
+            ..Default::default()
+        }),
         // On a second display the window is rarely the active one, and must keep its frame rate.
         inactive_frame_interval: None,
         ..Default::default()
@@ -78,13 +86,23 @@ impl OutputView {
             cx.on_release({
                 let playback = playback.clone();
                 move |_, cx| {
-                    guard::guard("output release", || playback.update(cx, |p, cx| p.forget_pane(id, cx)));
+                    guard::guard("output release", || {
+                        playback.update(cx, |p, cx| p.forget_pane(id, cx))
+                    });
                 }
             }),
         ];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        Self { shell, playback, owner, stretch: false, image: None, focus, _subscriptions: subscriptions }
+        Self {
+            shell,
+            playback,
+            owner,
+            stretch: false,
+            image: None,
+            focus,
+            _subscriptions: subscriptions,
+        }
     }
 
     #[cfg(test)]
@@ -104,8 +122,14 @@ impl OutputView {
 
     /// Shows the Properties area of the project window this one shows the playback of.
     fn show_project_settings(&self, cx: &mut App) {
-        let Some(shell) = self.shell.upgrade() else { return };
-        let Some(handle) = windows::project_windows(cx).into_iter().find(|(_, s)| *s == shell).map(|(h, _)| h) else {
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let Some(handle) = windows::project_windows(cx)
+            .into_iter()
+            .find(|(_, s)| *s == shell)
+            .map(|(h, _)| h)
+        else {
             return;
         };
         cx.update_window(handle, |_, window, cx| {
@@ -124,7 +148,11 @@ impl Focusable for OutputView {
 impl Render for OutputView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         guard::render("OutputView", || {
-            let shown = self.playback.read(cx).pane_frame(cx.entity_id()).map(|(_, shown)| shown);
+            let shown = self
+                .playback
+                .read(cx)
+                .pane_frame(cx.entity_id())
+                .map(|(_, shown)| shown);
             // The window's image cache holds each frame drawn as an image until it is dropped.
             let image = match &shown {
                 Some(Shown::Image(image)) => Some(image.clone()),
@@ -136,7 +164,11 @@ impl Render for OutputView {
             {
                 log::warn!("dropping the previous frame failed: {error:#}");
             }
-            let fit = if self.stretch { ObjectFit::Fill } else { ObjectFit::Contain };
+            let fit = if self.stretch {
+                ObjectFit::Fill
+            } else {
+                ObjectFit::Contain
+            };
             let id = cx.entity_id();
             let playback = self.playback.clone();
             let owner = self.owner;
@@ -154,9 +186,11 @@ impl Render for OutputView {
                         move |bounds, window, cx| {
                             guard::guard("output layout", || {
                                 let scale = window.scale_factor();
-                                let Some(pane) =
-                                    device_size(f32::from(bounds.size.width), f32::from(bounds.size.height), scale)
-                                else {
+                                let Some(pane) = device_size(
+                                    f32::from(bounds.size.width),
+                                    f32::from(bounds.size.height),
+                                    scale,
+                                ) else {
                                     return;
                                 };
                                 // The size is registered through the project window, so that the frames it
@@ -172,24 +206,44 @@ impl Render for OutputView {
                     .absolute()
                     .size_full(),
                 )
-                .children(shown.map(|shown| match shown {
-                    #[cfg(target_os = "macos")]
-                    Shown::Surface(frame) => gpui::surface(frame).object_fit(fit).absolute().size_full().into_any_element(),
-                    Shown::Image(image) => img(image).object_fit(fit).absolute().size_full().into_any_element(),
+                .children(shown.map(|shown| {
+                    match shown {
+                        #[cfg(target_os = "macos")]
+                        Shown::Surface(frame) => gpui::surface(frame)
+                            .object_fit(fit)
+                            .absolute()
+                            .size_full()
+                            .into_any_element(),
+                        Shown::Image(image) => img(image)
+                            .object_fit(fit)
+                            .absolute()
+                            .size_full()
+                            .into_any_element(),
+                    }
                 }))
                 .on_click(cx.safe_listener(|_, event: &ClickEvent, window, _| {
                     if event.click_count() == 2 {
                         window.toggle_fullscreen();
                     }
                 }))
-                .on_action(cx.safe_listener(|this, _: &ToggleOutputStretch, _, cx| this.toggle_stretch(cx)))
+                .on_action(
+                    cx.safe_listener(|this, _: &ToggleOutputStretch, _, cx| {
+                        this.toggle_stretch(cx)
+                    }),
+                )
                 .on_action(cx.safe_listener(move |this, _: &NewOutputWindow, _, cx| {
                     if let Some(shell) = this.shell.upgrade() {
                         shell.update(cx, |shell, cx| shell.new_output(owner, cx));
                     }
                 }))
-                .on_action(cx.safe_listener(|_, _: &windows::CloseWindow, window, _| window.remove_window()))
-                .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, _, cx| this.show_project_settings(cx)))
+                .on_action(
+                    cx.safe_listener(|_, _: &windows::CloseWindow, window, _| {
+                        window.remove_window()
+                    }),
+                )
+                .on_action(cx.safe_listener(|this, _: &OpenProjectSettings, _, cx| {
+                    this.show_project_settings(cx)
+                }))
         })
     }
 }

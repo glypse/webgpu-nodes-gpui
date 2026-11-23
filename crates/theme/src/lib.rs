@@ -10,8 +10,8 @@ mod curve_editor;
 mod gamut_image;
 mod icon;
 mod number_field;
-mod ramp_editor;
 pub mod popup;
+mod ramp_editor;
 mod theme;
 
 use std::borrow::Cow;

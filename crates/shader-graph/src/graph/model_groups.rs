@@ -4,13 +4,13 @@
 use std::collections::HashSet;
 
 use super::model::{GraphModel, clone_subgraph};
-use super::{
-    GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GroupRef,
-    GroupSide, NODE_GROUP, Point, ROOT_ID, new_id,
-};
-use crate::library::{self, is_library_ref};
 use super::model_interface::fit_type_owners;
+use super::{
+    GROUP_INPUT, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GroupRef, GroupSide,
+    NODE_GROUP, Point, ROOT_ID, new_id,
+};
 use crate::enums::{fit_variants, is_under, owner_chain, owner_exists, shown_apart};
+use crate::library::{self, is_library_ref};
 use crate::types::{
     EnumVariant, GroupHandleDef, HandleType, InputOwner, InputValue, TypeVariable, WgslType,
     toggle_variants,
@@ -33,7 +33,10 @@ fn reachable_from(doc: &GraphDocument, starts: &[&str]) -> HashSet<String> {
     let mut seen: HashSet<String> = starts.iter().map(|s| (*s).to_owned()).collect();
     let mut stack: Vec<String> = seen.iter().cloned().collect();
     while let Some(current) = stack.pop() {
-        let mut next: Vec<&str> = doc.edges_from(&current).map(|e| e.target.as_str()).collect();
+        let mut next: Vec<&str> = doc
+            .edges_from(&current)
+            .map(|e| e.target.as_str())
+            .collect();
         // A zone's output depends on its input without a link saying so.
         if let Some(output) = doc.node(&current).and_then(paired_output_id) {
             next.push(output);
@@ -96,7 +99,10 @@ impl GraphModel {
     fn add_instance_of(&mut self, definition: GraphDocument, position: Point) -> Option<String> {
         let reference = new_id();
         let mut node = GraphNode::new(NODE_GROUP, position);
-        node.group = Some(GroupRef { definition_ref: reference.clone(), locked: false });
+        node.group = Some(GroupRef {
+            definition_ref: reference.clone(),
+            locked: false,
+        });
         let id = node.id.clone();
         let key = self.active_definition_ref();
         self.project.definitions.insert(reference, definition);
@@ -115,9 +121,16 @@ impl GraphModel {
             return None;
         }
         let locked = is_library_ref(definition_ref)
-            || self.project.definitions.get(definition_ref).is_some_and(|def| def.locked);
+            || self
+                .project
+                .definitions
+                .get(definition_ref)
+                .is_some_and(|def| def.locked);
         let mut node = GraphNode::new(NODE_GROUP, position);
-        node.group = Some(GroupRef { definition_ref: definition_ref.to_owned(), locked });
+        node.group = Some(GroupRef {
+            definition_ref: definition_ref.to_owned(),
+            locked,
+        });
         let id = node.id.clone();
         let key = self.active_definition_ref();
         self.project.definitions.get_mut(&key)?.nodes.push(node);
@@ -159,7 +172,9 @@ impl GraphModel {
             .filter(|e| selection.contains(&e.source) && !selection.contains(&e.target))
             .map(|e| e.target.as_str())
             .collect();
-        reachable_from(doc, &outside).iter().any(|id| selection.contains(id))
+        reachable_from(doc, &outside)
+            .iter()
+            .any(|id| selection.contains(id))
     }
 
     /// Collapse nodes of the active document into a new group. Zones go as a
@@ -184,7 +199,9 @@ impl GraphModel {
         let nodes: Vec<GraphNode> = doc
             .nodes
             .iter()
-            .filter(|n| expanded.contains(&n.id) && !UNGROUPABLE_TYPES.contains(&n.node_type.as_str()))
+            .filter(|n| {
+                expanded.contains(&n.id) && !UNGROUPABLE_TYPES.contains(&n.node_type.as_str())
+            })
             .cloned()
             .collect();
         if nodes.is_empty() || nodes.iter().all(|n| n.is(NODE_GROUP)) {
@@ -202,12 +219,21 @@ impl GraphModel {
         });
         let center = Point::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
 
-        let internal: Vec<&GraphEdge> =
-            doc.edges.iter().filter(|e| ids.contains(&e.source) && ids.contains(&e.target)).collect();
-        let incoming: Vec<&GraphEdge> =
-            doc.edges.iter().filter(|e| !ids.contains(&e.source) && ids.contains(&e.target)).collect();
-        let outgoing: Vec<&GraphEdge> =
-            doc.edges.iter().filter(|e| ids.contains(&e.source) && !ids.contains(&e.target)).collect();
+        let internal: Vec<&GraphEdge> = doc
+            .edges
+            .iter()
+            .filter(|e| ids.contains(&e.source) && ids.contains(&e.target))
+            .collect();
+        let incoming: Vec<&GraphEdge> = doc
+            .edges
+            .iter()
+            .filter(|e| !ids.contains(&e.source) && ids.contains(&e.target))
+            .collect();
+        let outgoing: Vec<&GraphEdge> = doc
+            .edges
+            .iter()
+            .filter(|e| ids.contains(&e.source) && !ids.contains(&e.target))
+            .collect();
         let dedupe = |edges: &[&GraphEdge]| -> Vec<Vec<GraphEdge>> {
             let mut groups: Vec<((String, String), Vec<GraphEdge>)> = Vec::new();
             for e in edges {
@@ -222,12 +248,15 @@ impl GraphModel {
         let (deduped_in, deduped_out) = (dedupe(&incoming), dedupe(&outgoing));
 
         let group_id = new_id();
-        let mut input_node = GraphNode::new(GROUP_INPUT, Point::new(min_x - GROUP_OFFSET, center.y));
-        let mut output_node = GraphNode::new(GROUP_OUTPUT, Point::new(max_x + GROUP_OFFSET, center.y));
+        let mut input_node =
+            GraphNode::new(GROUP_INPUT, Point::new(min_x - GROUP_OFFSET, center.y));
+        let mut output_node =
+            GraphNode::new(GROUP_OUTPUT, Point::new(max_x + GROUP_OFFSET, center.y));
         input_node.data = Default::default();
         output_node.data = Default::default();
         let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
-        let (mut outer_edges, mut inner_edges): (Vec<GraphEdge>, Vec<GraphEdge>) = (Vec::new(), Vec::new());
+        let (mut outer_edges, mut inner_edges): (Vec<GraphEdge>, Vec<GraphEdge>) =
+            (Vec::new(), Vec::new());
         for (i, group) in deduped_in.iter().enumerate() {
             let first = &group[0];
             let ty = self.resolve_output_handle_type(&first.source, &first.source_handle);
@@ -278,7 +307,11 @@ impl GraphModel {
         definition_nodes.extend([input_node, output_node]);
         let definition = GraphDocument {
             nodes: definition_nodes,
-            edges: internal.iter().map(|e| (*e).clone()).chain(inner_edges).collect(),
+            edges: internal
+                .iter()
+                .map(|e| (*e).clone())
+                .chain(inner_edges)
+                .collect(),
             label: Some(self.next_group_label()),
             inputs,
             outputs,
@@ -287,10 +320,17 @@ impl GraphModel {
         let reference = new_id();
         let mut group_node = GraphNode::new(NODE_GROUP, center);
         group_node.id = group_id.clone();
-        group_node.group = Some(GroupRef { definition_ref: reference.clone(), locked: false });
+        group_node.group = Some(GroupRef {
+            definition_ref: reference.clone(),
+            locked: false,
+        });
         group_node.frame = frames.common_frame(ids.iter().map(String::as_str));
-        let touched: HashSet<&str> =
-            internal.iter().chain(&incoming).chain(&outgoing).map(|e| e.id.as_str()).collect();
+        let touched: HashSet<&str> = internal
+            .iter()
+            .chain(&incoming)
+            .chain(&outgoing)
+            .map(|e| e.id.as_str())
+            .collect();
         let key = self.active_definition_ref();
         self.project.definitions.insert(reference, definition);
         let doc = self.project.definitions.get_mut(&key)?;
@@ -322,10 +362,18 @@ impl GraphModel {
     }
 
     fn ungroup_node(&mut self, group_node: &GraphNode) -> Vec<String> {
-        let Some(reference) = group_node.definition_ref() else { return Vec::new() };
-        let Some(def) = self.project.document(reference).cloned() else { return Vec::new() };
-        let inner_nodes: Vec<GraphNode> =
-            def.nodes.iter().filter(|n| n.side().is_none()).cloned().collect();
+        let Some(reference) = group_node.definition_ref() else {
+            return Vec::new();
+        };
+        let Some(def) = self.project.document(reference).cloned() else {
+            return Vec::new();
+        };
+        let inner_nodes: Vec<GraphNode> = def
+            .nodes
+            .iter()
+            .filter(|n| n.side().is_none())
+            .cloned()
+            .collect();
         // Re-center the inner nodes on the group node.
         let center = if inner_nodes.is_empty() {
             Point::default()
@@ -336,7 +384,10 @@ impl GraphModel {
                 inner_nodes.iter().map(|n| n.position.y).sum::<f32>() / n,
             )
         };
-        let offset = Point::new(group_node.position.x - center.x, group_node.position.y - center.y);
+        let offset = Point::new(
+            group_node.position.x - center.x,
+            group_node.position.y - center.y,
+        );
         let (mut nodes, edges, id_map) = clone_subgraph(&inner_nodes, &def.edges, offset);
         // What was in no frame of the group goes in the group node's.
         if let Some(frame) = &group_node.frame {
@@ -346,7 +397,9 @@ impl GraphModel {
         }
         let remap = |id: &str| id_map.get(id).cloned().unwrap_or_else(|| id.to_owned());
         let key = self.active_definition_ref();
-        let Some(doc) = self.project.document(&key) else { return Vec::new() };
+        let Some(doc) = self.project.document(&key) else {
+            return Vec::new();
+        };
         let incoming: Vec<GraphEdge> = doc.edges_into(&group_node.id).cloned().collect();
         let outgoing: Vec<GraphEdge> = doc.edges_from(&group_node.id).cloned().collect();
         let mut boundary: Vec<GraphEdge> = Vec::new();
@@ -355,7 +408,10 @@ impl GraphModel {
             if def.node(&inner.source).and_then(GraphNode::side) != Some(GroupSide::Input) {
                 continue;
             }
-            let Some(feed) = incoming.iter().find(|e| e.target_handle == inner.source_handle) else {
+            let Some(feed) = incoming
+                .iter()
+                .find(|e| e.target_handle == inner.source_handle)
+            else {
                 continue;
             };
             boundary.push(GraphEdge {
@@ -371,7 +427,10 @@ impl GraphModel {
             if def.node(&inner.target).and_then(GraphNode::side) != Some(GroupSide::Output) {
                 continue;
             }
-            for consumer in outgoing.iter().filter(|e| e.source_handle == inner.target_handle) {
+            for consumer in outgoing
+                .iter()
+                .filter(|e| e.source_handle == inner.target_handle)
+            {
                 boundary.push(GraphEdge {
                     id: new_id(),
                     source: remap(&inner.source),
@@ -381,9 +440,15 @@ impl GraphModel {
                 });
             }
         }
-        let removed: HashSet<String> = incoming.iter().chain(&outgoing).map(|e| e.id.clone()).collect();
+        let removed: HashSet<String> = incoming
+            .iter()
+            .chain(&outgoing)
+            .map(|e| e.id.clone())
+            .collect();
         let ids = nodes.iter().map(|n| n.id.clone()).collect();
-        let Some(doc) = self.project.definitions.get_mut(&key) else { return Vec::new() };
+        let Some(doc) = self.project.definitions.get_mut(&key) else {
+            return Vec::new();
+        };
         doc.nodes.retain(|n| n.id != group_node.id);
         doc.nodes.extend(nodes);
         doc.edges.retain(|e| !removed.contains(&e.id));
@@ -395,7 +460,11 @@ impl GraphModel {
 
     pub fn set_group_label(&mut self, node_id: &str, label: &str) {
         let label = label.trim();
-        let Some(reference) = self.node(node_id).and_then(|n| n.definition_ref()).map(str::to_owned) else {
+        let Some(reference) = self
+            .node(node_id)
+            .and_then(|n| n.definition_ref())
+            .map(str::to_owned)
+        else {
             return;
         };
         if label.is_empty() {
@@ -424,7 +493,8 @@ impl GraphModel {
                 .map(|n| n.id.clone())
                 .collect();
             doc.nodes.retain(|n| !instances.contains(&n.id));
-            doc.edges.retain(|e| !instances.contains(&e.source) && !instances.contains(&e.target));
+            doc.edges
+                .retain(|e| !instances.contains(&e.source) && !instances.contains(&e.target));
             gone.extend(instances);
         }
         self.selected.retain(|id| !gone.contains(id));
@@ -528,7 +598,9 @@ impl GraphModel {
             "Output"
         };
         let labels: HashSet<&str> = handles.iter().map(|h| h.label.as_str()).collect();
-        let n = (1..).find(|n| !labels.contains(format!("{prefix} {n}").as_str())).expect("unbounded");
+        let n = (1..)
+            .find(|n| !labels.contains(format!("{prefix} {n}").as_str()))
+            .expect("unbounded");
         // Only an output's type can be whatever reaches it.
         let ty = if toggle {
             WgslType::Bool.into()
@@ -573,8 +645,14 @@ impl GraphModel {
         handle_id: &str,
         update: impl FnOnce(&mut GroupHandleDef),
     ) -> bool {
-        let Some(def) = self.user_definition(definition_ref) else { return false };
-        let Some(handle) = def.interface_mut(side).iter_mut().find(|h| h.id == handle_id) else {
+        let Some(def) = self.user_definition(definition_ref) else {
+            return false;
+        };
+        let Some(handle) = def
+            .interface_mut(side)
+            .iter_mut()
+            .find(|h| h.id == handle_id)
+        else {
             return false;
         };
         update(handle);
@@ -593,9 +671,13 @@ impl GraphModel {
         label: &str,
     ) -> bool {
         let label = label.trim().to_owned();
-        let Some(def) = self.project.document(definition_ref) else { return false };
+        let Some(def) = self.project.document(definition_ref) else {
+            return false;
+        };
         let handles = def.interface(side);
-        let Some(handle) = handles.iter().find(|h| h.id == handle_id) else { return false };
+        let Some(handle) = handles.iter().find(|h| h.id == handle_id) else {
+            return false;
+        };
         let taken = handles.iter().any(|h| {
             h.id != handle_id
                 && h.label == label
@@ -624,7 +706,9 @@ impl GraphModel {
             .document(definition_ref)
             .and_then(|d| d.interface(side).iter().find(|h| h.id == handle_id))
             .and_then(|h| h.owner.clone());
-        let Some(def) = self.user_definition(definition_ref) else { return };
+        let Some(def) = self.user_definition(definition_ref) else {
+            return;
+        };
         for h in def.interface_mut(side) {
             if h.id == handle_id {
                 h.ty = ty.clone();
@@ -654,7 +738,9 @@ impl GraphModel {
         let keys: Vec<String> = self.project.definitions.keys().cloned().collect();
         let mut dropped = false;
         for key in keys {
-            let Some(doc) = self.project.document(&key) else { continue };
+            let Some(doc) = self.project.document(&key) else {
+                continue;
+            };
             let instances: HashSet<&str> = doc
                 .nodes
                 .iter()
@@ -666,7 +752,8 @@ impl GraphModel {
                 .iter()
                 .filter(|e| {
                     (instances.contains(e.target.as_str()) && handles.contains(&e.target_handle))
-                        || (instances.contains(e.source.as_str()) && handles.contains(&e.source_handle))
+                        || (instances.contains(e.source.as_str())
+                            && handles.contains(&e.source_handle))
                 })
                 .filter(|e| match (doc.node(&e.source), doc.node(&e.target)) {
                     (Some(s), Some(t)) => !self.link_fits(s, &e.source_handle, t, &e.target_handle),
@@ -687,7 +774,12 @@ impl GraphModel {
     }
 
     /// Set what a group's input holds on group nodes until edited.
-    pub fn set_handle_default(&mut self, definition_ref: &str, handle_id: &str, value: Option<InputValue>) {
+    pub fn set_handle_default(
+        &mut self,
+        definition_ref: &str,
+        handle_id: &str,
+        value: Option<InputValue>,
+    ) {
         if let Some(def) = self.user_definition(definition_ref) {
             match value {
                 Some(v) => {
@@ -710,17 +802,28 @@ impl GraphModel {
         handle_id: &str,
         variants: Option<Vec<EnumVariant>>,
     ) {
-        let Some(def) = self.project.document(definition_ref) else { return };
+        let Some(def) = self.project.document(definition_ref) else {
+            return;
+        };
         let is_toggle = def.inputs.iter().any(|h| {
             h.id == handle_id && h.ty == HandleType::Fixed(WgslType::Bool) && h.variants.is_some()
         });
         if variants.is_some() && !is_toggle {
-            self.set_handle_type(definition_ref, GroupSide::Input, handle_id, WgslType::U32.into());
+            self.set_handle_type(
+                definition_ref,
+                GroupSide::Input,
+                handle_id,
+                WgslType::U32.into(),
+            );
         }
-        let Some(def) = self.user_definition(definition_ref) else { return };
+        let Some(def) = self.user_definition(definition_ref) else {
+            return;
+        };
         let handles = def.inputs.clone();
         let variables = def.type_variables.clone();
-        let Some(handle) = def.inputs.iter_mut().find(|h| h.id == handle_id) else { return };
+        let Some(handle) = def.inputs.iter_mut().find(|h| h.id == handle_id) else {
+            return;
+        };
         handle.compiled = None;
         handle.variants = variants.clone();
         if variants.is_some() {
@@ -731,7 +834,11 @@ impl GraphModel {
         let kept: Vec<i64> = variants.iter().flatten().map(|v| v.value).collect();
         let orphans: Vec<String> = handles
             .iter()
-            .filter(|h| owner_chain(&handles, h).iter().any(|o| o.enum_id == handle_id && !kept.contains(&o.value)))
+            .filter(|h| {
+                owner_chain(&handles, h)
+                    .iter()
+                    .any(|o| o.enum_id == handle_id && !kept.contains(&o.value))
+            })
             .map(|h| h.id.clone())
             .collect();
         self.changed();
@@ -746,20 +853,27 @@ impl GraphModel {
     }
 
     pub fn remove_handle(&mut self, definition_ref: &str, side: GroupSide, handle_id: &str) {
-        let Some(def) = self.project.document(definition_ref) else { return };
+        let Some(def) = self.project.document(definition_ref) else {
+            return;
+        };
         let handles = def.interface(side);
         if !handles.iter().any(|h| h.id == handle_id) {
             return;
         }
         let mut ids = vec![handle_id.to_owned()];
         ids.extend(
-            handles.iter().filter(|h| is_under(handles, h, handle_id, None)).map(|h| h.id.clone()),
+            handles
+                .iter()
+                .filter(|h| is_under(handles, h, handle_id, None))
+                .map(|h| h.id.clone()),
         );
         self.remove_handles(definition_ref, side, &ids);
     }
 
     pub(super) fn remove_handles(&mut self, definition_ref: &str, side: GroupSide, ids: &[String]) {
-        let Some(def) = self.user_definition(definition_ref) else { return };
+        let Some(def) = self.user_definition(definition_ref) else {
+            return;
+        };
         def.interface_mut(side).retain(|h| !ids.contains(&h.id));
         if side == GroupSide::Input {
             def.defaults.retain(|id, _| !ids.contains(id));
@@ -792,10 +906,20 @@ impl GraphModel {
     }
 
     /// Move a handle up (-1) or down (+1) among its side's.
-    pub fn move_handle(&mut self, definition_ref: &str, side: GroupSide, handle_id: &str, offset: isize) {
-        let Some(def) = self.user_definition(definition_ref) else { return };
+    pub fn move_handle(
+        &mut self,
+        definition_ref: &str,
+        side: GroupSide,
+        handle_id: &str,
+        offset: isize,
+    ) {
+        let Some(def) = self.user_definition(definition_ref) else {
+            return;
+        };
         let list = def.interface_mut(side);
-        let Some(index) = list.iter().position(|h| h.id == handle_id) else { return };
+        let Some(index) = list.iter().position(|h| h.id == handle_id) else {
+            return;
+        };
         let Some(target) = index.checked_add_signed(offset).filter(|t| *t < list.len()) else {
             return;
         };
@@ -806,7 +930,11 @@ impl GraphModel {
     // ── Type variables ───────────────────────────────────────────────────────
 
     /// Add a type variable to a group, named after the next free letter from T.
-    pub fn add_type_variable(&mut self, definition_ref: &str, types: &[WgslType]) -> Option<TypeVariable> {
+    pub fn add_type_variable(
+        &mut self,
+        definition_ref: &str,
+        types: &[WgslType],
+    ) -> Option<TypeVariable> {
         if types.is_empty() {
             return None;
         }
@@ -816,7 +944,11 @@ impl GraphModel {
             .map(String::from)
             .find(|n| !def.type_variables.iter().any(|v| &v.name == n))
             .unwrap_or_else(|| format!("T{}", def.type_variables.len() + 1));
-        let variable = TypeVariable { id: new_id(), name, types: types.to_vec() };
+        let variable = TypeVariable {
+            id: new_id(),
+            name,
+            types: types.to_vec(),
+        };
         def.type_variables.push(variable.clone());
         self.changed();
         Some(variable)
@@ -833,7 +965,9 @@ impl GraphModel {
         types: Option<&[WgslType]>,
     ) {
         let types = types.filter(|t| !t.is_empty());
-        let Some(def) = self.user_definition(definition_ref) else { return };
+        let Some(def) = self.user_definition(definition_ref) else {
+            return;
+        };
         let Some(variable) = def.type_variables.iter_mut().find(|v| v.id == variable_id) else {
             return;
         };
@@ -847,8 +981,17 @@ impl GraphModel {
         let handles = self.handles_of_variable(definition_ref, variable_id);
         if let Some(types) = types {
             for doc in self.project.definitions.values_mut() {
-                for node in doc.nodes.iter_mut().filter(|n| n.definition_ref() == Some(definition_ref)) {
-                    if node.data.types.get(variable_id).is_some_and(|t| !types.contains(t)) {
+                for node in doc
+                    .nodes
+                    .iter_mut()
+                    .filter(|n| n.definition_ref() == Some(definition_ref))
+                {
+                    if node
+                        .data
+                        .types
+                        .get(variable_id)
+                        .is_some_and(|t| !types.contains(t))
+                    {
                         node.data.types.remove(variable_id);
                     }
                 }
@@ -861,20 +1004,29 @@ impl GraphModel {
     }
 
     fn handles_of_variable(&self, definition_ref: &str, variable_id: &str) -> Vec<String> {
-        self.project.document(definition_ref).map_or_else(Vec::new, |d| {
-            d.inputs
-                .iter()
-                .chain(&d.outputs)
-                .filter(|h| h.ty.variable() == Some(variable_id))
-                .map(|h| h.id.clone())
-                .collect()
-        })
+        self.project
+            .document(definition_ref)
+            .map_or_else(Vec::new, |d| {
+                d.inputs
+                    .iter()
+                    .chain(&d.outputs)
+                    .filter(|h| h.ty.variable() == Some(variable_id))
+                    .map(|h| h.id.clone())
+                    .collect()
+            })
     }
 
     /// Remove a variable; the sockets using it take its first type.
     pub fn remove_type_variable(&mut self, definition_ref: &str, variable_id: &str) {
-        let Some(def) = self.user_definition(definition_ref) else { return };
-        let Some(variable) = def.type_variables.iter().find(|v| v.id == variable_id).cloned() else {
+        let Some(def) = self.user_definition(definition_ref) else {
+            return;
+        };
+        let Some(variable) = def
+            .type_variables
+            .iter()
+            .find(|v| v.id == variable_id)
+            .cloned()
+        else {
             return;
         };
         let fixed = variable.types.first().copied().unwrap_or(WgslType::F32);
@@ -883,7 +1035,12 @@ impl GraphModel {
                 h.ty = HandleType::Fixed(fixed);
             }
         }
-        for item in def.nodes.iter_mut().filter_map(|n| n.data.items.as_mut()).flatten() {
+        for item in def
+            .nodes
+            .iter_mut()
+            .filter_map(|n| n.data.items.as_mut())
+            .flatten()
+        {
             if item.ty.variable() == Some(variable_id) {
                 item.ty = HandleType::Fixed(fixed);
             }
@@ -891,7 +1048,11 @@ impl GraphModel {
         def.type_variables.retain(|v| v.id != variable_id);
         fit_type_owners(def);
         for doc in self.project.definitions.values_mut() {
-            for node in doc.nodes.iter_mut().filter(|n| n.definition_ref() == Some(definition_ref)) {
+            for node in doc
+                .nodes
+                .iter_mut()
+                .filter(|n| n.definition_ref() == Some(definition_ref))
+            {
                 node.data.types.remove(variable_id);
             }
         }
@@ -916,7 +1077,12 @@ impl GraphModel {
     /// the copy's definition ref.
     pub fn deep_clone_group(&mut self, node_id: &str) -> Option<String> {
         let holder = self.project.definition_ref_of(node_id)?.to_owned();
-        let source_ref = self.project.document(&holder)?.node(node_id)?.definition_ref()?.to_owned();
+        let source_ref = self
+            .project
+            .document(&holder)?
+            .node(node_id)?
+            .definition_ref()?
+            .to_owned();
         let source = self.project.document(&source_ref)?.clone();
         let (nodes, edges, _) = clone_subgraph(&source.nodes, &source.edges, Point::default());
         let copy = GraphDocument {
@@ -931,8 +1097,15 @@ impl GraphModel {
         };
         let reference = new_id();
         self.project.definitions.insert(reference.clone(), copy);
-        let target = self.project.definitions.get_mut(&holder)?.node_mut(node_id)?;
-        target.group = Some(GroupRef { definition_ref: reference.clone(), locked: false });
+        let target = self
+            .project
+            .definitions
+            .get_mut(&holder)?
+            .node_mut(node_id)?;
+        target.group = Some(GroupRef {
+            definition_ref: reference.clone(),
+            locked: false,
+        });
         self.changed();
         Some(reference)
     }
@@ -946,7 +1119,12 @@ impl GraphModel {
         let used: HashSet<&str> = library::entries()
             .iter()
             .map(|e| e.label.as_str())
-            .chain(self.project.definitions.values().filter_map(|d| d.label.as_deref()))
+            .chain(
+                self.project
+                    .definitions
+                    .values()
+                    .filter_map(|d| d.label.as_deref()),
+            )
             .collect();
         let base = format!("{source} - Copy");
         if !used.contains(base.as_str()) {

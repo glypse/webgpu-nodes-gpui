@@ -20,7 +20,10 @@ pub const SAMPLE_TEXTURE_LEVEL: &str = "level";
 pub const TEXTURE_SIZE_LEVEL: &str = "level";
 
 pub fn interpolations() -> Vec<EnumVariant> {
-    vec![EnumVariant::new(0, "Linear"), EnumVariant::new(1, "Closest")]
+    vec![
+        EnumVariant::new(0, "Linear"),
+        EnumVariant::new(1, "Closest"),
+    ]
 }
 
 /// What a texture reads outside of its [0, 1] coordinates, by variant value.
@@ -55,7 +58,11 @@ const OUTSIDE_SOURCE: &str = "fn texture_outside(coords: vec2f) -> bool {
 }";
 
 fn sampler_filter(interpolation: i64) -> SamplerFilter {
-    if interpolation == 1 { SamplerFilter::Nearest } else { SamplerFilter::Linear }
+    if interpolation == 1 {
+        SamplerFilter::Nearest
+    } else {
+        SamplerFilter::Linear
+    }
 }
 
 fn sampler_address(extension: i64) -> SamplerAddress {
@@ -73,9 +80,19 @@ fn sampler_address(extension: i64) -> SamplerAddress {
 pub(super) fn sample_texture_node() -> NodeDescriptor {
     let mut uv = NodeInputDef::new(SAMPLE_TEXTURE_UV, "uv", &[WgslType::Vec2f]);
     uv.fallback = true;
-    let data = NodeData::with_values([("interpolation", 0.0), ("extension", 0.0), (SAMPLE_TEXTURE_LEVEL, 0.0)]);
+    let data = NodeData::with_values([
+        ("interpolation", 0.0),
+        ("extension", 0.0),
+        (SAMPLE_TEXTURE_LEVEL, 0.0),
+    ]);
     NodeDescriptor::new(SAMPLE_TEXTURE, "Sample Texture", NodeCategory::Texture)
-        .aliases(&["Texture Sample", "Image Texture", "texture2D", "Lookup", "Texture Fetch"])
+        .aliases(&[
+            "Texture Sample",
+            "Image Texture",
+            "texture2D",
+            "Lookup",
+            "Texture Fetch",
+        ])
         .inputs(vec![
             NodeInputDef::new("texture", "texture", &[WgslType::Texture]),
             uv,
@@ -128,14 +145,21 @@ fn sample_texture_wgsl(ctx: &mut WgslCtx<'_>) -> Vec<String> {
     };
     let level = ctx.promote_input(SAMPLE_TEXTURE_LEVEL);
     let sample = |ctx: &mut WgslCtx<'_>, filter| {
-        let options = ReadOptions { filter, address, level: Some(&level) };
+        let options = ReadOptions {
+            filter,
+            address,
+            level: Some(&level),
+        };
         read_texture(ctx, &texture, format, &sampled, options)
     };
     let raw = match interpolation {
         None => {
             let linear = sample(ctx, SamplerFilter::Linear);
             let nearest = sample(ctx, SamplerFilter::Nearest);
-            format!("select({linear}, {nearest}, {} == 1u)", ctx.promote_input("interpolation"))
+            format!(
+                "select({linear}, {nearest}, {} == 1u)",
+                ctx.promote_input("interpolation")
+            )
         }
         Some(i) => sample(ctx, sampler_filter(i)),
     };
@@ -164,8 +188,16 @@ pub(super) fn texture_size_node() -> NodeDescriptor {
     let mut level = NodeInputDef::new(TEXTURE_SIZE_LEVEL, "level", &[WgslType::I32]);
     level.frame = true;
     NodeDescriptor::new(TEXTURE_SIZE, "Texture Size", NodeCategory::Texture)
-        .aliases(&["Image Size", "Texture Dimensions", "Texel Size", "Resolution"])
-        .inputs(vec![NodeInputDef::new("texture", "texture", &[WgslType::Texture]), level])
+        .aliases(&[
+            "Image Size",
+            "Texture Dimensions",
+            "Texel Size",
+            "Resolution",
+        ])
+        .inputs(vec![
+            NodeInputDef::new("texture", "texture", &[WgslType::Texture]),
+            level,
+        ])
         .outputs(vec![
             NodeOutputDef::new("size", "size", WgslType::Vec2f),
             NodeOutputDef::new("texel", "texel", WgslType::Vec2f),
@@ -177,7 +209,10 @@ pub(super) fn texture_size_node() -> NodeDescriptor {
             let size = ctx.output_var("size");
             let texture = ctx.texture("texture");
             let levels = format!("i32(textureNumLevels({texture}))");
-            let level = format!("clamp({}, 0, {levels} - 1)", ctx.promote_input(TEXTURE_SIZE_LEVEL));
+            let level = format!(
+                "clamp({}, 0, {levels} - 1)",
+                ctx.promote_input(TEXTURE_SIZE_LEVEL)
+            );
             vec![
                 format!("let {size} = vec2f(textureDimensions({texture}, {level}));"),
                 format!("let {} = 1.0 / {size};", ctx.output_var("texel")),
@@ -191,7 +226,10 @@ pub(super) fn texture_size_node() -> NodeDescriptor {
 /// the type picked on the node, converted from what the texture holds.
 pub(super) fn load_texel_node() -> NodeDescriptor {
     let mut data = NodeData::default();
-    data.values.insert("texel".to_owned(), crate::types::InputValue::vector(&[0.0, 0.0]));
+    data.values.insert(
+        "texel".to_owned(),
+        crate::types::InputValue::vector(&[0.0, 0.0]),
+    );
     data.values.insert("level".to_owned(), 0.0.into());
     let mut d = NodeDescriptor::new(LOAD_TEXEL, "Load Texel", NodeCategory::Texture)
         .aliases(&["texelFetch", "textureLoad", "Texel Fetch", "Pixel Read", "Image Load", "Read Pixel"])
@@ -219,11 +257,17 @@ pub(super) fn load_texel_node() -> NodeDescriptor {
                 format!("let {} = {converted};", ctx.var_name),
             ]
         });
-    d.type_family =
-        Some(TypeFamily { key: LOAD_TEXEL.to_owned(), types: vec![WgslType::Vec4f, WgslType::Vec4i, WgslType::Vec4u] });
+    d.type_family = Some(TypeFamily {
+        key: LOAD_TEXEL.to_owned(),
+        types: vec![WgslType::Vec4f, WgslType::Vec4i, WgslType::Vec4u],
+    });
     d
 }
 
 pub(super) fn texture_nodes() -> Vec<NodeDescriptor> {
-    vec![sample_texture_node(), texture_size_node(), load_texel_node()]
+    vec![
+        sample_texture_node(),
+        texture_size_node(),
+        load_texel_node(),
+    ]
 }

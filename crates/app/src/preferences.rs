@@ -33,7 +33,11 @@ impl Global for Preferences {}
 
 #[cfg(not(test))]
 fn file() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("webgpu-nodes").join("preferences.json"))
+    Some(
+        dirs::config_dir()?
+            .join("webgpu-nodes")
+            .join("preferences.json"),
+    )
 }
 
 /// Tests neither read nor write the user's preferences.
@@ -49,7 +53,9 @@ impl Preferences {
 
     /// What was saved, or the defaults when there is nothing readable.
     pub fn load() -> Self {
-        let Some(file) = file() else { return Self::default() };
+        let Some(file) = file() else {
+            return Self::default();
+        };
         match fs::read_to_string(&file) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
                 log::warn!("ignoring unreadable preferences {}: {e}", file.display());
@@ -81,7 +87,13 @@ impl Preferences {
 
     /// The first family of the list: GPUI takes one family name, not a comma-separated list.
     pub fn font_family(&self) -> Option<String> {
-        let first = self.font.split(',').next()?.trim().trim_matches(['"', '\'']).trim();
+        let first = self
+            .font
+            .split(',')
+            .next()?
+            .trim()
+            .trim_matches(['"', '\''])
+            .trim();
         (!first.is_empty()).then(|| first.to_owned())
     }
 
@@ -113,8 +125,10 @@ pub fn toggle_developer_tools(cx: &mut App) {
 
 /// Whether developer tools are on, or the build's default before preferences are set up.
 pub fn developer_tools_on(cx: &App) -> bool {
-    cx.try_global::<Preferences>()
-        .map_or_else(|| Preferences::default().developer_tools_enabled(), Preferences::developer_tools_enabled)
+    cx.try_global::<Preferences>().map_or_else(
+        || Preferences::default().developer_tools_enabled(),
+        Preferences::developer_tools_enabled,
+    )
 }
 
 /// Logs a shader's generated code while developer tools are on. Callers pass
@@ -170,29 +184,56 @@ mod tests {
 
     #[test]
     fn the_font_is_the_first_family_of_the_list() {
-        let p = |font: &str| Preferences { font: font.to_owned(), ..Preferences::default() };
-        assert_eq!(p("Inter, system-ui").font_family().as_deref(), Some("Inter"));
-        assert_eq!(p("\"Fira Sans\", sans-serif").font_family().as_deref(), Some("Fira Sans"));
+        let p = |font: &str| Preferences {
+            font: font.to_owned(),
+            ..Preferences::default()
+        };
+        assert_eq!(
+            p("Inter, system-ui").font_family().as_deref(),
+            Some("Inter")
+        );
+        assert_eq!(
+            p("\"Fira Sans\", sans-serif").font_family().as_deref(),
+            Some("Fira Sans")
+        );
         assert_eq!(p("  ").font_family(), None);
         assert_eq!(Preferences::default().font_family(), None);
     }
 
     #[test]
     fn preferences_round_trip_and_tolerate_missing_fields() {
-        let p = Preferences { theme: ThemePreference::Dark, font: "Inter".into(), developer_tools: None };
+        let p = Preferences {
+            theme: ThemePreference::Dark,
+            font: "Inter".into(),
+            developer_tools: None,
+        };
         let json = serde_json::to_string(&p).expect("serialises");
-        assert_eq!(serde_json::from_str::<Preferences>(&json).expect("reads"), p);
-        assert_eq!(serde_json::from_str::<Preferences>("{}").expect("reads"), Preferences::default());
         assert_eq!(
-            serde_json::from_str::<Preferences>(r#"{"theme":"light"}"#).expect("reads").theme,
+            serde_json::from_str::<Preferences>(&json).expect("reads"),
+            p
+        );
+        assert_eq!(
+            serde_json::from_str::<Preferences>("{}").expect("reads"),
+            Preferences::default()
+        );
+        assert_eq!(
+            serde_json::from_str::<Preferences>(r#"{"theme":"light"}"#)
+                .expect("reads")
+                .theme,
             ThemePreference::Light
         );
     }
 
     #[test]
     fn developer_tools_follow_the_saved_choice_then_the_build() {
-        let on = Preferences { developer_tools: Some(true), ..Preferences::default() };
-        let off = Preferences { developer_tools: Some(false), ..Preferences::default() };
+        let on = Preferences {
+            developer_tools: Some(true),
+            ..Preferences::default()
+        };
+        let off = Preferences {
+            developer_tools: Some(false),
+            ..Preferences::default()
+        };
         assert!(on.developer_tools_enabled());
         assert!(!off.developer_tools_enabled());
     }

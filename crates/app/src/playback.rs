@@ -9,8 +9,8 @@ use shader_graph::graph::MAX_CANVAS_SIZE;
 
 use crate::project::AssetFiles;
 use runtime::{
-    CompileQueue, Compiled, Frame, MediaSource, MediaStatus, PixelFormat, Player, Presented, Program, ProgramError, RefreshRateMeter,
-    RenderOptions, Renderer, Size, Timing,
+    CompileQueue, Compiled, Frame, MediaSource, MediaStatus, PixelFormat, Player, Presented,
+    Program, ProgramError, RefreshRateMeter, RenderOptions, Renderer, Size, Timing,
 };
 
 /// Seconds' worth of samples before the display's refresh rate is judged.
@@ -143,7 +143,9 @@ impl Playback {
             ),
         };
         let player = Player::new(DEFAULT_TIMING);
-        let compiler = renderer.as_ref().map(|r| CompileQueue::new(r.compiler(), || {}));
+        let compiler = renderer
+            .as_ref()
+            .map(|r| CompileQueue::new(r.compiler(), || {}));
         Self {
             renderer,
             program: None,
@@ -183,7 +185,12 @@ impl Playback {
     }
 
     /// Takes the files of the project's assets, for the programs reading them.
-    pub fn set_asset_files(&mut self, files: AssetFiles, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_asset_files(
+        &mut self,
+        files: AssetFiles,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.files = files;
         self.hashes.clear();
         self.watch_media(window, cx);
@@ -196,7 +203,9 @@ impl Playback {
     /// the images no program reads any more. Decoding happens off the main
     /// thread: `media_ready` shows each one as it arrives.
     fn sync_media(&mut self) {
-        let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else { return };
+        let (Some(renderer), Some(program)) = (&mut self.renderer, &self.program) else {
+            return;
+        };
         let sources = media_sources(&self.files, &mut self.hashes, program.plan());
         renderer.sync_media(&sources);
     }
@@ -212,7 +221,9 @@ impl Playback {
         if self.media_watching {
             return;
         }
-        let Some(renderer) = &mut self.renderer else { return };
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
         self.media_watching = true;
         let (wake, woken) = async_channel::bounded::<()>(1);
         renderer.set_media_waker(move || {
@@ -220,7 +231,9 @@ impl Playback {
         });
         cx.spawn_in(window, async move |this, cx| {
             while woken.recv().await.is_ok() {
-                let updated = guard::guard("media ready", || this.update_in(cx, |p, window, cx| p.media_ready(window, cx)));
+                let updated = guard::guard("media ready", || {
+                    this.update_in(cx, |p, window, cx| p.media_ready(window, cx))
+                });
                 if updated.is_none_or(|updated| updated.is_err()) {
                     break;
                 }
@@ -251,7 +264,10 @@ impl Playback {
         if let Some(held) = self.held.get(&area) {
             return Some(held.clone());
         }
-        self.frames.iter().next().map(|(size, shown)| (*size, shown.clone()))
+        self.frames
+            .iter()
+            .next()
+            .map(|(size, shown)| (*size, shown.clone()))
     }
 
     pub fn timing(&self) -> Timing {
@@ -429,7 +445,10 @@ impl Playback {
 
     /// The size frames render at for exports and the canvas readouts: the followed preview area's, while following it.
     pub fn render_size(&self) -> Size {
-        let pane = self.followed.and_then(|area| self.panes.get(&area)).copied();
+        let pane = self
+            .followed
+            .and_then(|area| self.panes.get(&area))
+            .copied();
         canvas_size(self.follow, pane, self.resolution)
     }
 
@@ -444,7 +463,13 @@ impl Playback {
             return vec![self.render_size()];
         }
         let mut sizes: Vec<Size> = Vec::new();
-        for size in self.followed.iter().filter_map(|a| self.panes.get(a)).chain(self.panes.values()).copied() {
+        for size in self
+            .followed
+            .iter()
+            .filter_map(|a| self.panes.get(a))
+            .chain(self.panes.values())
+            .copied()
+        {
             if !sizes.contains(&size) {
                 sizes.push(size);
             }
@@ -641,7 +666,10 @@ impl Playback {
         let (shown, gpu_time) = match presented {
             #[cfg(target_os = "macos")]
             Presented::Surfaces { surfaces, gpu_time } => (
-                surfaces.into_iter().map(|(size, surface)| (size, Shown::Surface(surface))).collect::<HashMap<_, _>>(),
+                surfaces
+                    .into_iter()
+                    .map(|(size, surface)| (size, Shown::Surface(surface)))
+                    .collect::<HashMap<_, _>>(),
                 gpu_time,
             ),
             Presented::Pixels(frame) => {
@@ -658,7 +686,11 @@ impl Playback {
         };
         #[cfg(target_os = "macos")]
         {
-            let sizes: Vec<(EntityId, Size)> = self.panes.keys().map(|area| (*area, self.size_of(*area))).collect();
+            let sizes: Vec<(EntityId, Size)> = self
+                .panes
+                .keys()
+                .map(|area| (*area, self.size_of(*area)))
+                .collect();
             for (area, size) in sizes {
                 if let Some(frame) = shown.get(&size) {
                     self.held.insert(area, (size, frame.clone()));
@@ -692,9 +724,17 @@ fn media_sources(
 ) -> BTreeMap<String, MediaSource> {
     let mut sources = BTreeMap::new();
     for resource in &plan.resources {
-        let ResourceDecl::Media { asset, video, .. } = resource else { continue };
-        let Some(bytes) = files.get(asset) else { continue };
-        let kind = if video.is_some() { AssetKind::Video } else { AssetKind::Image };
+        let ResourceDecl::Media { asset, video, .. } = resource else {
+            continue;
+        };
+        let Some(bytes) = files.get(asset) else {
+            continue;
+        };
+        let kind = if video.is_some() {
+            AssetKind::Video
+        } else {
+            AssetKind::Image
+        };
         let hash = match hashes.get(asset) {
             Some((known, hash)) if Arc::ptr_eq(known, bytes) => hash.clone(),
             _ => {
@@ -703,13 +743,23 @@ fn media_sources(
                 hash
             }
         };
-        sources.insert(asset.clone(), MediaSource { kind, hash, bytes: bytes.clone() });
+        sources.insert(
+            asset.clone(),
+            MediaSource {
+                kind,
+                hash,
+                bytes: bytes.clone(),
+            },
+        );
     }
     sources
 }
 
 fn uniform_values(uniforms: &[(String, shader_graph::UniformValue)]) -> BTreeMap<String, Vec<f64>> {
-    uniforms.iter().map(|(name, v)| (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect())).collect()
+    uniforms
+        .iter()
+        .map(|(name, v)| (name.clone(), v.0.iter().map(|c| f64::from(*c)).collect()))
+        .collect()
 }
 
 /// The size frames render at: the followed pane's while following it, else `stored`.
@@ -726,7 +776,11 @@ pub fn device_size(width: f32, height: f32, scale: f32) -> Option<Size> {
     // `min` would return the cap for NaN, so the comparison is written to send NaN to 0.
     let side = |logical: f32| {
         let pixels = (logical * scale).round();
-        if pixels > 0.0 { pixels.min(MAX_CANVAS_SIZE as f32) as u32 } else { 0 }
+        if pixels > 0.0 {
+            pixels.min(MAX_CANVAS_SIZE as f32) as u32
+        } else {
+            0
+        }
     };
     let size = Size::new(side(width), side(height));
     (size.width > 0 && size.height > 0).then_some(size)
@@ -735,7 +789,9 @@ pub fn device_size(width: f32, height: f32, scale: f32) -> Option<Size> {
 /// The frame as an image GPUI can draw: its BGRA bytes, premultiplied as the renderer drew them.
 fn image_of(frame: Frame) -> Option<Arc<RenderImage>> {
     let buffer = image::RgbaImage::from_raw(frame.size.width, frame.size.height, frame.pixels)?;
-    Some(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])))
+    Some(Arc::new(RenderImage::new(smallvec::smallvec![
+        image::Frame::new(buffer)
+    ])))
 }
 
 /// Averages the CPU and GPU cost of the preview's frames, logged every `STATS_PERIOD`.
@@ -772,8 +828,7 @@ impl FrameStats {
         }
         let frames = f64::from(self.frames);
         let per_frame_ms = |total: Duration| total.as_secs_f64() * 1e3 / frames;
-        let gpu_ms = (self.gpu_count > 0)
-            .then(|| self.gpu_total * 1e3 / f64::from(self.gpu_count));
+        let gpu_ms = (self.gpu_count > 0).then(|| self.gpu_total * 1e3 / f64::from(self.gpu_count));
         log::debug!(
             "preview: {:.1} fps ({:.2} ms per frame; submit {:.3} ms, present {:.3} ms, gpu {} ms)",
             frames / elapsed.as_secs_f64(),
@@ -807,7 +862,9 @@ mod tests {
     fn scene() -> shader_graph::codegen::Program {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scenes/default.json");
         let loaded = crate::project::read(&path).expect("the default scene loads");
-        GraphModel::new(loaded.project).generate().expect("the default scene generates")
+        GraphModel::new(loaded.project)
+            .generate()
+            .expect("the default scene generates")
     }
 
     fn set_source(
@@ -837,7 +894,10 @@ mod tests {
         let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
         let playback = harness.read_with(cx, |h, _| h.0.clone());
         set_source(cx, &playback, Ok(scene()));
-        assert!(playback.read_with(cx, |p, _| !p.code.is_empty()), "the code is known at once");
+        assert!(
+            playback.read_with(cx, |p, _| !p.code.is_empty()),
+            "the code is known at once"
+        );
         wait_for_compile(cx, &playback);
         playback.read_with(cx, |p, _| {
             assert!(p.program.is_some(), "the compiled program was swapped in");
@@ -846,7 +906,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_program_that_fails_to_compile_keeps_the_last_one_and_reports_the_error(cx: &mut TestAppContext) {
+    fn a_program_that_fails_to_compile_keeps_the_last_one_and_reports_the_error(
+        cx: &mut TestAppContext,
+    ) {
         let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
         let playback = harness.read_with(cx, |h, _| h.0.clone());
         set_source(cx, &playback, Ok(scene()));
@@ -861,7 +923,11 @@ mod tests {
         wait_for_compile(cx, &playback);
         playback.read_with(cx, |p, _| {
             assert!(p.failure.is_some(), "the error is reported");
-            assert_eq!(p.program.as_ref().map(|p| p.id()), good, "the last working program stays");
+            assert_eq!(
+                p.program.as_ref().map(|p| p.id()),
+                good,
+                "the last working program stays"
+            );
         });
 
         set_source(cx, &playback, Ok(scene()));
@@ -880,7 +946,10 @@ mod tests {
         set_source(cx, &playback, Err("no output".into()));
         wait_for_compile(cx, &playback);
         playback.read_with(cx, |p, _| {
-            assert_eq!(p.failure.as_ref().map(|f| f.message.to_string()).as_deref(), Some("no output"));
+            assert_eq!(
+                p.failure.as_ref().map(|f| f.message.to_string()).as_deref(),
+                Some("no output")
+            );
             assert!(p.program.is_none());
         });
     }
@@ -890,7 +959,9 @@ mod tests {
         let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| Playback::new())));
         let playback = harness.read_with(cx, |h, _| h.0.clone());
         set_source(cx, &playback, Ok(scene()));
-        let frame = playback.update(cx, |p, _| p.export_frame()).expect("a frame");
+        let frame = playback
+            .update(cx, |p, _| p.export_frame())
+            .expect("a frame");
         assert!(!frame.pixels.is_empty());
     }
 

@@ -6,8 +6,8 @@ use crate::codegen::CodegenGraph;
 use crate::enums::{MATCH, WIDTH_SWITCH};
 use crate::graph::{GROUP_INPUT, GraphEdge, GraphNode, NODE_GROUP};
 use crate::nodes::{
-    COMPONENT_COUNT, FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE, TEXTURE_SIZE, TEXTURE_SIZE_LEVEL, VIDEO, is_video_metadata,
-    resolve_descriptor,
+    COMPONENT_COUNT, FALLBACK, FALLBACK_DEFAULT, FALLBACK_VALUE, TEXTURE_SIZE, TEXTURE_SIZE_LEVEL,
+    VIDEO, is_video_metadata, resolve_descriptor,
 };
 use crate::passes::TextureSources;
 use crate::zones::{ITERATIONS_HANDLE, REPEAT_INPUT, ZoneKind, zone_items, zone_kind_of};
@@ -107,7 +107,10 @@ impl<'g> FrameValueAnalysis<'g> {
             FrameResult::Texture => None,
             FrameResult::PerPixel(reason) => {
                 let descriptor = resolve_descriptor(target, self.graph.project);
-                let input = descriptor.inputs.iter().find(|i| i.id == edge.target_handle)?;
+                let input = descriptor
+                    .inputs
+                    .iter()
+                    .find(|i| i.id == edge.target_handle)?;
                 input.frame.then(|| FrameLink::Invalid {
                     reason: format!("{FRAME_VALUE_REQUIRED}: {}.", reason.trim_end_matches('.')),
                 })
@@ -125,8 +128,12 @@ impl<'g> FrameValueAnalysis<'g> {
     /// depends on: those a Match, Width Switch or Fallback doesn't pick are
     /// left out, as is whatever a Component Count reads (only its type).
     pub fn inputs_read(&self, path: &[String], node_id: &str) -> Vec<String> {
-        let Some(instance) = self.sources.instance(path) else { return Vec::new() };
-        let Some(node) = instance.doc.node(node_id) else { return Vec::new() };
+        let Some(instance) = self.sources.instance(path) else {
+            return Vec::new();
+        };
+        let Some(node) = instance.doc.node(node_id) else {
+            return Vec::new();
+        };
         let ids: Vec<String> = self
             .graph
             .resolver
@@ -137,26 +144,43 @@ impl<'g> FrameValueAnalysis<'g> {
             .collect();
         match node.node_type.as_str() {
             MATCH => {
-                let picked =
-                    self.sources.with_enums(&instance, |e| e.matched_case(node_id, &instance.constants));
+                let picked = self
+                    .sources
+                    .with_enums(&instance, |e| e.matched_case(node_id, &instance.constants));
                 picked.map_or(ids, |p| vec![p])
             }
             WIDTH_SWITCH => {
-                let picked = self.sources.with_enums(&instance, |e| e.width_case(node_id));
+                let picked = self
+                    .sources
+                    .with_enums(&instance, |e| e.width_case(node_id));
                 picked.map_or(ids, |p| vec![p])
             }
             COMPONENT_COUNT => Vec::new(),
             FALLBACK => {
-                let linked = instance.edges_into(node_id).any(|e| e.target_handle == FALLBACK_VALUE);
-                vec![if linked { FALLBACK_VALUE } else { FALLBACK_DEFAULT }.to_owned()]
+                let linked = instance
+                    .edges_into(node_id)
+                    .any(|e| e.target_handle == FALLBACK_VALUE);
+                vec![
+                    if linked {
+                        FALLBACK_VALUE
+                    } else {
+                        FALLBACK_DEFAULT
+                    }
+                    .to_owned(),
+                ]
             }
             _ => ids,
         }
     }
 
     fn input(&self, path: &[String], node_id: &str, input_id: &str) -> FrameResult {
-        let Some(instance) = self.sources.instance(path) else { return FrameResult::Frame };
-        for edge in instance.edges_into(node_id).filter(|e| e.target_handle == input_id) {
+        let Some(instance) = self.sources.instance(path) else {
+            return FrameResult::Frame;
+        };
+        for edge in instance
+            .edges_into(node_id)
+            .filter(|e| e.target_handle == input_id)
+        {
             let result = self.output(path, &edge.source, &edge.source_handle);
             if !result.is_frame() {
                 return result;
@@ -185,10 +209,22 @@ impl<'g> FrameValueAnalysis<'g> {
     }
 
     fn compute(&self, path: &[String], node_id: &str, handle: &str) -> FrameResult {
-        let Some(instance) = self.sources.instance(path) else { return no("There's nothing to read.") };
-        let Some(node) = instance.doc.node(node_id) else { return no("There's nothing to read.") };
-        let types = self.graph.resolver.resolve(self.graph.project, node, &instance.bindings);
-        if types.resolved_outputs.iter().find(|o| o.id == handle).is_some_and(|o| o.ty.is_texture()) {
+        let Some(instance) = self.sources.instance(path) else {
+            return no("There's nothing to read.");
+        };
+        let Some(node) = instance.doc.node(node_id) else {
+            return no("There's nothing to read.");
+        };
+        let types = self
+            .graph
+            .resolver
+            .resolve(self.graph.project, node, &instance.bindings);
+        if types
+            .resolved_outputs
+            .iter()
+            .find(|o| o.id == handle)
+            .is_some_and(|o| o.ty.is_texture())
+        {
             return FrameResult::Texture;
         }
         let label = || resolve_descriptor(node, self.graph.project).label.clone();
@@ -217,9 +253,13 @@ impl<'g> FrameValueAnalysis<'g> {
             return self.group_output(path, node, handle);
         }
         match zone_kind_of(ty) {
-            Some(ZoneKind::Simulation) => return no(format!("{} keeps its state for each pixel.", label())),
+            Some(ZoneKind::Simulation) => {
+                return no(format!("{} keeps its state for each pixel.", label()));
+            }
             Some(ZoneKind::Repeat) => return self.zone_value(path, node_id),
-            Some(ZoneKind::Passes) => return no(format!("{} repeats passes, not a computation.", label())),
+            Some(ZoneKind::Passes) => {
+                return no(format!("{} repeats passes, not a computation.", label()));
+            }
             None => {}
         }
         if resolve_descriptor(node, self.graph.project).cpu.is_none() {
@@ -236,23 +276,42 @@ impl<'g> FrameValueAnalysis<'g> {
 
     fn group_output(&self, path: &[String], node: &GraphNode, handle: &str) -> FrameResult {
         let inner: Vec<String> = path.iter().cloned().chain([node.id.clone()]).collect();
-        let Some(definition) = node.definition_ref().and_then(|r| self.graph.project.document(r)) else {
+        let Some(definition) = node
+            .definition_ref()
+            .and_then(|r| self.graph.project.document(r))
+        else {
             return FrameResult::Frame;
         };
-        definition.output_node_of(handle).map_or(FrameResult::Frame, |o| self.input(&inner, &o.id, handle))
+        definition
+            .output_node_of(handle)
+            .map_or(FrameResult::Frame, |o| self.input(&inner, &o.id, handle))
     }
 
     /// An output of a repeat zone's boundary. A zone whose inputs and next
     /// values are all frame values runs on the CPU, and so are its outputs and
     /// what's in it, its iteration included; otherwise none of them is.
     fn zone_value(&self, path: &[String], node_id: &str) -> FrameResult {
-        let Some(instance) = self.sources.instance(path) else { return no("The zone isn't paired.") };
-        let Some(zone) = instance.zones.zone_of_boundary.get(node_id).and_then(|z| instance.zones.zones.get(z))
+        let Some(instance) = self.sources.instance(path) else {
+            return no("The zone isn't paired.");
+        };
+        let Some(zone) = instance
+            .zones
+            .zone_of_boundary
+            .get(node_id)
+            .and_then(|z| instance.zones.zones.get(z))
         else {
             return no("The zone isn't paired.");
         };
-        let inside = instance.doc.node(node_id).is_some_and(|n| n.is(REPEAT_INPUT));
-        if inside && self.assuming.borrow().contains(&format!("{}|{}", key(path), zone.id)) {
+        let inside = instance
+            .doc
+            .node(node_id)
+            .is_some_and(|n| n.is(REPEAT_INPUT));
+        if inside
+            && self
+                .assuming
+                .borrow()
+                .contains(&format!("{}|{}", key(path), zone.id))
+        {
             return FrameResult::Frame;
         }
         self.zone_result(path, &zone.id)
@@ -260,17 +319,29 @@ impl<'g> FrameValueAnalysis<'g> {
 
     fn zone_result(&self, path: &[String], zone_id: &str) -> FrameResult {
         let cache_key = format!("{}|zone|{zone_id}", key(path));
-        if let Some(known) = self.memo.borrow().get(&cache_key).or(self.scratch.borrow().get(&cache_key)) {
+        if let Some(known) = self
+            .memo
+            .borrow()
+            .get(&cache_key)
+            .or(self.scratch.borrow().get(&cache_key))
+        {
             return known.clone();
         }
-        let Some(instance) = self.sources.instance(path) else { return no("The zone isn't paired.") };
-        let Some(zone) = instance.zones.zones.get(zone_id) else { return no("The zone isn't paired.") };
-        let Some(output) = instance.doc.node(&zone.output_id) else { return no("The zone isn't paired.") };
+        let Some(instance) = self.sources.instance(path) else {
+            return no("The zone isn't paired.");
+        };
+        let Some(zone) = instance.zones.zones.get(zone_id) else {
+            return no("The zone isn't paired.");
+        };
+        let Some(output) = instance.doc.node(&zone.output_id) else {
+            return no("The zone isn't paired.");
+        };
         let items = zone_items(Some(output));
         let assumed = format!("{}|{zone_id}", key(path));
         self.assuming.borrow_mut().insert(assumed.clone());
         let mut result = FrameResult::Frame;
-        let handles = std::iter::once(ITERATIONS_HANDLE.to_owned()).chain(items.iter().map(|i| i.id.clone()));
+        let handles =
+            std::iter::once(ITERATIONS_HANDLE.to_owned()).chain(items.iter().map(|i| i.id.clone()));
         for id in handles {
             let read = self.input(path, &zone.input_id, &id);
             if !read.is_frame() {

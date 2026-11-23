@@ -30,7 +30,10 @@ impl GraphModel {
             .filter(|id| self.node(id).is_some_and(|n| n.is(REROUTE)))
             .cloned()
             .collect();
-        let hide = reroutes.iter().any(|id| self.node(id).is_some_and(|n| n.data.hide_links != Some(true)));
+        let hide = reroutes.iter().any(|id| {
+            self.node(id)
+                .is_some_and(|n| n.data.hide_links != Some(true))
+        });
         for id in &reroutes {
             self.update_node_data(id, |d| d.hide_links = hide.then_some(true));
         }
@@ -45,11 +48,15 @@ impl GraphModel {
             return Vec::new();
         }
         let key = self.active_definition_ref();
-        let Some(doc) = self.project.document(&key) else { return Vec::new() };
+        let Some(doc) = self.project.document(&key) else {
+            return Vec::new();
+        };
         let mut order: Vec<(String, String)> = Vec::new();
         let mut by_source: HashMap<(String, String), (Vec<GraphEdge>, Vec<Point>)> = HashMap::new();
         for (edge_id, position) in cuts {
-            let Some(edge) = doc.edge(edge_id) else { continue };
+            let Some(edge) = doc.edge(edge_id) else {
+                continue;
+            };
             let source = (edge.source.clone(), edge.source_handle.clone());
             let entry = by_source.entry(source.clone()).or_insert_with(|| {
                 order.push(source);
@@ -64,7 +71,9 @@ impl GraphModel {
         let mut cut: HashSet<String> = HashSet::new();
         let (mut reroutes, mut links): (Vec<GraphNode>, Vec<GraphEdge>) = (Vec::new(), Vec::new());
         for source in &order {
-            let Some((edges, positions)) = by_source.get(source) else { continue };
+            let Some((edges, positions)) = by_source.get(source) else {
+                continue;
+            };
             let Some(first) = edges.first() else { continue };
             let count = positions.len() as f32;
             let at = Point::new(
@@ -96,7 +105,9 @@ impl GraphModel {
             return Vec::new();
         }
         let ids = reroutes.iter().map(|n| n.id.clone()).collect();
-        let Some(doc) = self.doc_mut(&key) else { return Vec::new() };
+        let Some(doc) = self.doc_mut(&key) else {
+            return Vec::new();
+        };
         doc.nodes.extend(reroutes);
         doc.edges.retain(|e| !cut.contains(&e.id));
         doc.edges.extend(links);
@@ -107,26 +118,44 @@ impl GraphModel {
     /// A group node's type variables: the type each takes, the one forced on
     /// the node if any, and whether links can decide it.
     pub fn variable_choices(&self, node_id: &str) -> Vec<VariableChoice> {
-        let Some(node) = self.node(node_id) else { return Vec::new() };
+        let Some(node) = self.node(node_id) else {
+            return Vec::new();
+        };
         let Some(def) = node.definition_ref().and_then(|r| self.project.document(r)) else {
             return Vec::new();
         };
-        let Some(doc_ref) = self.project.definition_ref_of(node_id) else { return Vec::new() };
+        let Some(doc_ref) = self.project.definition_ref_of(node_id) else {
+            return Vec::new();
+        };
         let bindings = self.view_bindings(doc_ref, &self.path);
         let resolved = self.resolver.resolve(&self.project, node, &bindings);
         let mut unforced = node.data.clone();
         unforced.types.clear();
-        let free = self.resolver.resolve_with(&self.project, node, &unforced, &bindings);
+        let free = self
+            .resolver
+            .resolve_with(&self.project, node, &unforced, &bindings);
         def.type_variables
             .iter()
             .map(|variable| {
-                let inferable = def.inputs.iter().any(|h| h.ty.variable() == Some(variable.id.as_str()));
+                let inferable = def
+                    .inputs
+                    .iter()
+                    .any(|h| h.ty.variable() == Some(variable.id.as_str()));
                 let fallback = variable.types.first().copied().unwrap_or(WgslType::F32);
                 VariableChoice {
                     variable: variable.clone(),
-                    ty: resolved.bindings.as_ref().and_then(|b| b.get(&variable.id)).copied().unwrap_or(fallback),
+                    ty: resolved
+                        .bindings
+                        .as_ref()
+                        .and_then(|b| b.get(&variable.id))
+                        .copied()
+                        .unwrap_or(fallback),
                     inferred: if inferable {
-                        free.bindings.as_ref().and_then(|b| b.get(&variable.id)).copied().unwrap_or(fallback)
+                        free.bindings
+                            .as_ref()
+                            .and_then(|b| b.get(&variable.id))
+                            .copied()
+                            .unwrap_or(fallback)
                     } else {
                         fallback
                     },

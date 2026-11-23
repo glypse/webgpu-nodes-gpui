@@ -15,7 +15,9 @@ use common::source;
 fn png(width: u32, height: u32) -> Vec<u8> {
     let image = image::RgbaImage::from_pixel(width, height, image::Rgba([200, 10, 10, 255]));
     let mut out = Cursor::new(Vec::new());
-    image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+    image
+        .write_to(&mut out, image::ImageFormat::Png)
+        .expect("encodes");
     out.into_inner()
 }
 
@@ -28,10 +30,15 @@ fn settle(renderer: &mut Renderer, sources: &BTreeMap<String, MediaSource>) {
     renderer.sync_media(sources);
     loop {
         renderer.poll_media();
-        if sources.keys().all(|asset| renderer.media_status(asset) != MediaStatus::Loading) {
+        if sources
+            .keys()
+            .all(|asset| renderer.media_status(asset) != MediaStatus::Loading)
+        {
             return;
         }
-        woken.recv_timeout(Duration::from_secs(20)).expect("the images decode");
+        woken
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the images decode");
     }
 }
 
@@ -41,13 +48,19 @@ fn decodes_an_image_to_its_size() {
     let sources = BTreeMap::from([("photo".to_owned(), source(AssetKind::Image, &png(5, 3)))]);
     assert_eq!(renderer.media_status("photo"), MediaStatus::Missing);
     settle(&mut renderer, &sources);
-    assert_eq!(renderer.media_status("photo"), MediaStatus::Ready(Size::new(5, 3)));
+    assert_eq!(
+        renderer.media_status("photo"),
+        MediaStatus::Ready(Size::new(5, 3))
+    );
 }
 
 #[test]
 fn a_file_that_isnt_an_image_fails_with_its_reason() {
     let mut renderer = Renderer::new().expect("a GPU");
-    let sources = BTreeMap::from([("broken".to_owned(), source(AssetKind::Image, b"not an image"))]);
+    let sources = BTreeMap::from([(
+        "broken".to_owned(),
+        source(AssetKind::Image, b"not an image"),
+    )]);
     settle(&mut renderer, &sources);
     assert!(
         matches!(renderer.media_status("broken"), MediaStatus::Failed(m) if m.starts_with("An image can't be used.")),
@@ -65,11 +78,17 @@ fn assets_with_one_file_share_its_image_and_unused_images_are_dropped() {
         ("second".to_owned(), source(AssetKind::Image, &bytes)),
     ]);
     settle(&mut renderer, &both);
-    assert_eq!(renderer.media_status("second"), MediaStatus::Ready(Size::new(2, 2)));
+    assert_eq!(
+        renderer.media_status("second"),
+        MediaStatus::Ready(Size::new(2, 2))
+    );
 
     let one = BTreeMap::from([("second".to_owned(), source(AssetKind::Image, &bytes))]);
     renderer.sync_media(&one);
-    assert_eq!(renderer.media_status("second"), MediaStatus::Ready(Size::new(2, 2)));
+    assert_eq!(
+        renderer.media_status("second"),
+        MediaStatus::Ready(Size::new(2, 2))
+    );
     assert_eq!(renderer.media_status("first"), MediaStatus::Missing);
 
     renderer.sync_media(&BTreeMap::new());

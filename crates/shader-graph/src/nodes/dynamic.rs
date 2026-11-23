@@ -4,12 +4,14 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::enums::{CASES_FAMILY, MATCH, MATCH_SELECTOR, WIDTH_SWITCH, WIDTH_SWITCH_VALUE, case_handle, widths};
+use crate::enums::{
+    CASES_FAMILY, MATCH, MATCH_SELECTOR, WIDTH_SWITCH, WIDTH_SWITCH_VALUE, case_handle, widths,
+};
 use crate::graph::{GROUP_INPUT, GraphDocument, GraphNode, GraphProject, MAX_CASES, REROUTE};
 use crate::types::{
-    EnumVariant, GroupHandleDef, HandleType, InputControl, InputValue,
-    NodeCategory, NodeData, TypeFamily, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
-    SOCKET_TYPES, TypeVariable, WgslType, bound_type, enum_value,
+    EnumVariant, GroupHandleDef, HandleType, InputControl, InputValue, NodeCategory, NodeData,
+    NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget, SOCKET_TYPES, TypeFamily,
+    TypeVariable, WgslType, bound_type, enum_value,
 };
 
 pub const INDEX_SWITCH: &str = "index-switch";
@@ -30,18 +32,26 @@ pub fn clamp_cases(count: i64) -> u32 {
 /// `match`). When the enum's value is known while compiling, only the picked
 /// case is computed.
 pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
-    let cases: Vec<(String, i64)> =
-        variants.iter().map(|v| (case_handle(v.value), v.value)).collect();
+    let cases: Vec<(String, i64)> = variants
+        .iter()
+        .map(|v| (case_handle(v.value), v.value))
+        .collect();
     let mut inputs = vec![NodeInputDef::new(MATCH_SELECTOR, "enum", &[WgslType::U32])];
-    inputs.extend(
-        variants
-            .iter()
-            .map(|v| NodeInputDef::new(case_handle(v.value), v.label.clone(), &SOCKET_TYPES).family(CASES_FAMILY)),
-    );
-    let case_values: Vec<EnumVariant> =
-        variants.iter().map(|v| EnumVariant::new(v.value, "")).collect();
+    inputs.extend(variants.iter().map(|v| {
+        NodeInputDef::new(case_handle(v.value), v.label.clone(), &SOCKET_TYPES).family(CASES_FAMILY)
+    }));
+    let case_values: Vec<EnumVariant> = variants
+        .iter()
+        .map(|v| EnumVariant::new(v.value, ""))
+        .collect();
     let mut d = NodeDescriptor::new(MATCH, "Match", NodeCategory::Logic)
-        .aliases(&["Menu Switch", "Switch Case", "Case", "Enum Switch", "Index Switch"])
+        .aliases(&[
+            "Menu Switch",
+            "Switch Case",
+            "Case",
+            "Enum Switch",
+            "Index Switch",
+        ])
         .inputs(inputs)
         .outputs(result_output())
         .cpu(move |ctx| {
@@ -56,7 +66,10 @@ pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
                 return vec![format!("let {} = {zero};", ctx.var_name)];
             };
             if let Some(value) = ctx.constant(MATCH_SELECTOR) {
-                let picked = cases.iter().find(|(_, v)| *v == value).map_or(first, |(id, _)| id);
+                let picked = cases
+                    .iter()
+                    .find(|(_, v)| *v == value)
+                    .map_or(first, |(id, _)| id);
                 let e = ctx.promote_input(picked);
                 return vec![format!("let {} = {e};", ctx.var_name)];
             }
@@ -73,7 +86,10 @@ pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
     // Without cases nothing infers its type: it's picked, under the key the
     // cases' type is forced with once an enum is linked.
     if variants.is_empty() {
-        d.type_family = Some(TypeFamily { key: CASES_FAMILY.to_owned(), types: WgslType::ALL.to_vec() });
+        d.type_family = Some(TypeFamily {
+            key: CASES_FAMILY.to_owned(),
+            types: WgslType::ALL.to_vec(),
+        });
     }
     d
 }
@@ -82,18 +98,29 @@ pub fn build_match_descriptor(variants: &[EnumVariant]) -> NodeDescriptor {
 /// compiling: only that case is computed, and the result has its type, so
 /// cases may differ in type.
 pub fn width_switch_node() -> NodeDescriptor {
-    let mut inputs = vec![NodeInputDef::new(WIDTH_SWITCH_VALUE, "value", &WgslType::ALL)];
-    inputs.extend(
-        widths()
-            .iter()
-            .map(|w| NodeInputDef::new(case_handle(w.value), w.label.clone(), &WgslType::ALL).family(case_handle(w.value))),
-    );
+    let mut inputs = vec![NodeInputDef::new(
+        WIDTH_SWITCH_VALUE,
+        "value",
+        &WgslType::ALL,
+    )];
+    inputs.extend(widths().iter().map(|w| {
+        NodeInputDef::new(case_handle(w.value), w.label.clone(), &WgslType::ALL)
+            .family(case_handle(w.value))
+    }));
     NodeDescriptor::new(WIDTH_SWITCH, "Width Switch", NodeCategory::Logic)
-        .aliases(&["Type Switch", "Dimension Switch", "Switch by Width", "Component Count Switch"])
+        .aliases(&[
+            "Type Switch",
+            "Dimension Switch",
+            "Switch by Width",
+            "Component Count Switch",
+        ])
         .inputs(inputs)
         .outputs(result_output())
         .output_type(|ty, types| {
-            types.get(&case_handle(ty.components() as i64)).copied().unwrap_or(WgslType::F32)
+            types
+                .get(&case_handle(ty.components() as i64))
+                .copied()
+                .unwrap_or(WgslType::F32)
         })
         .cpu(|ctx| {
             let case = case_handle(ctx.input_type(WIDTH_SWITCH_VALUE).components() as i64);
@@ -115,21 +142,29 @@ pub fn index_switch_cases(data: &NodeData) -> u32 {
 pub fn build_index_switch_descriptor(data: &NodeData) -> NodeDescriptor {
     let count = index_switch_cases(data);
     let cases: Vec<String> = (0..count).map(|i| case_handle(i64::from(i))).collect();
-    let mut inputs = vec![NodeInputDef::new(INDEX_SWITCH_INDEX, "index", &[WgslType::I32])];
-    inputs.extend(
-        cases
-            .iter()
-            .enumerate()
-            .map(|(i, id)| NodeInputDef::new(id.clone(), i.to_string(), &SOCKET_TYPES).family(CASES_FAMILY)),
-    );
-    let defaults = NodeData { cases: Some(DEFAULT_CASES), ..Default::default() };
+    let mut inputs = vec![NodeInputDef::new(
+        INDEX_SWITCH_INDEX,
+        "index",
+        &[WgslType::I32],
+    )];
+    inputs.extend(cases.iter().enumerate().map(|(i, id)| {
+        NodeInputDef::new(id.clone(), i.to_string(), &SOCKET_TYPES).family(CASES_FAMILY)
+    }));
+    let defaults = NodeData {
+        cases: Some(DEFAULT_CASES),
+        ..Default::default()
+    };
     let mut d = NodeDescriptor::new(INDEX_SWITCH, "Index Switch", NodeCategory::Logic)
         .aliases(&["Table", "Lookup Table", "Array", "Select by Index", "Pick"])
         .inputs(inputs)
         .outputs(result_output())
         .defaults(defaults)
         .cpu(move |ctx| {
-            let index = ctx.input(INDEX_SWITCH_INDEX).first().copied().unwrap_or(0.0);
+            let index = ctx
+                .input(INDEX_SWITCH_INDEX)
+                .first()
+                .copied()
+                .unwrap_or(0.0);
             let picked = index.max(0.0).min(f64::from(count - 1));
             super::cpu::result(ctx.input(&case_handle(picked as i64)))
         })
@@ -145,7 +180,11 @@ pub fn build_index_switch_descriptor(data: &NodeData) -> NodeDescriptor {
             let values: Vec<String> = cases.iter().map(|id| ctx.promote_input(id)).collect();
             vec![
                 format!("var {table} = array<{ty}, {count}>({});", values.join(", ")),
-                format!("let {} = {table}[clamp({index}, 0, {})];", ctx.var_name, count - 1),
+                format!(
+                    "let {} = {table}[clamp({index}, 0, {})];",
+                    ctx.var_name,
+                    count - 1
+                ),
             ]
         });
     d.primary_input = Some(case_handle(0));
@@ -157,10 +196,16 @@ pub fn build_index_switch_descriptor(data: &NodeData) -> NodeDescriptor {
 
 /// The types a socket accepts and the family it's in: a variable's sockets
 /// share one, an inferred output has its own.
-fn socket_types(handle: &GroupHandleDef, variables: &[TypeVariable]) -> (Vec<WgslType>, Option<String>) {
+fn socket_types(
+    handle: &GroupHandleDef,
+    variables: &[TypeVariable],
+) -> (Vec<WgslType>, Option<String>) {
     match &handle.ty {
         HandleType::Fixed(t) => (vec![*t], None),
-        HandleType::Inferred { .. } => (SOCKET_TYPES.to_vec(), Some(format!("inferred:{}", handle.id))),
+        HandleType::Inferred { .. } => (
+            SOCKET_TYPES.to_vec(),
+            Some(format!("inferred:{}", handle.id)),
+        ),
         HandleType::Variable { variable } => {
             let types = variables
                 .iter()
@@ -185,7 +230,9 @@ pub fn build_group_input_descriptor(
         .outputs(
             handles
                 .iter()
-                .map(|h| NodeOutputDef::new(h.id.clone(), h.label.clone(), default_type(h, variables)))
+                .map(|h| {
+                    NodeOutputDef::new(h.id.clone(), h.label.clone(), default_type(h, variables))
+                })
                 .collect(),
         )
 }
@@ -216,7 +263,9 @@ pub fn group_input_def(handle: &GroupHandleDef, variables: &[TypeVariable]) -> N
         Some(if handle.ty == HandleType::Fixed(WgslType::Bool) {
             InputControl::Toggle { compiled: true }
         } else {
-            InputControl::Enum { variants: variants.clone() }
+            InputControl::Enum {
+                variants: variants.clone(),
+            }
         })
     } else if handle.display == Some(crate::types::ColorDisplay::Swatch) {
         Some(InputControl::Color)
@@ -231,7 +280,13 @@ pub fn group_input_def(handle: &GroupHandleDef, variables: &[TypeVariable]) -> N
             compiled,
         })
     } else if compiled {
-        Some(InputControl::Number { min: None, max: None, soft_min: None, soft_max: None, compiled: true })
+        Some(InputControl::Number {
+            min: None,
+            max: None,
+            soft_min: None,
+            soft_max: None,
+            compiled: true,
+        })
     } else {
         None
     };
@@ -252,8 +307,12 @@ pub fn fallback_handle_ids(
     visiting: &mut Vec<*const GraphDocument>,
 ) -> BTreeSet<String> {
     visiting.push(definition);
-    let input_nodes: BTreeSet<&str> =
-        definition.nodes.iter().filter(|n| n.is(GROUP_INPUT)).map(|n| n.id.as_str()).collect();
+    let input_nodes: BTreeSet<&str> = definition
+        .nodes
+        .iter()
+        .filter(|n| n.is(GROUP_INPUT))
+        .map(|n| n.id.as_str())
+        .collect();
     fn is_fallback(
         definition: &GraphDocument,
         project: &GraphProject,
@@ -262,7 +321,9 @@ pub fn fallback_handle_ids(
         handle: &str,
         depth: usize,
     ) -> bool {
-        let Some(node) = definition.node(target) else { return false };
+        let Some(node) = definition.node(target) else {
+            return false;
+        };
         if node.is(super::FALLBACK) {
             return handle == super::FALLBACK_VALUE;
         }
@@ -271,10 +332,20 @@ pub fn fallback_handle_ids(
         }
         if node.is(REROUTE) && depth < 64 {
             return definition.edges_from(target).any(|e| {
-                is_fallback(definition, project, visiting, &e.target, &e.target_handle, depth + 1)
+                is_fallback(
+                    definition,
+                    project,
+                    visiting,
+                    &e.target,
+                    &e.target_handle,
+                    depth + 1,
+                )
             });
         }
-        let Some((reference, inner)) = node.definition_ref().and_then(|r| project.document(r).map(|d| (r, d))) else {
+        let Some((reference, inner)) = node
+            .definition_ref()
+            .and_then(|r| project.document(r).map(|d| (r, d)))
+        else {
             return false;
         };
         if let Some(known) = project.cached_fallbacks(reference) {
@@ -288,7 +359,14 @@ pub fn fallback_handle_ids(
     let mut result = BTreeSet::new();
     for e in &definition.edges {
         if input_nodes.contains(e.source.as_str())
-            && is_fallback(definition, project, visiting, &e.target, &e.target_handle, 0)
+            && is_fallback(
+                definition,
+                project,
+                visiting,
+                &e.target,
+                &e.target_handle,
+                0,
+            )
         {
             result.insert(e.source_handle.clone());
         }
@@ -299,7 +377,11 @@ pub fn fallback_handle_ids(
 
 /// `fallback_handle_ids` of the definition `reference`, which every resolution of a group node
 /// asks for, so it is worked out once per project state.
-fn fallback_handles_of(reference: &str, definition: &GraphDocument, project: &GraphProject) -> Arc<BTreeSet<String>> {
+fn fallback_handles_of(
+    reference: &str,
+    definition: &GraphDocument,
+    project: &GraphProject,
+) -> Arc<BTreeSet<String>> {
     if let Some(known) = project.cached_fallbacks(reference) {
         return known;
     }
@@ -313,7 +395,8 @@ pub fn build_group_descriptor(node: &GraphNode, project: &GraphProject) -> NodeD
     let Some((reference, definition)) =
         definition_ref.and_then(|r| project.document(r).map(|d| (r, d)))
     else {
-        return NodeDescriptor::new("node-group", "Missing group", NodeCategory::Misc).static_outputs();
+        return NodeDescriptor::new("node-group", "Missing group", NodeCategory::Misc)
+            .static_outputs();
     };
     let fallbacks = fallback_handles_of(reference, definition, project);
     // The group's defaults are what instances hold until they're edited.
@@ -328,30 +411,37 @@ pub fn build_group_descriptor(node: &GraphNode, project: &GraphProject) -> NodeD
             data.values.insert(h.id.clone(), value);
         }
     }
-    let mut descriptor =
-        NodeDescriptor::new("node-group", definition.label.as_deref().unwrap_or(reference), NodeCategory::Misc)
-        .static_outputs()
-        .inputs(
-            definition
-                .inputs
-                .iter()
-                .map(|h| {
-                    let mut input = group_input_def(h, &definition.type_variables);
-                    input.fallback = fallbacks.contains(&h.id);
-                    input
-                })
-                .collect(),
-        )
-        .outputs(
-            definition
-                .outputs
-                .iter()
-                .map(|h| {
-                    NodeOutputDef::new(h.id.clone(), h.label.clone(), default_type(h, &definition.type_variables))
-                })
-                .collect(),
-        )
-        .defaults(data);
+    let mut descriptor = NodeDescriptor::new(
+        "node-group",
+        definition.label.as_deref().unwrap_or(reference),
+        NodeCategory::Misc,
+    )
+    .static_outputs()
+    .inputs(
+        definition
+            .inputs
+            .iter()
+            .map(|h| {
+                let mut input = group_input_def(h, &definition.type_variables);
+                input.fallback = fallbacks.contains(&h.id);
+                input
+            })
+            .collect(),
+    )
+    .outputs(
+        definition
+            .outputs
+            .iter()
+            .map(|h| {
+                NodeOutputDef::new(
+                    h.id.clone(),
+                    h.label.clone(),
+                    default_type(h, &definition.type_variables),
+                )
+            })
+            .collect(),
+    )
+    .defaults(data);
     descriptor.widget = definition.widget.clone().map(NodeWidget::Color);
     descriptor
 }

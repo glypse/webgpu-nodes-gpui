@@ -23,7 +23,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::graph::{GraphEdge, GraphNode, GraphProject};
 use crate::passes::{ItemSizeMode, item_size_handles, size_inputs};
 use crate::types::{
-    HandleType, NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, TypeVariable, WgslType, ZoneItem, bound_type,
+    HandleType, NodeCategory, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, TypeVariable,
+    WgslType, ZoneItem, bound_type,
 };
 
 pub const REPEAT_INPUT: &str = "repeat-input";
@@ -91,14 +92,18 @@ pub fn is_zone_output(ty: &str) -> bool {
 
 /// The id of the zone output a zone input is paired with.
 pub fn paired_output_id(node: &GraphNode) -> Option<&str> {
-    if is_zone_input(&node.node_type) { node.data.paired_output.as_deref() } else { None }
+    if is_zone_input(&node.node_type) {
+        node.data.paired_output.as_deref()
+    } else {
+        None
+    }
 }
 
 /// The zone input paired with the zone output `output_id`, among `nodes`.
 pub fn paired_input<'a>(nodes: &'a [GraphNode], output_id: &str) -> Option<&'a GraphNode> {
-    nodes.iter().find(|n| {
-        is_zone_input(&n.node_type) && n.data.paired_output.as_deref() == Some(output_id)
-    })
+    nodes
+        .iter()
+        .find(|n| is_zone_input(&n.node_type) && n.data.paired_output.as_deref() == Some(output_id))
 }
 
 /// Whether a zone keeps its items in textures: a repeat zone's live in one pixel's computation.
@@ -115,13 +120,22 @@ pub fn carries_item(kind: Option<ZoneKind>, item: &ZoneItem) -> bool {
 /// of a texture's: those a file gives it are left out.
 pub fn zone_items(output: Option<&GraphNode>) -> Vec<ZoneItem> {
     let kind = output.and_then(|n| zone_kind_of(&n.node_type));
-    let items = output.and_then(|n| n.data.items.clone()).unwrap_or_default();
-    items.into_iter().filter(|i| carries_item(kind, i)).collect()
+    let items = output
+        .and_then(|n| n.data.items.clone())
+        .unwrap_or_default();
+    items
+        .into_iter()
+        .filter(|i| carries_item(kind, i))
+        .collect()
 }
 
 /// The safety cap applied to a zone's iteration count.
 pub fn zone_max_iterations(input: &GraphNode) -> u32 {
-    input.data.max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS).min(MAX_ITERATIONS)
+    input
+        .data
+        .max_iterations
+        .unwrap_or(DEFAULT_MAX_ITERATIONS)
+        .min(MAX_ITERATIONS)
 }
 
 pub fn is_inferred_item(item: &ZoneItem) -> bool {
@@ -166,7 +180,9 @@ fn item_output(item: &ZoneItem, variables: &[TypeVariable]) -> NodeOutputDef {
 }
 
 fn base(ty: &str, label: &str) -> NodeDescriptor {
-    let mut d = NodeDescriptor::new(ty, label, NodeCategory::Zone).hidden().static_outputs();
+    let mut d = NodeDescriptor::new(ty, label, NodeCategory::Zone)
+        .hidden()
+        .static_outputs();
     d.wgsl = std::sync::Arc::new(|_| Vec::new());
     d
 }
@@ -182,22 +198,42 @@ pub fn build_zone_descriptor(
     match node.node_type.as_str() {
         REPEAT_INPUT => {
             let items = zone_items(output_node());
-            let mut inputs = vec![NodeInputDef::new(ITERATIONS_HANDLE, "Iterations", &[WgslType::I32])];
+            let mut inputs = vec![NodeInputDef::new(
+                ITERATIONS_HANDLE,
+                "Iterations",
+                &[WgslType::I32],
+            )];
             inputs.extend(items.iter().map(|i| item_input(i, variables)));
-            let mut outputs = vec![NodeOutputDef::new(ITERATION_HANDLE, "Iteration", WgslType::I32)];
+            let mut outputs = vec![NodeOutputDef::new(
+                ITERATION_HANDLE,
+                "Iteration",
+                WgslType::I32,
+            )];
             outputs.extend(items.iter().map(|i| item_output(i, variables)));
             let mut data = NodeData::with_values([(ITERATIONS_HANDLE, DEFAULT_ITERATIONS)]);
             data.max_iterations = Some(DEFAULT_MAX_ITERATIONS);
-            base(REPEAT_INPUT, "Repeat Input").inputs(inputs).outputs(outputs).defaults(data)
+            base(REPEAT_INPUT, "Repeat Input")
+                .inputs(inputs)
+                .outputs(outputs)
+                .defaults(data)
         }
         SIMULATION_INPUT => {
             let items = zone_items(output_node());
-            let mut outputs = vec![NodeOutputDef::new(DELTA_TIME_HANDLE, "Delta Time", WgslType::F32)];
+            let mut outputs = vec![NodeOutputDef::new(
+                DELTA_TIME_HANDLE,
+                "Delta Time",
+                WgslType::F32,
+            )];
             outputs.extend(items.iter().map(|i| item_output(i, variables)));
-            let mut inputs: Vec<NodeInputDef> = items.iter().map(|i| item_input(i, variables)).collect();
+            let mut inputs: Vec<NodeInputDef> =
+                items.iter().map(|i| item_input(i, variables)).collect();
             for item in &items {
                 let mode = ItemSizeMode::parse(item.size.as_deref());
-                inputs.extend(size_inputs(&item_size_handles(&item.id), mode, Some(&item.label)));
+                inputs.extend(size_inputs(
+                    &item_size_handles(&item.id),
+                    mode,
+                    Some(&item.label),
+                ));
             }
             base(SIMULATION_INPUT, "Simulation Input")
                 .inputs(inputs)
@@ -216,22 +252,37 @@ pub fn build_zone_descriptor(
         }
         PASS_REPEAT_INPUT => {
             let items = zone_items(output_node());
-            let mut iterations = NodeInputDef::new(ITERATIONS_HANDLE, "Iterations", &[WgslType::I32]);
+            let mut iterations =
+                NodeInputDef::new(ITERATIONS_HANDLE, "Iterations", &[WgslType::I32]);
             iterations.frame = true;
             let mut inputs = vec![iterations];
             inputs.extend(items.iter().map(|i| item_input(i, variables)));
             for item in &items {
                 let mode = ItemSizeMode::parse(item.size.as_deref());
-                inputs.extend(size_inputs(&item_size_handles(&item.id), mode, Some(&item.label)));
+                inputs.extend(size_inputs(
+                    &item_size_handles(&item.id),
+                    mode,
+                    Some(&item.label),
+                ));
             }
-            let mut outputs = vec![NodeOutputDef::new(ITERATION_HANDLE, "Iteration", WgslType::I32)];
+            let mut outputs = vec![NodeOutputDef::new(
+                ITERATION_HANDLE,
+                "Iteration",
+                WgslType::I32,
+            )];
             outputs.extend(items.iter().map(|i| item_output(i, variables)));
             let data = NodeData::with_values([(ITERATIONS_HANDLE, DEFAULT_ITERATIONS)]);
-            base(PASS_REPEAT_INPUT, "Repeat Passes Input").inputs(inputs).outputs(outputs).defaults(data)
+            base(PASS_REPEAT_INPUT, "Repeat Passes Input")
+                .inputs(inputs)
+                .outputs(outputs)
+                .defaults(data)
         }
         PASS_REPEAT_OUTPUT => {
             let items = zone_items(Some(node));
-            let data = NodeData { items: Some(Vec::new()), ..Default::default() };
+            let data = NodeData {
+                items: Some(Vec::new()),
+                ..Default::default()
+            };
             base(PASS_REPEAT_OUTPUT, "Repeat Passes Output")
                 .inputs(items.iter().map(|i| item_input(i, variables)).collect())
                 .outputs(items.iter().map(|i| item_output(i, variables)).collect())
@@ -239,7 +290,10 @@ pub fn build_zone_descriptor(
         }
         _ => {
             let items = zone_items(Some(node));
-            let data = NodeData { items: Some(Vec::new()), ..Default::default() };
+            let data = NodeData {
+                items: Some(Vec::new()),
+                ..Default::default()
+            };
             base(REPEAT_OUTPUT, "Repeat Output")
                 .inputs(items.iter().map(|i| item_input(i, variables)).collect())
                 .outputs(items.iter().map(|i| item_output(i, variables)).collect())
@@ -253,8 +307,12 @@ pub fn build_zone_descriptor(
 /// Nodes that can never live inside a zone: the document's sinks, and a
 /// simulation's start, which a loop or another frame's step can't run.
 fn root_only(node: &GraphNode, simulating: &HashSet<String>) -> bool {
-    matches!(node.node_type.as_str(), "frag-output" | "group-output" | SIMULATION_INPUT)
-        || node.definition_ref().is_some_and(|r| simulating.contains(r))
+    matches!(
+        node.node_type.as_str(),
+        "frag-output" | "group-output" | SIMULATION_INPUT
+    ) || node
+        .definition_ref()
+        .is_some_and(|r| simulating.contains(r))
 }
 
 const SIMULATION_REASON: &str = "A simulation steps once a frame: it can't be inside a zone.";
@@ -351,8 +409,11 @@ pub fn would_create_cycle(
     for e in edges {
         adjacency.entry(&e.source).or_default().push(&e.target);
     }
-    let outputs: HashSet<&str> =
-        nodes.iter().filter(|n| is_zone_output(&n.node_type)).map(|n| n.id.as_str()).collect();
+    let outputs: HashSet<&str> = nodes
+        .iter()
+        .filter(|n| is_zone_output(&n.node_type))
+        .map(|n| n.id.as_str())
+        .collect();
     for n in nodes {
         if let Some(out) = paired_output_id(n).filter(|o| outputs.contains(o)) {
             adjacency.entry(&n.id).or_default().push(out);
@@ -384,8 +445,11 @@ fn topo_order(ids: &[&str], edges: &[(&str, &str)]) -> Vec<String> {
         adjacency.entry(s).or_default().push(t);
         *in_degree.get_mut(t).expect("checked") += 1;
     }
-    let mut queue: std::collections::VecDeque<&str> =
-        ids.iter().copied().filter(|id| in_degree[id] == 0).collect();
+    let mut queue: std::collections::VecDeque<&str> = ids
+        .iter()
+        .copied()
+        .filter(|id| in_degree[id] == 0)
+        .collect();
     let mut order: Vec<String> = Vec::new();
     while let Some(id) = queue.pop_front() {
         order.push(id.to_owned());
@@ -398,8 +462,11 @@ fn topo_order(ids: &[&str], edges: &[(&str, &str)]) -> Vec<String> {
         }
     }
     let placed: HashSet<&str> = order.iter().map(String::as_str).collect();
-    let rest: Vec<String> =
-        ids.iter().filter(|id| !placed.contains(**id)).map(|id| (*id).to_owned()).collect();
+    let rest: Vec<String> = ids
+        .iter()
+        .filter(|id| !placed.contains(**id))
+        .map(|id| (*id).to_owned())
+        .collect();
     order.extend(rest);
     order
 }
@@ -470,8 +537,10 @@ pub fn analyze_zones(
         .collect();
 
     let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
-    let implicit: Vec<(&str, &str)> =
-        zones.values().map(|z| (z.input_id.as_str(), z.output_id.as_str())).collect();
+    let implicit: Vec<(&str, &str)> = zones
+        .values()
+        .map(|z| (z.input_id.as_str(), z.output_id.as_str()))
+        .collect();
 
     type Flags = HashMap<String, BTreeSet<String>>;
     let mut inside: Flags = HashMap::new();
@@ -524,19 +593,26 @@ pub fn analyze_zones(
             }
             let zone = zone_of_boundary.get(&id).and_then(|z| zones.get(z));
             if let Some(node) = node.filter(|n| root_only(n, &options.simulating)) {
-                if !ins.is_empty() && !matches!(node.node_type.as_str(), "frag-output" | "group-output")
+                if !ins.is_empty()
+                    && !matches!(node.node_type.as_str(), "frag-output" | "group-output")
                 {
                     refused.insert(id.clone(), SIMULATION_REASON);
                 }
                 ins.clear();
             }
             let repeats_passes = node.is_some_and(|n| {
-                n.is(PASS_REPEAT_INPUT) || n.definition_ref().is_some_and(|r| options.looping.contains(r))
+                n.is(PASS_REPEAT_INPUT)
+                    || n.definition_ref()
+                        .is_some_and(|r| options.looping.contains(r))
             });
             if repeats_passes {
                 let in_repeat: Vec<String> = ins
                     .iter()
-                    .filter(|z| zones.get(*z).is_some_and(|zone| zone.kind == ZoneKind::Repeat))
+                    .filter(|z| {
+                        zones
+                            .get(*z)
+                            .is_some_and(|zone| zone.kind == ZoneKind::Repeat)
+                    })
                     .cloned()
                     .collect();
                 for z in in_repeat {
@@ -581,7 +657,9 @@ pub fn analyze_zones(
             if let Some(own) = own {
                 flags.remove(own);
             }
-            let Some(keep) = innermost(&zones, &inside, &flags) else { continue };
+            let Some(keep) = innermost(&zones, &inside, &flags) else {
+                continue;
+            };
             let mut chain = ancestors.get(&keep).cloned().unwrap_or_default();
             chain.insert(keep);
             let foreign: Vec<&String> = flags.iter().filter(|z| !chain.contains(*z)).collect();
@@ -590,11 +668,23 @@ pub fn analyze_zones(
             }
             let mut suspects: Vec<&GraphEdge> =
                 incoming.get(*id).into_iter().flatten().copied().collect();
-            if let Some(zone) = own.and_then(|z| zones.get(z)).filter(|z| z.output_id == *id) {
-                suspects.extend(incoming.get(zone.input_id.as_str()).into_iter().flatten().copied());
+            if let Some(zone) = own
+                .and_then(|z| zones.get(z))
+                .filter(|z| z.output_id == *id)
+            {
+                suspects.extend(
+                    incoming
+                        .get(zone.input_id.as_str())
+                        .into_iter()
+                        .flatten()
+                        .copied(),
+                );
             }
             for e in suspects {
-                if foreign.iter().any(|z| inside.get(&e.source).is_some_and(|s| s.contains(*z))) {
+                if foreign
+                    .iter()
+                    .any(|z| inside.get(&e.source).is_some_and(|s| s.contains(*z)))
+                {
                     newly_invalid.push(e.id.clone());
                 }
             }
@@ -625,7 +715,11 @@ pub fn analyze_zones(
             node_zone.insert((*id).to_owned(), Some(own.clone()));
             continue;
         }
-        let zone = innermost(&zones, &inside, &inside.get(*id).cloned().unwrap_or_default());
+        let zone = innermost(
+            &zones,
+            &inside,
+            &inside.get(*id).cloned().unwrap_or_default(),
+        );
         node_zone.insert((*id).to_owned(), zone.clone());
         let mut z = zone;
         while let Some(current) = z {
@@ -676,9 +770,10 @@ pub fn analyze_zones(
         let from = side_zone(&e.source, |z| &z.output_id);
         let to = side_zone(&e.target, |z| &z.input_id);
         if let Some(from) = from
-            && !contains(&from, to.as_ref()) {
-                leaving.push(e.id.clone());
-            }
+            && !contains(&from, to.as_ref())
+        {
+            leaving.push(e.id.clone());
+        }
     }
     invalid.extend(leaving);
 

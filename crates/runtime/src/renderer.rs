@@ -20,10 +20,10 @@ use crate::media::{MediaLibrary, MediaSource, MediaStatus};
 use crate::mips::MipGenerator;
 use crate::present::{PresentOptions, Presenter};
 use crate::simulation::{Step, StepKind};
-use crate::target::{Target, render_target};
-use crate::uniforms::pack_block;
 #[cfg(target_os = "macos")]
 use crate::surface::{Surface, SurfacePool};
+use crate::target::{Target, render_target};
+use crate::uniforms::pack_block;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use shader_graph::passes::Size;
@@ -197,10 +197,12 @@ const READBACK_DEPTH: usize = 2;
 /// Maps a staging buffer for reading, once the copy into it has run.
 fn map_for_read(buffer: &wgpu::Buffer) -> Ready {
     let (sender, receiver) = std::sync::mpsc::channel();
-    buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-        // The receiver is gone only when the frame was dropped unread.
-        let _ = sender.send(result.map_err(anyhow::Error::from));
-    });
+    buffer
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |result| {
+            // The receiver is gone only when the frame was dropped unread.
+            let _ = sender.send(result.map_err(anyhow::Error::from));
+        });
     Some(receiver)
 }
 
@@ -215,7 +217,9 @@ fn gpu_done(queue: &wgpu::Queue) -> Ready {
 
 /// Whether a step has finished, without waiting; a failed step is an error.
 fn poll_ready(ready: &mut Ready) -> Result<bool> {
-    let Some(receiver) = ready else { return Ok(true) };
+    let Some(receiver) = ready else {
+        return Ok(true);
+    };
     match receiver.try_recv() {
         Ok(result) => {
             result?;
@@ -305,7 +309,12 @@ impl Sizes<'_> {
                 }
                 let values = OnceCell::new();
                 let frame = |reference: &FrameRef| {
-                    values.get_or_init(|| self.frame_values(canvas)).value(reference).first().copied().unwrap_or(0.0)
+                    values
+                        .get_or_init(|| self.frame_values(canvas))
+                        .value(reference)
+                        .first()
+                        .copied()
+                        .unwrap_or(0.0)
                 };
                 let resource = |of: &str| Some(self.get(of));
                 let resolved = resolve_size(
@@ -368,9 +377,9 @@ impl Compiler {
                 .writes
                 .iter()
                 .map(|id| match plan.resource(id) {
-                    Some(ResourceDecl::Transient { format, .. } | ResourceDecl::State { format, .. }) => {
-                        wgpu_format(*format)
-                    }
+                    Some(
+                        ResourceDecl::Transient { format, .. } | ResourceDecl::State { format, .. },
+                    ) => wgpu_format(*format),
                     _ => LINEAR_FORMAT,
                 })
                 .collect();
@@ -378,11 +387,19 @@ impl Compiler {
         }
         if passes.is_empty() {
             return Err(ProgramError {
-                diagnostics: vec![ProgramDiagnostic { message: "the plan draws nothing".to_owned(), location: None }],
+                diagnostics: vec![ProgramDiagnostic {
+                    message: "the plan draws nothing".to_owned(),
+                    location: None,
+                }],
                 code: String::new(),
             });
         }
-        Ok(Program { id: NEXT_PROGRAM.fetch_add(1, Ordering::Relaxed), passes, plan: plan.clone(), uniforms: std::sync::Mutex::new(Arc::new(plan.uniforms.clone())) })
+        Ok(Program {
+            id: NEXT_PROGRAM.fetch_add(1, Ordering::Relaxed),
+            passes,
+            plan: plan.clone(),
+            uniforms: std::sync::Mutex::new(Arc::new(plan.uniforms.clone())),
+        })
     }
 
     fn compile_pass(
@@ -396,10 +413,12 @@ impl Compiler {
             code: source.code.clone(),
         };
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("program"),
-            source: wgpu::ShaderSource::Wgsl(source.code.as_str().into()),
-        });
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("program"),
+                source: wgpu::ShaderSource::Wgsl(source.code.as_str().into()),
+            });
         let info = pollster::block_on(module.get_compilation_info());
         let diagnostics: Vec<ProgramDiagnostic> = info
             .messages
@@ -407,12 +426,18 @@ impl Compiler {
             .filter(|m| m.message_type == wgpu::CompilationMessageType::Error)
             .map(|m| ProgramDiagnostic {
                 message: m.message.clone(),
-                location: m.location.as_ref().map(|l| (l.line_number, l.line_position)),
+                location: m
+                    .location
+                    .as_ref()
+                    .map(|l| (l.line_number, l.line_position)),
             })
             .collect();
         if !diagnostics.is_empty() {
             pollster::block_on(scope.pop());
-            return Err(ProgramError { diagnostics, code: source.code.clone() });
+            return Err(ProgramError {
+                diagnostics,
+                code: source.code.clone(),
+            });
         }
 
         let visibility = wgpu::ShaderStages::FRAGMENT;
@@ -447,38 +472,44 @@ impl Compiler {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         }));
-        let layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("program"),
-            entries: &layout_entries,
-        });
-        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("program"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
+        let layout = self
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("program"),
+                entries: &layout_entries,
+            });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("program"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
         let targets: Vec<Option<wgpu::ColorTargetState>> =
             formats.iter().map(|f| Some((*f).into())).collect();
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("program"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some(&source.vertex_entry),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some(&source.fragment_entry),
-                compilation_options: Default::default(),
-                targets: &targets,
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("program"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some(&source.vertex_entry),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(&source.fragment_entry),
+                    compilation_options: Default::default(),
+                    targets: &targets,
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
         let buffer = |label, block: &UniformBlock| {
             self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
@@ -491,7 +522,12 @@ impl Compiler {
         if let Some(error) = pollster::block_on(scope.pop()) {
             return Err(fail(error.to_string(), None));
         }
-        Ok(CompiledPass { decl: decl.clone(), pipeline, layout, uniform_buffer })
+        Ok(CompiledPass {
+            decl: decl.clone(),
+            pipeline,
+            layout,
+            uniform_buffer,
+        })
     }
 }
 
@@ -527,11 +563,17 @@ impl Renderer {
                 ..Default::default()
             }))?;
         // wgpu's default handler panics on errors outside an error scope.
-        device.on_uncaptured_error(std::sync::Arc::new(|error| log::error!("GPU error: {error}")));
+        device.on_uncaptured_error(std::sync::Arc::new(|error| {
+            log::error!("GPU error: {error}")
+        }));
         let timer = GpuTimer::new(&device, &queue);
         let empty = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("empty"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -565,13 +607,18 @@ impl Renderer {
 
     /// A handle that compiles on the renderer's device from any thread.
     pub fn compiler(&self) -> Compiler {
-        Compiler { device: self.device.clone() }
+        Compiler {
+            device: self.device.clone(),
+        }
     }
 
     /// Writes the values of a program's uniform blocks, e.g. after an edit that doesn't change its code.
     pub fn set_uniforms(&self, program: &Program, values: &BTreeMap<String, Vec<f64>>) {
         {
-            let mut held = program.uniforms.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut held = program
+                .uniforms
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let list = Arc::make_mut(&mut held);
             for (name, value) in values {
                 let value = UniformValue(value.iter().map(|c| *c as f32).collect());
@@ -587,7 +634,11 @@ impl Renderer {
                 continue;
             }
             let mut bytes = vec![0u8; block.size as usize];
-            pack_block(block, |name| values.get(name).map(|v| Cow::Borrowed(v.as_slice())), &mut bytes);
+            pack_block(
+                block,
+                |name| values.get(name).map(|v| Cow::Borrowed(v.as_slice())),
+                &mut bytes,
+            );
             self.queue.write_buffer(&pass.uniform_buffer, 0, &bytes);
         }
     }
@@ -618,7 +669,9 @@ impl Renderer {
     }
 
     fn take_target(&mut self, size: Size) -> Target {
-        self.targets.remove(&size).unwrap_or_else(|| Target::new(&self.device, size))
+        self.targets
+            .remove(&size)
+            .unwrap_or_else(|| Target::new(&self.device, size))
     }
 
     fn sampler(&mut self, filter: SamplerFilter, address: SamplerAddress) -> wgpu::Sampler {
@@ -651,22 +704,34 @@ impl Renderer {
     ) -> (HashMap<String, wgpu::Texture>, HashMap<String, Step>) {
         let plan = sizes.plan;
         // State is sized like any other texture, so it's kept once sizes can be resolved.
-        let steps = target.simulation.advance(&self.device, plan, inputs, &mut |id| sizes.get(id));
+        let steps = target
+            .simulation
+            .advance(&self.device, plan, inputs, &mut |id| sizes.get(id));
         let mut textures = HashMap::new();
         let mut frame_values = None;
         for resource in &plan.resources {
             let texture = match resource {
-                ResourceDecl::Transient { id, format, mips, .. } => {
-                    target.transient(&self.device, id, sizes.get(id), *format, *mips)
-                }
-                ResourceDecl::State { texture, read, .. } => {
-                    target.simulation.texture(texture, *read).unwrap_or(&self.empty).clone()
-                }
-                ResourceDecl::Media { id, asset, video, time } => match video {
+                ResourceDecl::Transient {
+                    id, format, mips, ..
+                } => target.transient(&self.device, id, sizes.get(id), *format, *mips),
+                ResourceDecl::State { texture, read, .. } => target
+                    .simulation
+                    .texture(texture, *read)
+                    .unwrap_or(&self.empty)
+                    .clone(),
+                ResourceDecl::Media {
+                    id,
+                    asset,
+                    video,
+                    time,
+                } => match video {
                     Some(playback) => {
-                        let values = frame_values.get_or_insert_with(|| sizes.frame_values(sizes.canvas()));
+                        let values =
+                            frame_values.get_or_insert_with(|| sizes.frame_values(sizes.canvas()));
                         let at = time.as_ref().map_or(inputs.time, |arg| values.arg(arg));
-                        self.media.video_texture(asset, id, playback, at).unwrap_or_else(|| self.empty.clone())
+                        self.media
+                            .video_texture(asset, id, playback, at)
+                            .unwrap_or_else(|| self.empty.clone())
                     }
                     None => self.media.texture(asset).unwrap_or(&self.empty).clone(),
                 },
@@ -690,7 +755,11 @@ impl Renderer {
     ) {
         let canvas = target.size;
         target.ensure_blocks(&self.device, program);
-        let uniforms = program.uniforms.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let uniforms = program
+            .uniforms
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let media = program
             .plan
             .resources
@@ -705,7 +774,11 @@ impl Renderer {
             .collect();
         let sizes = Sizes {
             plan: &program.plan,
-            context: FrameContext { inputs, canvas, uniforms: uniforms.as_slice() },
+            context: FrameContext {
+                inputs,
+                canvas,
+                uniforms: uniforms.as_slice(),
+            },
             max_dimension: self.device.limits().max_texture_dimension_2d,
             media,
             known: RefCell::default(),
@@ -718,9 +791,9 @@ impl Renderer {
             .iter()
             .enumerate()
             .filter(|(_, pass)| match &pass.decl.simulation {
-                Some(sim) if sim.stage == Some(SimulationStage::Start) => {
-                    steps.get(&sim.id).is_some_and(|s| s.kind == StepKind::Start)
-                }
+                Some(sim) if sim.stage == Some(SimulationStage::Start) => steps
+                    .get(&sim.id)
+                    .is_some_and(|s| s.kind == StepKind::Start),
                 _ => true,
             })
             .collect();
@@ -730,7 +803,16 @@ impl Renderer {
             let targets: Vec<wgpu::Texture> = decl
                 .writes
                 .iter()
-                .map(|id| if id == PLAN_TARGET { target.linear.clone() } else { textures.get(id).cloned().unwrap_or_else(|| self.empty.clone()) })
+                .map(|id| {
+                    if id == PLAN_TARGET {
+                        target.linear.clone()
+                    } else {
+                        textures
+                            .get(id)
+                            .cloned()
+                            .unwrap_or_else(|| self.empty.clone())
+                    }
+                })
                 .collect();
             let first = targets.first();
             let delta = decl
@@ -754,17 +836,25 @@ impl Renderer {
                 })
                 .collect();
             let program_source = &decl.program;
-            let sampler_list: Vec<wgpu::Sampler> =
-                program_source.samplers.iter().map(|s| self.sampler(s.filter, s.address)).collect();
+            let sampler_list: Vec<wgpu::Sampler> = program_source
+                .samplers
+                .iter()
+                .map(|s| self.sampler(s.filter, s.address))
+                .collect();
             let read_views: Vec<wgpu::TextureView> = program_source
                 .textures
                 .iter()
                 .map(|t| {
                     let id = t.source.id();
-                    textures.get(&id).unwrap_or(&self.empty).create_view(&Default::default())
+                    textures
+                        .get(&id)
+                        .unwrap_or(&self.empty)
+                        .create_view(&Default::default())
                 })
                 .collect();
-            let Some(blocks) = target.pass_blocks(index) else { continue };
+            let Some(blocks) = target.pass_blocks(index) else {
+                continue;
+            };
             let mut entries = vec![
                 wgpu::BindGroupEntry {
                     binding: program_source.frame.binding,
@@ -779,18 +869,22 @@ impl Renderer {
                     resource: blocks.frame_values.as_entire_binding(),
                 },
             ];
-            entries.extend(program_source.textures.iter().zip(&read_views).map(|(t, view)| {
-                wgpu::BindGroupEntry {
-                    binding: t.binding,
-                    resource: wgpu::BindingResource::TextureView(view),
-                }
-            }));
-            entries.extend(program_source.samplers.iter().zip(&sampler_list).map(|(s, sampler)| {
-                wgpu::BindGroupEntry {
+            entries.extend(
+                program_source
+                    .textures
+                    .iter()
+                    .zip(&read_views)
+                    .map(|(t, view)| wgpu::BindGroupEntry {
+                        binding: t.binding,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    }),
+            );
+            entries.extend(program_source.samplers.iter().zip(&sampler_list).map(
+                |(s, sampler)| wgpu::BindGroupEntry {
                     binding: s.binding,
                     resource: wgpu::BindingResource::Sampler(sampler),
-                }
-            }));
+                },
+            ));
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("program"),
                 layout: &pass.layout,
@@ -834,7 +928,13 @@ impl Renderer {
     }
 
     /// Writes the frame values a pass's program reads, computed for its size.
-    fn write_frame_values(&mut self, pass: &CompiledPass, buffer: &wgpu::Buffer, sizes: &Sizes<'_>, first: Option<&wgpu::Texture>) {
+    fn write_frame_values(
+        &mut self,
+        pass: &CompiledPass,
+        buffer: &wgpu::Buffer,
+        sizes: &Sizes<'_>,
+        first: Option<&wgpu::Texture>,
+    ) {
         let program = &pass.decl.program;
         if program.frame_value_refs.is_empty() {
             return;
@@ -846,7 +946,10 @@ impl Renderer {
         self.scratch.resize(program.frame_values.size as usize, 0);
         pack_block(
             &program.frame_values,
-            |name| refs.get(name).map(|reference| Cow::Owned(computed.value(reference))),
+            |name| {
+                refs.get(name)
+                    .map(|reference| Cow::Owned(computed.value(reference)))
+            },
             &mut self.scratch,
         );
         self.queue.write_buffer(buffer, 0, &self.scratch);
@@ -939,7 +1042,12 @@ impl Renderer {
     /// and without copying anything to the CPU. Every size is drawn with the same inputs, in one
     /// GPU submit; each keeps its own simulation state.
     #[cfg(target_os = "macos")]
-    pub fn submit_surfaces(&mut self, program: &Program, inputs: FrameInputs, sizes: &[Size]) -> Result<()> {
+    pub fn submit_surfaces(
+        &mut self,
+        program: &Program,
+        inputs: FrameInputs,
+        sizes: &[Size],
+    ) -> Result<()> {
         self.ensure_room()?;
         let submitted = self.start_surfaces(program, inputs, sizes)?;
         self.in_flight.push_back(submitted);
@@ -974,7 +1082,10 @@ impl Renderer {
     /// The oldest submitted frame, waiting for its GPU work (not for frames submitted after it).
     pub fn wait_frame(&mut self) -> Option<Result<Presented>> {
         let submission = self.in_flight.front()?.submission.clone();
-        let wait = wgpu::PollType::Wait { submission_index: Some(submission), timeout: None };
+        let wait = wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: None,
+        };
         if let Err(error) = self.device.poll(wait) {
             self.in_flight.clear();
             return Some(Err(error.into()));
@@ -1058,7 +1169,12 @@ impl Renderer {
     /// Draws a frame into one surface per distinct size of `sizes`, all in one submit. Targets of
     /// other sizes are dropped, with their simulation state; a size that is new takes over what it can of one.
     #[cfg(target_os = "macos")]
-    fn start_surfaces(&mut self, program: &Program, inputs: FrameInputs, sizes: &[Size]) -> Result<Submitted> {
+    fn start_surfaces(
+        &mut self,
+        program: &Program,
+        inputs: FrameInputs,
+        sizes: &[Size],
+    ) -> Result<Submitted> {
         let mut distinct: Vec<Size> = Vec::new();
         for size in sizes {
             self.check_canvas(*size)?;
@@ -1067,8 +1183,16 @@ impl Renderer {
             }
         }
         anyhow::ensure!(!distinct.is_empty(), "there is no canvas to draw");
-        let gone: Vec<Size> = self.targets.keys().filter(|size| !distinct.contains(size)).copied().collect();
-        let mut stale: Vec<Target> = gone.iter().filter_map(|size| self.targets.remove(size)).collect();
+        let gone: Vec<Size> = self
+            .targets
+            .keys()
+            .filter(|size| !distinct.contains(size))
+            .copied()
+            .collect();
+        let mut stale: Vec<Target> = gone
+            .iter()
+            .filter_map(|size| self.targets.remove(size))
+            .collect();
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut surfaces = Vec::with_capacity(distinct.len());
@@ -1081,7 +1205,13 @@ impl Renderer {
                     None => Target::new(&self.device, size),
                 },
             };
-            let surface = self.encode_surface(&mut encoder, program, inputs, &mut target, (i == 0, i == last));
+            let surface = self.encode_surface(
+                &mut encoder,
+                program,
+                inputs,
+                &mut target,
+                (i == 0, i == last),
+            );
             self.targets.insert(size, target);
             surfaces.push((size, surface?));
         }
@@ -1124,7 +1254,10 @@ impl Renderer {
     }
 
     /// Submits a frame's commands; the timestamps it wrote are read once the frame is done.
-    fn submit_frame(&mut self, mut encoder: wgpu::CommandEncoder) -> (Option<Timing>, wgpu::SubmissionIndex) {
+    fn submit_frame(
+        &mut self,
+        mut encoder: wgpu::CommandEncoder,
+    ) -> (Option<Timing>, wgpu::SubmissionIndex) {
         let buffer = self.start_timing(&mut encoder);
         let submission = self.queue.submit([encoder.finish()]);
         let timing = buffer.map(|buffer| Timing {
@@ -1139,7 +1272,11 @@ impl Renderer {
         let Submitted { output, timing, .. } = submitted;
         let gpu_time = timing.and_then(|timing| self.read_seconds(timing));
         Ok(match output {
-            Output::Pixels { size, format, buffer } => {
+            Output::Pixels {
+                size,
+                format,
+                buffer,
+            } => {
                 let pixels = read_pixels(&buffer, size)?;
                 buffer.unmap();
                 if self.free_pixels.len() < READBACK_DEPTH {
@@ -1238,8 +1375,8 @@ fn read_pixels(buffer: &wgpu::Buffer, size: Size) -> Result<Vec<u8>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use shader_graph::{UniformField, UniformScalar};
     use shader_graph::codegen::{PassDecl, RenderPlan};
+    use shader_graph::{UniformField, UniformScalar};
 
     pub(crate) const CODE: &str = r"
 struct Frame { time: f32, delta: f32, resolution: vec2f, frame: u32 }
@@ -1277,12 +1414,24 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
                     ("resolution".into(), field(8, 2)),
                     (
                         "frame".into(),
-                        UniformField { offset: 16, scalar: UniformScalar::U32, components: 1 },
+                        UniformField {
+                            offset: 16,
+                            scalar: UniformScalar::U32,
+                            components: 1,
+                        },
                     ),
                 ]),
             },
-            uniforms: UniformBlock { binding: 1, size: 0, fields: BTreeMap::new() },
-            frame_values: UniformBlock { binding: 2, size: 0, fields: BTreeMap::new() },
+            uniforms: UniformBlock {
+                binding: 1,
+                size: 0,
+                fields: BTreeMap::new(),
+            },
+            frame_values: UniformBlock {
+                binding: 2,
+                size: 0,
+                fields: BTreeMap::new(),
+            },
             frame_value_refs: BTreeMap::new(),
             textures: Vec::new(),
             samplers: Vec::new(),
@@ -1312,8 +1461,16 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             format: PixelFormat::Bgra8,
             premultiply: true,
         };
-        let first = FrameInputs { time: 0.25, delta: 0.0, frame: 0 };
-        let second = FrameInputs { time: 0.75, delta: 0.0, frame: 1 };
+        let first = FrameInputs {
+            time: 0.25,
+            delta: 0.0,
+            frame: 0,
+        };
+        let second = FrameInputs {
+            time: 0.75,
+            delta: 0.0,
+            frame: 1,
+        };
         let expected = [
             renderer.render(&program, first, options).unwrap(),
             renderer.render(&program, second, options).unwrap(),
@@ -1327,7 +1484,10 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         );
         let mut taken = Vec::new();
         while taken.len() < 2 {
-            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            renderer
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
             match renderer.take_frame() {
                 Some(Ok(Presented::Pixels(frame))) => taken.push(frame),
                 Some(_) => panic!("a readback came out as something else"),
@@ -1351,7 +1511,10 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
     ) -> Vec<(Size, Surface)> {
         renderer.submit_surfaces(program, inputs, sizes).unwrap();
         loop {
-            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            renderer
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
             match renderer.take_frame() {
                 Some(Ok(Presented::Surfaces { surfaces, .. })) => break surfaces,
                 Some(_) => panic!("a surface frame came out as something else"),
@@ -1367,9 +1530,12 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
     #[cfg(target_os = "macos")]
     impl<'a> ReadLock<'a> {
         fn new(surface: &'a Surface) -> Self {
-            use objc2_core_video::{CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, kCVReturnSuccess};
+            use objc2_core_video::{
+                CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, kCVReturnSuccess,
+            };
             // SAFETY: the buffer is one the test holds, and the lock is released by `Drop`.
-            let status = unsafe { CVPixelBufferLockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly) };
+            let status =
+                unsafe { CVPixelBufferLockBaseAddress(surface, CVPixelBufferLockFlags::ReadOnly) };
             assert_eq!(status, kCVReturnSuccess);
             Self(surface)
         }
@@ -1378,7 +1544,7 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
     #[cfg(target_os = "macos")]
     impl Drop for ReadLock<'_> {
         fn drop(&mut self) {
-            use objc2_core_video::{CVPixelBufferUnlockBaseAddress, CVPixelBufferLockFlags};
+            use objc2_core_video::{CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress};
             // SAFETY: balances the successful lock taken in `new`.
             unsafe { CVPixelBufferUnlockBaseAddress(self.0, CVPixelBufferLockFlags::ReadOnly) };
         }
@@ -1397,7 +1563,9 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         for y in 0..size.height as usize {
             // SAFETY: the buffer is locked for reading by `_lock`, and each row of `row_bytes` bytes starts
             // at `y * stride` inside it.
-            pixels.extend_from_slice(unsafe { std::slice::from_raw_parts(base.add(y * stride), row_bytes) });
+            pixels.extend_from_slice(unsafe {
+                std::slice::from_raw_parts(base.add(y * stride), row_bytes)
+            });
         }
         pixels
     }
@@ -1413,10 +1581,16 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             format: PixelFormat::Bgra8,
             premultiply: true,
         };
-        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let inputs = FrameInputs {
+            time: 0.5,
+            delta: 0.0,
+            frame: 0,
+        };
         let expected = renderer.render(&program, inputs, options).unwrap();
 
-        let surface = draw_surfaces(&mut renderer, &program, inputs, &[size]).remove(0).1;
+        let surface = draw_surfaces(&mut renderer, &program, inputs, &[size])
+            .remove(0)
+            .1;
         assert_eq!(surface_pixels(&surface, size), expected.pixels);
     }
 
@@ -1426,9 +1600,17 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         let mut renderer = Renderer::new().unwrap();
         let program = renderer.compile(&plan(CODE)).unwrap();
         let (wide, tall) = (Size::new(100, 50), Size::new(30, 60));
-        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let inputs = FrameInputs {
+            time: 0.5,
+            delta: 0.0,
+            frame: 0,
+        };
         let read = |renderer: &mut Renderer, size| {
-            let options = RenderOptions { size, format: PixelFormat::Bgra8, premultiply: true };
+            let options = RenderOptions {
+                size,
+                format: PixelFormat::Bgra8,
+                premultiply: true,
+            };
             renderer.render(&program, inputs, options).unwrap().pixels
         };
         let expected = [read(&mut renderer, wide), read(&mut renderer, tall)];
@@ -1446,12 +1628,23 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
         let mut renderer = Renderer::new().unwrap();
         let program = renderer.compile(&plan(CODE)).unwrap();
         let (a, b) = (Size::new(40, 20), Size::new(20, 40));
-        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let inputs = FrameInputs {
+            time: 0.5,
+            delta: 0.0,
+            frame: 0,
+        };
         let surfaces = draw_surfaces(&mut renderer, &program, inputs, &[a, a, b, a]);
-        assert_eq!(surfaces.iter().map(|(size, _)| *size).collect::<Vec<_>>(), [a, b]);
+        assert_eq!(
+            surfaces.iter().map(|(size, _)| *size).collect::<Vec<_>>(),
+            [a, b]
+        );
         assert_eq!(renderer.target_count(), 2);
         draw_surfaces(&mut renderer, &program, inputs, &[b]);
-        assert_eq!(renderer.target_count(), 1, "the target of a size no frame asks for is dropped");
+        assert_eq!(
+            renderer.target_count(),
+            1,
+            "the target of a size no frame asks for is dropped"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1459,7 +1652,11 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
     fn a_run_of_size_changes_keeps_one_target_and_draws_each_size() {
         let mut renderer = Renderer::new().unwrap();
         let program = renderer.compile(&plan(CODE)).unwrap();
-        let inputs = FrameInputs { time: 0.5, delta: 0.0, frame: 0 };
+        let inputs = FrameInputs {
+            time: 0.5,
+            delta: 0.0,
+            frame: 0,
+        };
         for width in 300..360 {
             let size = Size::new(width, 200);
             let surfaces = draw_surfaces(&mut renderer, &program, inputs, &[size]);
@@ -1477,7 +1674,11 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             format: PixelFormat::Rgba8,
             premultiply: false,
         };
-        let inputs = FrameInputs { time: 1.0, delta: 0.0, frame: 0 };
+        let inputs = FrameInputs {
+            time: 1.0,
+            delta: 0.0,
+            frame: 0,
+        };
         let frame = renderer.render(&program, inputs, options).unwrap();
         assert_eq!(frame.pixels.len(), 100 * 50 * 4);
         let at = |x: usize, y: usize| &frame.pixels[(y * 100 + x) * 4..][..4];
@@ -1496,6 +1697,10 @@ fn fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             .err()
             .unwrap();
         assert!(!error.diagnostics.is_empty());
-        assert!(error.diagnostics[0].location.is_some_and(|(line, _)| line > 0));
+        assert!(
+            error.diagnostics[0]
+                .location
+                .is_some_and(|(line, _)| line > 0)
+        );
     }
 }

@@ -1,5 +1,6 @@
 use gpui::{
-    BorderStyle, Bounds, DevicePixels, DynamicTexture, Hsla, Pixels, Point, Window, point, px, quad, size,
+    BorderStyle, Bounds, DevicePixels, DynamicTexture, Hsla, Pixels, Point, Window, point, px,
+    quad, size,
 };
 
 use crate::geometry::Viewport;
@@ -55,7 +56,12 @@ impl BackgroundOptions {
 }
 
 /// Positions of pattern lines along one axis within `length` pixels.
-pub(crate) fn pattern_positions(length: f32, pan: f32, gap: f32, offset: f32) -> impl Iterator<Item = f32> {
+pub(crate) fn pattern_positions(
+    length: f32,
+    pan: f32,
+    gap: f32,
+    offset: f32,
+) -> impl Iterator<Item = f32> {
     let start = phase(pan, offset, gap);
     let count = ((length - start) / gap).floor().max(-1.0) as i32 + 1;
     (0..count.max(0)).map(move |i| start + gap * i as f32)
@@ -125,7 +131,10 @@ impl Layout {
     }
 
     fn tile(&self) -> (f32, f32) {
-        (self.periods.0 as f32 * self.gap.0, self.periods.1 as f32 * self.gap.1)
+        (
+            self.periods.0 as f32 * self.gap.0,
+            self.periods.1 as f32 * self.gap.1,
+        )
     }
 }
 
@@ -140,7 +149,8 @@ fn tile_origins(length: f32, phase: f32, tile: f32) -> impl Iterator<Item = f32>
 fn sprite_origins(w: f32, h: f32, layout: &Layout) -> impl Iterator<Item = (f32, f32)> {
     let (tx, ty) = layout.tile();
     let (phase_x, phase_y) = layout.phase;
-    tile_origins(w, phase_x, tx).flat_map(move |x| tile_origins(h, phase_y, ty).map(move |y| (x, y)))
+    tile_origins(w, phase_x, tx)
+        .flat_map(move |x| tile_origins(h, phase_y, ty).map(move |y| (x, y)))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -168,8 +178,12 @@ impl TileKey {
     }
 
     fn texels(&self) -> (usize, usize) {
-        let side = |periods: u32, gap: f32| (periods as f32 * gap * self.scale).round().max(1.0) as usize;
-        (side(self.periods.0, self.gap.0), side(self.periods.1, self.gap.1))
+        let side =
+            |periods: u32, gap: f32| (periods as f32 * gap * self.scale).round().max(1.0) as usize;
+        (
+            side(self.periods.0, self.gap.0),
+            side(self.periods.1, self.gap.1),
+        )
     }
 }
 
@@ -230,7 +244,9 @@ impl BackgroundCache {
         match window.create_dynamic_texture(extent, &bytes, (tw * 4) as u32) {
             Ok(texture) => self.tile = Some(CachedTile { key, texture }),
             Err(err) => {
-                log::warn!("background pattern texture unavailable, drawing marks individually: {err:#}");
+                log::warn!(
+                    "background pattern texture unavailable, drawing marks individually: {err:#}"
+                );
                 self.unsupported = true;
             }
         }
@@ -249,13 +265,20 @@ impl Drop for BackgroundCache {
     }
 }
 
-fn paint_tiles(window: &mut Window, bounds: Bounds<Pixels>, texture: DynamicTexture, layout: &Layout) {
+fn paint_tiles(
+    window: &mut Window,
+    bounds: Bounds<Pixels>,
+    texture: DynamicTexture,
+    layout: &Layout,
+) {
     let (tx, ty) = layout.tile();
     let w = f32::from(bounds.size.width);
     let h = f32::from(bounds.size.height);
     for (x, y) in sprite_origins(w, h, layout) {
         let origin = point(bounds.origin.x + px(x), bounds.origin.y + px(y));
-        if let Err(err) = window.paint_dynamic_texture(Bounds::new(origin, size(px(tx), px(ty))), texture) {
+        if let Err(err) =
+            window.paint_dynamic_texture(Bounds::new(origin, size(px(tx), px(ty))), texture)
+        {
             log::warn!("background pattern tile not painted: {err:#}");
             return;
         }
@@ -275,10 +298,16 @@ fn rasterize(key: &TileKey, (tw, th): (usize, usize)) -> Vec<u8> {
             for j in 0..=key.periods.0 {
                 for i in 0..=key.periods.1 {
                     let (cx, cy) = (j as f32 * pitch.0, i as f32 * pitch.1);
-                    canvas.fill(cx - r - 1.0, cx + r + 1.0, cy - r - 1.0, cy + r + 1.0, |x, y| {
-                        let dist = ((x + 0.5 - cx).powi(2) + (y + 0.5 - cy).powi(2)).sqrt();
-                        (r + 0.5 - dist).clamp(0.0, 1.0)
-                    });
+                    canvas.fill(
+                        cx - r - 1.0,
+                        cx + r + 1.0,
+                        cy - r - 1.0,
+                        cy + r + 1.0,
+                        |x, y| {
+                            let dist = ((x + 0.5 - cx).powi(2) + (y + 0.5 - cy).powi(2)).sqrt();
+                            (r + 0.5 - dist).clamp(0.0, 1.0)
+                        },
+                    );
                 }
             }
         }
@@ -343,7 +372,8 @@ impl Canvas {
 
     fn fill_rect(&mut self, x0: f32, x1: f32, y0: f32, y1: f32) {
         self.fill(x0, x1, y0, y1, move |x, y| {
-            ((x + 1.0).min(x1) - x.max(x0)).clamp(0.0, 1.0) * ((y + 1.0).min(y1) - y.max(y0)).clamp(0.0, 1.0)
+            ((x + 1.0).min(x1) - x.max(x0)).clamp(0.0, 1.0)
+                * ((y + 1.0).min(y1) - y.max(y0)).clamp(0.0, 1.0)
         });
     }
 
@@ -377,7 +407,9 @@ fn paint_marks(
     let h = f32::from(bounds.size.height);
     let xs: Vec<f32> = pattern_positions(w, vp.x, layout.gap.0, layout.offset.0).collect();
     let ys: Vec<f32> = pattern_positions(h, vp.y, layout.gap.1, layout.offset.1).collect();
-    let at = |x: f32, y: f32| -> Point<Pixels> { point(bounds.origin.x + px(x), bounds.origin.y + px(y)) };
+    let at = |x: f32, y: f32| -> Point<Pixels> {
+        point(bounds.origin.x + px(x), bounds.origin.y + px(y))
+    };
     let rect = |window: &mut Window, x: f32, y: f32, rw: f32, rh: f32, r: f32| {
         window.paint_quad(quad(
             Bounds::new(at(x, y), size(px(rw), px(rh))),
@@ -450,15 +482,27 @@ mod tests {
     #[test]
     fn tiles_cover_the_canvas_at_any_pan() {
         for &pan in &[0.0, 1.0, 137.5, 511.0, 512.0, -3.0] {
-            let layout = Layout::new(1600.0, 1000.0, &vp(pan, pan, 0.5), &BackgroundOptions::default()).unwrap();
+            let layout = Layout::new(
+                1600.0,
+                1000.0,
+                &vp(pan, pan, 0.5),
+                &BackgroundOptions::default(),
+            )
+            .unwrap();
             let (tx, ty) = layout.tile();
             let xs: Vec<f32> = tile_origins(1600.0, layout.phase.0, tx).collect();
             for probe in [0.0, 1.0, 800.0, 1599.0] {
-                assert!(xs.iter().any(|&o| o <= probe && probe < o + tx), "pan {pan} misses {probe}");
+                assert!(
+                    xs.iter().any(|&o| o <= probe && probe < o + tx),
+                    "pan {pan} misses {probe}"
+                );
             }
             let ys: Vec<f32> = tile_origins(1000.0, layout.phase.1, ty).collect();
             for probe in [0.0, 999.0] {
-                assert!(ys.iter().any(|&o| o <= probe && probe < o + ty), "pan {pan} misses {probe}");
+                assert!(
+                    ys.iter().any(|&o| o <= probe && probe < o + ty),
+                    "pan {pan} misses {probe}"
+                );
             }
         }
     }

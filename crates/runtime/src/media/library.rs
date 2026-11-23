@@ -101,7 +101,10 @@ impl MediaLibrary {
     /// have yet and drops those no source reads any more. Decoding finishes in
     /// `poll`.
     pub fn sync(&mut self, sources: &BTreeMap<String, MediaSource>) {
-        self.assets = sources.iter().map(|(asset, source)| (asset.clone(), source.hash.clone())).collect();
+        self.assets = sources
+            .iter()
+            .map(|(asset, source)| (asset.clone(), source.hash.clone()))
+            .collect();
         let live: HashSet<&String> = self.assets.values().collect();
         self.entries.retain(|hash, _| live.contains(hash));
         let mut new = Vec::new();
@@ -111,7 +114,8 @@ impl MediaLibrary {
             }
             if source.kind == AssetKind::Video {
                 let stream = VideoStream::open(source.bytes.clone(), self.waker.clone());
-                self.entries.insert(source.hash.clone(), Entry::Video(stream));
+                self.entries
+                    .insert(source.hash.clone(), Entry::Video(stream));
             } else {
                 self.entries.insert(source.hash.clone(), Entry::Decoding);
                 new.push((source.hash.clone(), source.bytes.clone()));
@@ -148,7 +152,10 @@ impl MediaLibrary {
                 continue;
             }
             let entry = match result {
-                Ok(image) => Entry::Ready { texture: self.upload(&image), size: image.size },
+                Ok(image) => Entry::Ready {
+                    texture: self.upload(&image),
+                    size: image.size,
+                },
                 Err(error) => {
                     log::error!("[media] can't decode an image: {error}");
                     Entry::Failed(format!("An image can't be used. {error}"))
@@ -161,7 +168,9 @@ impl MediaLibrary {
     }
 
     pub fn status(&self, asset: &str) -> MediaStatus {
-        let Some(hash) = self.assets.get(asset) else { return MediaStatus::Missing };
+        let Some(hash) = self.assets.get(asset) else {
+            return MediaStatus::Missing;
+        };
         match self.entries.get(hash) {
             None | Some(Entry::Decoding) => MediaStatus::Loading,
             Some(Entry::Ready { size, .. }) => MediaStatus::Ready(*size),
@@ -195,18 +204,38 @@ impl MediaLibrary {
         time: f64,
     ) -> Option<wgpu::Texture> {
         let now = Instant::now();
-        self.views.retain(|_, v| now.duration_since(v.used) < IDLE_VIEW);
-        let Self { assets, entries, views, device, queue, .. } = self;
-        let Some(Entry::Video(stream)) = assets.get(asset).and_then(|hash| entries.get(hash)) else {
+        self.views
+            .retain(|_, v| now.duration_since(v.used) < IDLE_VIEW);
+        let Self {
+            assets,
+            entries,
+            views,
+            device,
+            queue,
+            ..
+        } = self;
+        let Some(Entry::Video(stream)) = assets.get(asset).and_then(|hash| entries.get(hash))
+        else {
             return None;
         };
-        let Ok(Some(info)) = stream.info() else { return None };
+        let Ok(Some(info)) = stream.info() else {
+            return None;
+        };
         let t = video_time(playback, time, info.duration)?;
         let frame = stream.frame_at(view, t);
-        let entry = views.entry(view.to_owned()).or_insert(View { texture: None, shown: None, used: now });
+        let entry = views.entry(view.to_owned()).or_insert(View {
+            texture: None,
+            shown: None,
+            used: now,
+        });
         entry.used = now;
         if let Some(frame) = frame.filter(|frame| entry.shown != Some(frame.seq)) {
-            entry.texture = Some(upload_frame(device, queue, entry.texture.take(), &frame.decoded));
+            entry.texture = Some(upload_frame(
+                device,
+                queue,
+                entry.texture.take(),
+                &frame.decoded,
+            ));
             entry.shown = Some(frame.seq);
         }
         entry.texture.clone()
@@ -216,7 +245,11 @@ impl MediaLibrary {
         let size = image.size;
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("media"),
-            size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -227,7 +260,11 @@ impl MediaLibrary {
         self.queue.write_texture(
             texture.as_image_copy(),
             &image.texels,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size.width * 8), rows_per_image: None },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size.width * 8),
+                rows_per_image: None,
+            },
             texture.size(),
         );
         texture
@@ -243,23 +280,35 @@ fn upload_frame(
 ) -> wgpu::Texture {
     let size = frame.size;
     let texture = match reuse {
-        Some(texture) if texture.width() == size.width && texture.height() == size.height => texture,
+        Some(texture) if texture.width() == size.width && texture.height() == size.height => {
+            texture
+        }
         _ => device.create_texture(&wgpu::TextureDescriptor {
             label: Some("video"),
-            size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: VIDEO_FORMAT,
             // COPY_SRC lets a frame be read back, as the renderer does for exports and tests.
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         }),
     };
     queue.write_texture(
         texture.as_image_copy(),
         &frame.bgra,
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size.width * 4), rows_per_image: None },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(size.width * 4),
+            rows_per_image: None,
+        },
         texture.size(),
     );
     texture

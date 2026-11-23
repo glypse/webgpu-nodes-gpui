@@ -17,8 +17,16 @@ pub fn segment_crossing(a: Xy, b: Xy, c: Xy, d: Xy) -> Option<Xy> {
 
 fn bounds(points: &[Xy]) -> (Xy, Xy) {
     points.iter().fold(
-        (Xy::new(f32::INFINITY, f32::INFINITY), Xy::new(f32::NEG_INFINITY, f32::NEG_INFINITY)),
-        |(lo, hi), p| (Xy::new(lo.x.min(p.x), lo.y.min(p.y)), Xy::new(hi.x.max(p.x), hi.y.max(p.y))),
+        (
+            Xy::new(f32::INFINITY, f32::INFINITY),
+            Xy::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
+        ),
+        |(lo, hi), p| {
+            (
+                Xy::new(lo.x.min(p.x), lo.y.min(p.y)),
+                Xy::new(hi.x.max(p.x), hi.y.max(p.y)),
+            )
+        },
     )
 }
 
@@ -31,7 +39,10 @@ pub fn first_crossing(stroke: &[Xy], line: &[Xy]) -> Option<Xy> {
     if a_hi.x < b_lo.x || b_hi.x < a_lo.x || a_hi.y < b_lo.y || b_hi.y < a_lo.y {
         return None;
     }
-    stroke.windows(2).find_map(|p| line.windows(2).find_map(|l| segment_crossing(p[0], p[1], l[0], l[1])))
+    stroke.windows(2).find_map(|p| {
+        line.windows(2)
+            .find_map(|l| segment_crossing(p[0], p[1], l[0], l[1]))
+    })
 }
 
 #[cfg(test)]
@@ -40,16 +51,37 @@ mod tests {
 
     #[test]
     fn crossing_segments_meet_where_they_cross() {
-        let at = segment_crossing(Xy::new(0.0, 0.0), Xy::new(2.0, 2.0), Xy::new(0.0, 2.0), Xy::new(2.0, 0.0));
+        let at = segment_crossing(
+            Xy::new(0.0, 0.0),
+            Xy::new(2.0, 2.0),
+            Xy::new(0.0, 2.0),
+            Xy::new(2.0, 0.0),
+        );
         assert_eq!(at, Some(Xy::new(1.0, 1.0)));
-        assert_eq!(segment_crossing(Xy::new(0.0, 0.0), Xy::new(1.0, 0.0), Xy::new(0.0, 1.0), Xy::new(1.0, 1.0)), None);
+        assert_eq!(
+            segment_crossing(
+                Xy::new(0.0, 0.0),
+                Xy::new(1.0, 0.0),
+                Xy::new(0.0, 1.0),
+                Xy::new(1.0, 1.0)
+            ),
+            None
+        );
     }
 
     #[test]
     fn the_first_crossing_is_the_first_along_the_stroke() {
         let stroke = [Xy::new(0.0, 5.0), Xy::new(10.0, 5.0)];
-        let line = [Xy::new(7.0, 0.0), Xy::new(7.0, 10.0), Xy::new(3.0, 10.0), Xy::new(3.0, 0.0)];
+        let line = [
+            Xy::new(7.0, 0.0),
+            Xy::new(7.0, 10.0),
+            Xy::new(3.0, 10.0),
+            Xy::new(3.0, 0.0),
+        ];
         assert_eq!(first_crossing(&stroke, &line), Some(Xy::new(7.0, 5.0)));
-        assert_eq!(first_crossing(&stroke, &[Xy::new(0.0, 20.0), Xy::new(5.0, 20.0)]), None);
+        assert_eq!(
+            first_crossing(&stroke, &[Xy::new(0.0, 20.0), Xy::new(5.0, 20.0)]),
+            None
+        );
     }
 }

@@ -4,9 +4,9 @@ use guard::SafeListener as _;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, BorderStyle, Bounds, Context, ElementId, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Window, canvas, div, point, px, quad, size,
+    AnyElement, App, BorderStyle, Bounds, Context, ElementId, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, canvas, div, point, px, quad, size,
 };
 
 use crate::flow::Flow;
@@ -93,7 +93,12 @@ pub(crate) struct MiniMapView {
     pub scale: f32,
 }
 
-pub(crate) fn minimap_view(nodes: Option<Rect>, viewport: Rect, width: f32, height: f32) -> MiniMapView {
+pub(crate) fn minimap_view(
+    nodes: Option<Rect>,
+    viewport: Rect,
+    width: f32,
+    height: f32,
+) -> MiniMapView {
     let bounding = nodes.map_or(viewport, |n| n.union(&viewport));
     let scaled_w = bounding.width / width;
     let scaled_h = bounding.height / height;
@@ -129,19 +134,32 @@ impl Flow {
     pub(crate) fn minimap_view(&self) -> Option<MiniMapView> {
         let opts = self.options.minimap.as_ref()?;
         let (w, h) = self.size();
-        let nodes = bounds_of(
-            self.nodes
-                .iter()
-                .filter(|n| !n.hidden)
-                .filter_map(|n| self.lookup.get(&n.id).filter(|i| i.size.is_some()).map(|i| i.rect())),
-        );
-        Some(minimap_view(nodes, self.viewport().visible_rect(w, h), opts.width, opts.height))
+        let nodes = bounds_of(self.nodes.iter().filter(|n| !n.hidden).filter_map(|n| {
+            self.lookup
+                .get(&n.id)
+                .filter(|i| i.size.is_some())
+                .map(|i| i.rect())
+        }));
+        Some(minimap_view(
+            nodes,
+            self.viewport().visible_rect(w, h),
+            opts.width,
+            opts.height,
+        ))
     }
 
-    pub(crate) fn render_panels(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn render_panels(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let mut out = Vec::new();
         for panel in &self.panels {
-            out.push(anchor(panel.position).child((panel.render)(window, cx)).into_any_element());
+            out.push(
+                anchor(panel.position)
+                    .child((panel.render)(window, cx))
+                    .into_any_element(),
+            );
         }
         if let Some(controls) = self.render_controls(cx) {
             out.push(controls);
@@ -172,50 +190,109 @@ impl Flow {
                 .child(child)
         };
         let bar = move |w: f32, h: f32| div().w(px(w)).h(px(h)).bg(theme.panel_text);
-        let mut column = div().flex().flex_col().rounded(px(2.0)).overflow_hidden().border(px(1.0)).border_color(theme.panel_border);
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .rounded(px(2.0))
+            .overflow_hidden()
+            .border(px(1.0))
+            .border_color(theme.panel_border);
         if opts.show_zoom {
             column = column
                 .child(
                     button(
                         "flow-zoom-in".into(),
-                        div().relative().size(px(12.0)).child(bar(12.0, 2.0).absolute().top(px(5.0))).child(bar(2.0, 12.0).absolute().left(px(5.0))).into_any_element(),
+                        div()
+                            .relative()
+                            .size(px(12.0))
+                            .child(bar(12.0, 2.0).absolute().top(px(5.0)))
+                            .child(bar(2.0, 12.0).absolute().left(px(5.0)))
+                            .into_any_element(),
                     )
                     .on_click(cx.safe_listener(|this, _, _, cx| this.zoom_in(cx))),
                 )
                 .child(
-                    button("flow-zoom-out".into(), div().w(px(12.0)).h(px(2.0)).bg(theme.panel_text).into_any_element())
-                        .on_click(cx.safe_listener(|this, _, _, cx| this.zoom_out(cx))),
+                    button(
+                        "flow-zoom-out".into(),
+                        div()
+                            .w(px(12.0))
+                            .h(px(2.0))
+                            .bg(theme.panel_text)
+                            .into_any_element(),
+                    )
+                    .on_click(cx.safe_listener(|this, _, _, cx| this.zoom_out(cx))),
                 );
         }
         if opts.show_fit_view {
-            let fit = div().size(px(12.0)).border(px(2.0)).border_color(theme.panel_text).rounded(px(1.0));
-            column = column.child(button("flow-fit".into(), fit.into_any_element()).on_click(cx.safe_listener(|this, _, _, cx| {
-                let options = crate::flow::FitViewOptions {
-                    duration: Some(std::time::Duration::from_millis(300)),
-                    ..this.options.fit_view_options
-                };
-                this.fit_view(options, cx);
-            })));
+            let fit = div()
+                .size(px(12.0))
+                .border(px(2.0))
+                .border_color(theme.panel_text)
+                .rounded(px(1.0));
+            column = column.child(button("flow-fit".into(), fit.into_any_element()).on_click(
+                cx.safe_listener(|this, _, _, cx| {
+                    let options = crate::flow::FitViewOptions {
+                        duration: Some(std::time::Duration::from_millis(300)),
+                        ..this.options.fit_view_options
+                    };
+                    this.fit_view(options, cx);
+                }),
+            ));
         }
         if opts.show_interactive {
             let locked = !self.is_interactive();
             let lock = div()
                 .relative()
                 .size(px(12.0))
-                .child(div().absolute().left(px(2.0)).top(px(0.0)).w(px(8.0)).h(px(6.0)).border(px(2.0)).border_color(theme.panel_text).rounded_t(px(4.0)))
-                .child(div().absolute().left(px(0.0)).top(px(5.0)).w(px(12.0)).h(px(7.0)).bg(if locked { theme.panel_text } else { theme.panel_background }).border(px(2.0)).border_color(theme.panel_text).rounded(px(1.0)));
-            column = column.child(button("flow-lock".into(), lock.into_any_element()).on_click(cx.safe_listener(|this, _, _, cx| {
-                let next = !this.is_interactive();
-                this.set_interactive(next, cx);
-            })));
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(2.0))
+                        .top(px(0.0))
+                        .w(px(8.0))
+                        .h(px(6.0))
+                        .border(px(2.0))
+                        .border_color(theme.panel_text)
+                        .rounded_t(px(4.0)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(5.0))
+                        .w(px(12.0))
+                        .h(px(7.0))
+                        .bg(if locked {
+                            theme.panel_text
+                        } else {
+                            theme.panel_background
+                        })
+                        .border(px(2.0))
+                        .border_color(theme.panel_text)
+                        .rounded(px(1.0)),
+                );
+            column = column.child(
+                button("flow-lock".into(), lock.into_any_element()).on_click(cx.safe_listener(
+                    |this, _, _, cx| {
+                        let next = !this.is_interactive();
+                        this.set_interactive(next, cx);
+                    },
+                )),
+            );
         }
         for (i, extra) in opts.extra.iter().enumerate() {
             let on_click = extra.on_click.clone();
             column = column.child(
-                button(("flow-extra", i).into(), div().text_size(px(11.0)).child(extra.label.clone()).into_any_element())
-                    .on_click(move |_, window, cx| {
-                        guard::guard("flow control button", || on_click(window, cx));
-                    }),
+                button(
+                    ("flow-extra", i).into(),
+                    div()
+                        .text_size(px(11.0))
+                        .child(extra.label.clone())
+                        .into_any_element(),
+                )
+                .on_click(move |_, window, cx| {
+                    guard::guard("flow control button", || on_click(window, cx));
+                }),
             );
         }
         Some(anchor(opts.position).child(column).into_any_element())
@@ -244,38 +321,49 @@ impl Flow {
         let (mw, mh) = (opts.width, opts.height);
         let paint = canvas(
             |_, _, _| {},
-            move |bounds: Bounds<gpui::Pixels>, _, window, _| { guard::guard("panels canvas", || {
-                let to_px = |p: Xy| {
-                    point(
-                        bounds.origin.x + px((p.x - view.view_box.x) / view.scale),
-                        bounds.origin.y + px((p.y - view.view_box.y) / view.scale),
-                    )
-                };
-                let fill = |window: &mut Window, r: Rect, color: Hsla| {
-                    let origin = to_px(Xy::new(r.x, r.y));
-                    window.paint_quad(quad(
-                        Bounds::new(origin, size(px(r.width / view.scale), px(r.height / view.scale))),
-                        px(2.0),
-                        color,
-                        px(0.0),
-                        gpui::transparent_black(),
-                        BorderStyle::Solid,
-                    ));
-                };
-                for (rect, color) in &nodes {
-                    fill(window, *rect, *color);
-                }
-                // The mask covers everything but the visible area.
-                let vb = view.view_box;
-                let v = visible;
-                let top = Rect::new(vb.x, vb.y, vb.width, (v.y - vb.y).max(0.0));
-                let bottom = Rect::new(vb.x, v.bottom(), vb.width, (vb.bottom() - v.bottom()).max(0.0));
-                let left = Rect::new(vb.x, v.y, (v.x - vb.x).max(0.0), v.height);
-                let right = Rect::new(v.right(), v.y, (vb.right() - v.right()).max(0.0), v.height);
-                for r in [top, bottom, left, right] {
-                    fill(window, r, theme.minimap_mask);
-                }
-            }); },
+            move |bounds: Bounds<gpui::Pixels>, _, window, _| {
+                guard::guard("panels canvas", || {
+                    let to_px = |p: Xy| {
+                        point(
+                            bounds.origin.x + px((p.x - view.view_box.x) / view.scale),
+                            bounds.origin.y + px((p.y - view.view_box.y) / view.scale),
+                        )
+                    };
+                    let fill = |window: &mut Window, r: Rect, color: Hsla| {
+                        let origin = to_px(Xy::new(r.x, r.y));
+                        window.paint_quad(quad(
+                            Bounds::new(
+                                origin,
+                                size(px(r.width / view.scale), px(r.height / view.scale)),
+                            ),
+                            px(2.0),
+                            color,
+                            px(0.0),
+                            gpui::transparent_black(),
+                            BorderStyle::Solid,
+                        ));
+                    };
+                    for (rect, color) in &nodes {
+                        fill(window, *rect, *color);
+                    }
+                    // The mask covers everything but the visible area.
+                    let vb = view.view_box;
+                    let v = visible;
+                    let top = Rect::new(vb.x, vb.y, vb.width, (v.y - vb.y).max(0.0));
+                    let bottom = Rect::new(
+                        vb.x,
+                        v.bottom(),
+                        vb.width,
+                        (vb.bottom() - v.bottom()).max(0.0),
+                    );
+                    let left = Rect::new(vb.x, v.y, (v.x - vb.x).max(0.0), v.height);
+                    let right =
+                        Rect::new(v.right(), v.y, (vb.right() - v.right()).max(0.0), v.height);
+                    for r in [top, bottom, left, right] {
+                        fill(window, r, theme.minimap_mask);
+                    }
+                });
+            },
         )
         .absolute()
         .size_full();

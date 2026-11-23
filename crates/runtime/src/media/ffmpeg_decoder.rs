@@ -4,16 +4,16 @@
 
 use std::path::Path;
 
-use ffmpeg_next as ffmpeg;
 use ffmpeg::format::Pixel;
 use ffmpeg::format::context::Input;
 use ffmpeg::format::stream::Stream;
-use ffmpeg::software::scaling::{Context as Scaler, Flags};
 use ffmpeg::packet::side_data::Type as SideDataType;
+use ffmpeg::software::scaling::{Context as Scaler, Flags};
+use ffmpeg_next as ffmpeg;
 use shader_graph::assets::VideoInfo;
 
-use super::video::{DecodedFrame, VideoDecoder};
 use super::MediaError;
+use super::video::{DecodedFrame, VideoDecoder};
 use crate::Size;
 
 /// The spacing assumed for a frame when the video's frame rate isn't known.
@@ -45,19 +45,53 @@ impl FfmpegDecoder {
         ffmpeg::init().map_err(ff)?;
         let input = ffmpeg::format::input(path).map_err(ff)?;
         let (stream, time_base, turn, duration, frame_rate, parameters) = {
-            let stream = input.streams().best(ffmpeg::media::Type::Video).ok_or_else(|| video_error("the file has no video track"))?;
+            let stream = input
+                .streams()
+                .best(ffmpeg::media::Type::Video)
+                .ok_or_else(|| video_error("the file has no video track"))?;
             let time_base = f64::from(stream.time_base());
-            let duration = duration_seconds(&input, &stream, time_base).ok_or_else(|| video_error("the file's duration isn't known"))?;
-            (stream.index(), time_base, clockwise_degrees(&stream), duration, frame_rate(&stream), stream.parameters())
+            let duration = duration_seconds(&input, &stream, time_base)
+                .ok_or_else(|| video_error("the file's duration isn't known"))?;
+            (
+                stream.index(),
+                time_base,
+                clockwise_degrees(&stream),
+                duration,
+                frame_rate(&stream),
+                stream.parameters(),
+            )
         };
-        let decoder = ffmpeg::codec::context::Context::from_parameters(parameters).map_err(ff)?.decoder().video().map_err(ff)?;
+        let decoder = ffmpeg::codec::context::Context::from_parameters(parameters)
+            .map_err(ff)?
+            .decoder()
+            .video()
+            .map_err(ff)?;
         let (width, height) = (decoder.width(), decoder.height());
-        let (width, height) = if turn_swaps_sides(turn) { (height, width) } else { (width, height) };
-        let info = VideoInfo { width, height, duration, frame_rate };
+        let (width, height) = if turn_swaps_sides(turn) {
+            (height, width)
+        } else {
+            (width, height)
+        };
+        let info = VideoInfo {
+            width,
+            height,
+            duration,
+            frame_rate,
+        };
         if width == 0 || height == 0 {
             return Err(video_error("the video's size isn't one a frame can have"));
         }
-        Ok(Self { input, stream, time_base, decoder, scaler: None, turn, info, flushing: false, next_time: 0.0 })
+        Ok(Self {
+            input,
+            stream,
+            time_base,
+            decoder,
+            scaler: None,
+            turn,
+            info,
+            flushing: false,
+            next_time: 0.0,
+        })
     }
 
     /// The next packet of the video stream, or `None` at the end of the file.
@@ -79,7 +113,16 @@ impl FfmpegDecoder {
         let mut scaler = match self.scaler.take() {
             Some(state) if state.source == source => state,
             _ => ScalerState {
-                context: Scaler::get(source.0, width, height, Pixel::BGRA, width, height, Flags::BILINEAR).map_err(ff)?,
+                context: Scaler::get(
+                    source.0,
+                    width,
+                    height,
+                    Pixel::BGRA,
+                    width,
+                    height,
+                    Flags::BILINEAR,
+                )
+                .map_err(ff)?,
                 source,
             },
         };
@@ -87,15 +130,29 @@ impl FfmpegDecoder {
         let converted = scaler.context.run(frame, &mut bgra);
         self.scaler = Some(scaler);
         converted.map_err(ff)?;
-        let (bgra, size) = turned_pixels(bgra.data(0), bgra.stride(0), Size::new(width, height), self.turn)?;
+        let (bgra, size) = turned_pixels(
+            bgra.data(0),
+            bgra.stride(0),
+            Size::new(width, height),
+            self.turn,
+        )?;
 
         let time = match frame.timestamp() {
             Some(timestamp) => timestamp as f64 * self.time_base,
             None => self.next_time,
         };
-        let duration = if self.info.frame_rate > 0.0 { 1.0 / self.info.frame_rate } else { FALLBACK_FRAME_SECONDS };
+        let duration = if self.info.frame_rate > 0.0 {
+            1.0 / self.info.frame_rate
+        } else {
+            FALLBACK_FRAME_SECONDS
+        };
         self.next_time = time + duration;
-        Ok(DecodedFrame { time, duration, size, bgra })
+        Ok(DecodedFrame {
+            time,
+            duration,
+            size,
+            bgra,
+        })
     }
 }
 
@@ -165,7 +222,10 @@ fn frame_rate(stream: &Stream) -> f64 {
 /// The stream's display rotation as clockwise degrees, in quarter turns.
 /// The sign follows FFmpeg's own command line, which turns frames the same way.
 fn clockwise_degrees(stream: &Stream) -> u32 {
-    let Some(matrix) = stream.side_data().find(|data| data.kind() == SideDataType::DisplayMatrix) else {
+    let Some(matrix) = stream
+        .side_data()
+        .find(|data| data.kind() == SideDataType::DisplayMatrix)
+    else {
         return 0;
     };
     let mut values = [0i32; 9];
@@ -185,7 +245,12 @@ fn turn_swaps_sides(degrees: u32) -> bool {
 /// A frame's BGRA pixels (`data` with rows `stride` bytes apart, `size` of
 /// them) turned `degrees` clockwise, a multiple of 90, into one tight buffer,
 /// rows top first.
-fn turned_pixels(data: &[u8], stride: usize, size: Size, degrees: u32) -> Result<(Vec<u8>, Size), MediaError> {
+fn turned_pixels(
+    data: &[u8],
+    stride: usize,
+    size: Size,
+    degrees: u32,
+) -> Result<(Vec<u8>, Size), MediaError> {
     let (w, h) = (size.width as usize, size.height as usize);
     let row = w * 4;
     if stride < row || data.len() < stride * h.saturating_sub(1) + row {
@@ -200,7 +265,11 @@ fn turned_pixels(data: &[u8], stride: usize, size: Size, degrees: u32) -> Result
         }
         return Ok((out, size));
     }
-    let (out_w, out_h) = if turn_swaps_sides(degrees) { (h, w) } else { (w, h) };
+    let (out_w, out_h) = if turn_swaps_sides(degrees) {
+        (h, w)
+    } else {
+        (w, h)
+    };
     let mut out = vec![0u8; row * h];
     for (index, pixel) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let (ox, oy) = (index % out_w, index / out_w);
@@ -225,7 +294,13 @@ mod tests {
         // A 2 wide, 3 tall image whose pixels are numbered in reading order.
         let pixels: Vec<u8> = (0..6u8).flat_map(|n| [n, n, n, 255]).collect();
         let size = Size::new(2, 3);
-        let column = |bgra: &[u8]| bgra.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<_>>();
+        let column = |bgra: &[u8]| {
+            bgra.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| p[0])
+                .collect::<Vec<_>>()
+        };
 
         let (quarter, quarter_size) = turned_pixels(&pixels, 8, size, 90).expect("turns");
         assert_eq!((quarter_size.width, quarter_size.height), (3, 2));
@@ -246,12 +321,33 @@ mod tests {
     #[test]
     fn reads_rows_padded_to_a_stride() {
         // Each 2-pixel row is followed by 4 bytes of padding that must not reach the output.
-        let padded: Vec<u8> = (0..3u8).flat_map(|row| (0..2u8).flat_map(move |x| [row * 2 + x, 0, 0, 255]).chain([9, 9, 9, 9])).collect();
+        let padded: Vec<u8> = (0..3u8)
+            .flat_map(|row| {
+                (0..2u8)
+                    .flat_map(move |x| [row * 2 + x, 0, 0, 255])
+                    .chain([9, 9, 9, 9])
+            })
+            .collect();
         let size = Size::new(2, 3);
         let (tight, _) = turned_pixels(&padded, 12, size, 0).expect("turns");
         assert_eq!(tight.len(), 24);
-        assert!(tight.as_chunks::<4>().0.iter().enumerate().all(|(i, p)| p[0] == i as u8));
+        assert!(
+            tight
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .enumerate()
+                .all(|(i, p)| p[0] == i as u8)
+        );
         let (quarter, _) = turned_pixels(&padded, 12, size, 90).expect("turns");
-        assert_eq!(quarter.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<_>>(), vec![4, 2, 0, 5, 3, 1]);
+        assert_eq!(
+            quarter
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| p[0])
+                .collect::<Vec<_>>(),
+            vec![4, 2, 0, 5, 3, 1]
+        );
     }
 }

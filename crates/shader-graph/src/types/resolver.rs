@@ -33,13 +33,20 @@ impl ResolvedNodeTypes {
     }
 
     pub fn output_handle_type(&self, id: &str) -> WgslType {
-        self.resolved_outputs.iter().find(|o| o.id == id).map_or(self.output_type, |o| o.ty)
+        self.resolved_outputs
+            .iter()
+            .find(|o| o.id == id)
+            .map_or(self.output_type, |o| o.ty)
     }
 }
 
 /// A stable key for `bindings` (the empty string for none).
 pub fn bindings_key(bindings: &TypeBindings) -> String {
-    bindings.iter().map(|(id, ty)| format!("{id}={ty}")).collect::<Vec<_>>().join(",")
+    bindings
+        .iter()
+        .map(|(id, ty)| format!("{id}={ty}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Every variable's type: the bound one, or its first.
@@ -75,11 +82,16 @@ impl TypeResolver {
 
     /// Forget every node's types.
     pub fn clear(&self) {
-        self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        self.cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 
     fn variables<'a>(project: &'a GraphProject, node_id: &str) -> &'a [TypeVariable] {
-        project.document_of(node_id).map_or(&[], |d| d.type_variables.as_slice())
+        project
+            .document_of(node_id)
+            .map_or(&[], |d| d.type_variables.as_slice())
     }
 
     fn key(project: &GraphProject, node_id: &str, bindings: &TypeBindings) -> String {
@@ -129,9 +141,13 @@ impl TypeResolver {
         bindings: &TypeBindings,
     ) -> ResolvedNodeTypes {
         let descriptor = resolve_descriptor(node, project);
-        let incoming: Vec<&GraphEdge> =
-            project.document_of(&node.id).map_or_else(Vec::new, |d| d.edges_into(&node.id).collect());
-        let env = Env { resolver: self, project };
+        let incoming: Vec<&GraphEdge> = project
+            .document_of(&node.id)
+            .map_or_else(Vec::new, |d| d.edges_into(&node.id).collect());
+        let env = Env {
+            resolver: self,
+            project,
+        };
         env.resolve_node(node, &descriptor, &incoming, data, bindings)
     }
 
@@ -144,7 +160,8 @@ impl TypeResolver {
         bindings: &TypeBindings,
     ) -> WgslType {
         project.resolve_node(source).map_or(WgslType::F32, |node| {
-            self.resolve(project, node, bindings).output_handle_type(handle)
+            self.resolve(project, node, bindings)
+                .output_handle_type(handle)
         })
     }
 }
@@ -170,7 +187,9 @@ impl Env<'_> {
             if node.is(GROUP_OUTPUT) {
                 // The variables' families are forced to their bound types.
                 let mut forced = data.clone();
-                forced.types.extend(bound.iter().map(|(k, v)| (k.clone(), *v)));
+                forced
+                    .types
+                    .extend(bound.iter().map(|(k, v)| (k.clone(), *v)));
                 return self.resolve_regular(descriptor, incoming, &forced, &bound);
             }
             let mut resolved = self.resolve_regular(descriptor, incoming, data, &bound);
@@ -192,7 +211,11 @@ impl Env<'_> {
             return self.resolve_zone(node, descriptor, incoming, data, bindings);
         }
         let resolved = self.resolve_regular(descriptor, incoming, data, bindings);
-        if node.is(NODE_GROUP) { self.resolve_group(node, resolved) } else { resolved }
+        if node.is(NODE_GROUP) {
+            self.resolve_group(node, resolved)
+        } else {
+            resolved
+        }
     }
 
     /// A zone input or output: items typed by a variable take its bound type,
@@ -222,14 +245,15 @@ impl Env<'_> {
                 }
             }
         } else if let Some(doc) = doc
-            && let Some(input) = paired_input(&doc.nodes, &node.id) {
-                let paired = self.resolver.resolve(self.project, input, bindings);
-                for item in zone_items(Some(node)) {
-                    if let (true, Some(ty)) = (is_inferred_item(&item), paired.input_type(&item.id)) {
-                        types.insert(inferred_item_family(&item.id), ty);
-                    }
+            && let Some(input) = paired_input(&doc.nodes, &node.id)
+        {
+            let paired = self.resolver.resolve(self.project, input, bindings);
+            for item in zone_items(Some(node)) {
+                if let (true, Some(ty)) = (is_inferred_item(&item), paired.input_type(&item.id)) {
+                    types.insert(inferred_item_family(&item.id), ty);
                 }
             }
+        }
         let mut data = data.clone();
         data.types = types;
         let mut resolved = self.resolve_regular(descriptor, incoming, &data, bindings);
@@ -249,7 +273,11 @@ impl Env<'_> {
     /// variable takes the type of its sockets' family (forced on the node or
     /// inferred from links), or the one picked on the node when it has no
     /// input socket.
-    fn resolve_group(&self, node: &GraphNode, mut resolved: ResolvedNodeTypes) -> ResolvedNodeTypes {
+    fn resolve_group(
+        &self,
+        node: &GraphNode,
+        mut resolved: ResolvedNodeTypes,
+    ) -> ResolvedNodeTypes {
         let Some(def) = node.definition_ref().and_then(|r| self.project.document(r)) else {
             return resolved;
         };
@@ -273,7 +301,9 @@ impl Env<'_> {
         // Output node it's linked on.
         let inner_type = |handle: &str| -> Option<WgslType> {
             let output = def.output_node_of(handle)?;
-            self.resolver.resolve(self.project, output, &bindings).input_type(handle)
+            self.resolver
+                .resolve(self.project, output, &bindings)
+                .input_type(handle)
         };
         resolved.resolved_outputs = def
             .outputs
@@ -301,7 +331,11 @@ impl Env<'_> {
     fn source_handle_type(&self, edge: &GraphEdge, bindings: &TypeBindings) -> Option<WgslType> {
         let source = self.project.resolve_node(&edge.source)?;
         let resolved = self.resolver.resolve(self.project, source, bindings);
-        resolved.resolved_outputs.iter().find(|o| o.id == edge.source_handle).map(|o| o.ty)
+        resolved
+            .resolved_outputs
+            .iter()
+            .find(|o| o.id == edge.source_handle)
+            .map(|o| o.ty)
     }
 
     /// The standard type resolution for non-boundary nodes.
@@ -324,13 +358,15 @@ impl Env<'_> {
                 .or_else(|| family.types.first().copied())
                 .unwrap_or(WgslType::F32)
         });
-        let active_inputs: Vec<NodeInputDef> = match (family_output_type, &descriptor.resolve_inputs)
-        {
-            (Some(ty), Some(resolve)) => resolve(ty, data),
-            _ => descriptor.inputs.clone(),
-        };
-        let family_of: HashMap<&str, String> =
-            active_inputs.iter().map(|i| (i.id.as_str(), input_family_key(i, &active_inputs))).collect();
+        let active_inputs: Vec<NodeInputDef> =
+            match (family_output_type, &descriptor.resolve_inputs) {
+                (Some(ty), Some(resolve)) => resolve(ty, data),
+                _ => descriptor.inputs.clone(),
+            };
+        let family_of: HashMap<&str, String> = active_inputs
+            .iter()
+            .map(|i| (i.id.as_str(), input_family_key(i, &active_inputs)))
+            .collect();
         let family = |input: &NodeInputDef| family_of[input.id.as_str()].clone();
 
         // Links from outputs their source doesn't have with these bindings don't count.
@@ -354,8 +390,11 @@ impl Env<'_> {
             let ty = if let Some(forced) = overrides.get(&family(input)) {
                 *forced
             } else {
-                let sources =
-                    if input.types.len() == 1 { Vec::new() } else { source_types_of(&input.id) };
+                let sources = if input.types.len() == 1 {
+                    Vec::new()
+                } else {
+                    source_types_of(&input.id)
+                };
                 if sources.is_empty() {
                     input.default_type()
                 } else {
@@ -371,10 +410,13 @@ impl Env<'_> {
         let mut candidates: Vec<(String, Vec<WgslType>, Vec<WgslType>)> = Vec::new();
         for input in &active_inputs {
             let key = family(input);
-            let at = candidates.iter().position(|(k, ..)| *k == key).unwrap_or_else(|| {
-                candidates.push((key.clone(), input.types.clone(), Vec::new()));
-                candidates.len() - 1
-            });
+            let at = candidates
+                .iter()
+                .position(|(k, ..)| *k == key)
+                .unwrap_or_else(|| {
+                    candidates.push((key.clone(), input.types.clone(), Vec::new()));
+                    candidates.len() - 1
+                });
             let connected = if input.types.len() == 1 {
                 incoming.iter().any(|e| e.target_handle == input.id)
             } else {
@@ -393,7 +435,13 @@ impl Env<'_> {
         let input_types: BTreeMap<String, WgslType> = active_inputs
             .iter()
             .map(|i| {
-                (i.id.clone(), family_resolved.get(&family(i)).copied().unwrap_or(i.default_type()))
+                (
+                    i.id.clone(),
+                    family_resolved
+                        .get(&family(i))
+                        .copied()
+                        .unwrap_or(i.default_type()),
+                )
             })
             .collect();
 
@@ -409,16 +457,19 @@ impl Env<'_> {
             None => descriptor.outputs.first().map_or(WgslType::F32, |o| o.ty),
         };
         let value_input_types = || -> BTreeMap<String, WgslType> {
-            input_types.iter().filter(|(_, t)| !t.is_texture()).map(|(k, t)| (k.clone(), *t)).collect()
+            input_types
+                .iter()
+                .filter(|(_, t)| !t.is_texture())
+                .map(|(k, t)| (k.clone(), *t))
+                .collect()
         };
-        let output_type = family_output_type.unwrap_or_else(|| {
-            match &descriptor.resolve_output_type {
+        let output_type =
+            family_output_type.unwrap_or_else(|| match &descriptor.resolve_output_type {
                 Some(resolve) if !representative.is_texture() => {
                     resolve(representative, &value_input_types())
                 }
                 _ => representative,
-            }
-        });
+            });
 
         // Phase 5: dynamic inputs and outputs. Outputs carry their concrete
         // type so downstream consumers can read per-handle types directly.
@@ -429,13 +480,25 @@ impl Env<'_> {
         let resolved_outputs = if descriptor.static_output_types {
             raw_outputs
         } else {
-            raw_outputs.into_iter().map(|o| NodeOutputDef { ty: output_type, ..o }).collect()
+            raw_outputs
+                .into_iter()
+                .map(|o| NodeOutputDef {
+                    ty: output_type,
+                    ..o
+                })
+                .collect()
         };
         let resolved_inputs = match (&descriptor.resolve_inputs, family_output_type) {
             (Some(resolve), None) if !output_type.is_texture() => resolve(output_type, data),
             _ => active_inputs,
         };
-        ResolvedNodeTypes { input_types, output_type, resolved_inputs, resolved_outputs, bindings: None }
+        ResolvedNodeTypes {
+            input_types,
+            output_type,
+            resolved_inputs,
+            resolved_outputs,
+            bindings: None,
+        }
     }
 }
 

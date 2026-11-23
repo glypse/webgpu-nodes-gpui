@@ -42,11 +42,21 @@ pub struct Rect {
 
 impl Rect {
     pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub fn from_corners(a: Xy, b: Xy) -> Self {
-        Self::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
+        Self::new(
+            a.x.min(b.x),
+            a.y.min(b.y),
+            (a.x - b.x).abs(),
+            (a.y - b.y).abs(),
+        )
     }
 
     pub fn right(&self) -> f32 {
@@ -68,7 +78,12 @@ impl Rect {
     pub fn union(&self, o: &Rect) -> Rect {
         let x = self.x.min(o.x);
         let y = self.y.min(o.y);
-        Rect::new(x, y, self.right().max(o.right()) - x, self.bottom().max(o.bottom()) - y)
+        Rect::new(
+            x,
+            y,
+            self.right().max(o.right()) - x,
+            self.bottom().max(o.bottom()) - y,
+        )
     }
 
     pub fn overlap_area(&self, o: &Rect) -> f32 {
@@ -78,7 +93,12 @@ impl Rect {
     }
 
     pub fn inflate(&self, by: f32) -> Rect {
-        Rect::new(self.x - by, self.y - by, self.width + 2.0 * by, self.height + 2.0 * by)
+        Rect::new(
+            self.x - by,
+            self.y - by,
+            self.width + 2.0 * by,
+            self.height + 2.0 * by,
+        )
     }
 }
 
@@ -97,7 +117,11 @@ pub struct Viewport {
 
 impl Default for Viewport {
     fn default() -> Self {
-        Self { x: 0.0, y: 0.0, zoom: 1.0 }
+        Self {
+            x: 0.0,
+            y: 0.0,
+            zoom: 1.0,
+        }
     }
 }
 
@@ -124,7 +148,11 @@ impl Viewport {
     pub fn zoomed_at(&self, factor: f32, at: Xy, min: f32, max: f32) -> Viewport {
         let zoom = clamp(self.zoom * factor, min, max);
         let flow = self.to_flow(at);
-        Viewport { x: at.x - flow.x * zoom, y: at.y - flow.y * zoom, zoom }
+        Viewport {
+            x: at.x - flow.x * zoom,
+            y: at.y - flow.y * zoom,
+            zoom,
+        }
     }
 
     pub fn lerp(&self, to: &Viewport, t: f32) -> Viewport {
@@ -189,7 +217,11 @@ pub fn constrain_viewport(vp: Viewport, width: f32, height: f32, extent: &Extent
     };
     let tx = shift(left.x - extent.min.x, right.x - extent.max.x);
     let ty = shift(left.y - extent.min.y, right.y - extent.max.y);
-    Viewport { x: vp.x + vp.zoom * tx, y: vp.y + vp.zoom * ty, zoom: vp.zoom }
+    Viewport {
+        x: vp.x + vp.zoom * tx,
+        y: vp.y + vp.zoom * ty,
+        zoom: vp.zoom,
+    }
 }
 
 /// The viewport that centres `bounds` in a canvas with the given padding
@@ -244,7 +276,11 @@ mod tests {
 
     #[test]
     fn screen_and_flow_round_trip() {
-        let vp = Viewport { x: 30.0, y: -10.0, zoom: 2.0 };
+        let vp = Viewport {
+            x: 30.0,
+            y: -10.0,
+            zoom: 2.0,
+        };
         let p = Xy::new(12.0, 7.0);
         let back = vp.to_flow(vp.to_screen(p));
         assert!((back.x - p.x).abs() < 1e-5 && (back.y - p.y).abs() < 1e-5);
@@ -252,7 +288,11 @@ mod tests {
 
     #[test]
     fn zoom_keeps_the_anchor_still() {
-        let vp = Viewport { x: 30.0, y: 20.0, zoom: 1.0 };
+        let vp = Viewport {
+            x: 30.0,
+            y: 20.0,
+            zoom: 1.0,
+        };
         let at = Xy::new(100.0, 80.0);
         let before = vp.to_flow(at);
         let zoomed = vp.zoomed_at(1.5, at, 0.1, 3.0);
@@ -298,7 +338,10 @@ mod tests {
     #[test]
     fn extent_clamps_a_node() {
         let extent = Extent::new(Xy::new(0.0, 0.0), Xy::new(100.0, 100.0));
-        assert_eq!(clamp_position(Xy::new(95.0, -5.0), &extent, 20.0, 20.0), Xy::new(80.0, 0.0));
+        assert_eq!(
+            clamp_position(Xy::new(95.0, -5.0), &extent, 20.0, 20.0),
+            Xy::new(80.0, 0.0)
+        );
     }
 
     #[test]
@@ -307,7 +350,10 @@ mod tests {
         assert!(near_left.x > 0.0 && near_left.y == 0.0);
         let near_right = auto_pan(Xy::new(795.0, 200.0), 800.0, 600.0, 15.0, 40.0);
         assert!(near_right.x < 0.0);
-        assert_eq!(auto_pan(Xy::new(400.0, 300.0), 800.0, 600.0, 15.0, 40.0), Xy::ZERO);
+        assert_eq!(
+            auto_pan(Xy::new(400.0, 300.0), 800.0, 600.0, 15.0, 40.0),
+            Xy::ZERO
+        );
     }
 
     #[test]
@@ -319,7 +365,16 @@ mod tests {
     #[test]
     fn translate_extent_keeps_the_view_inside() {
         let extent = Extent::new(Xy::new(0.0, 0.0), Xy::new(1000.0, 1000.0));
-        let vp = constrain_viewport(Viewport { x: 500.0, y: 0.0, zoom: 1.0 }, 400.0, 400.0, &extent);
+        let vp = constrain_viewport(
+            Viewport {
+                x: 500.0,
+                y: 0.0,
+                zoom: 1.0,
+            },
+            400.0,
+            400.0,
+            &extent,
+        );
         assert!(vp.to_flow(Xy::ZERO).x >= 0.0);
     }
 }

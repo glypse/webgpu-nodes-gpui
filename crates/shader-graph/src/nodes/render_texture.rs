@@ -23,7 +23,11 @@ const MODE_KEY: &str = "mode";
 const MIPS_KEY: &str = "mips";
 
 pub fn render_mode_setting() -> NodeSetting {
-    NodeSetting::new(MODE_KEY, "Size", &[("scale", "Scale"), ("pixels", "Pixels")])
+    NodeSetting::new(
+        MODE_KEY,
+        "Size",
+        &[("scale", "Scale"), ("pixels", "Pixels")],
+    )
 }
 
 pub fn render_mips_setting() -> NodeSetting {
@@ -42,11 +46,16 @@ pub fn render_texture_items(data: &NodeData) -> Vec<ZoneItem> {
 
 /// What an item's input takes: a texture item's values are colours.
 pub fn render_item_type(item: &ZoneItem) -> WgslType {
-    item.ty.fixed().map_or(WgslType::Vec4f, WgslType::value_type)
+    item.ty
+        .fixed()
+        .map_or(WgslType::Vec4f, WgslType::value_type)
 }
 
 pub fn render_item_format(item: &ZoneItem) -> TextureFormat {
-    item.format.as_deref().and_then(TextureFormat::from_id).unwrap_or(DEFAULT_RENDER_FORMAT)
+    item.format
+        .as_deref()
+        .and_then(TextureFormat::from_id)
+        .unwrap_or(DEFAULT_RENDER_FORMAT)
 }
 
 /// Whether a Render Texture draws its size from pixels rather than a scale.
@@ -64,8 +73,13 @@ pub fn mips_problem(data: &NodeData) -> Option<String> {
     if !renders_mips(data) {
         return None;
     }
-    let item = render_texture_items(data).into_iter().find(|i| !render_item_format(i).can_mip())?;
-    Some(format!("\"{}\" is kept in integers, which can't be averaged into mip levels.", item.label))
+    let item = render_texture_items(data)
+        .into_iter()
+        .find(|i| !render_item_format(i).can_mip())?;
+    Some(format!(
+        "\"{}\" is kept in integers, which can't be averaged into mip levels.",
+        item.label
+    ))
 }
 
 /// A node drawing values or textures into textures of a chosen size and
@@ -79,9 +93,14 @@ pub fn build_render_texture_descriptor(data: &NodeData) -> NodeDescriptor {
         NodeInputDef::new(RENDER_SCALE, "scale", &[WgslType::F32])
     };
     size.frame = true;
-    let mut inputs = vec![size, NodeInputDef::new(RENDER_LIKE, "like", &[WgslType::Texture])];
+    let mut inputs = vec![
+        size,
+        NodeInputDef::new(RENDER_LIKE, "like", &[WgslType::Texture]),
+    ];
     inputs.extend(
-        items.iter().map(|i| NodeInputDef::new(i.id.clone(), i.label.clone(), &[render_item_type(i)])),
+        items
+            .iter()
+            .map(|i| NodeInputDef::new(i.id.clone(), i.label.clone(), &[render_item_type(i)])),
     );
     let outputs = items
         .iter()
@@ -94,23 +113,24 @@ pub fn build_render_texture_descriptor(data: &NodeData) -> NodeDescriptor {
     );
     defaults.items = Some(default_items());
     defaults = defaults.setting(MODE_KEY, "scale").setting(MIPS_KEY, "off");
-    let mut descriptor = NodeDescriptor::new(RENDER_TEXTURE, "Render Texture", NodeCategory::Texture)
-        .aliases(&[
-            "Render Target",
-            "Framebuffer",
-            "Buffer",
-            "Resize",
-            "Resolution",
-            "Downscale",
-            "Pixelate",
-            "Render Pass",
-            "Feedback",
-        ])
-        .inputs(inputs)
-        .outputs(outputs)
-        .settings(vec![render_mode_setting(), render_mips_setting()])
-        .defaults(defaults)
-        .static_outputs();
+    let mut descriptor =
+        NodeDescriptor::new(RENDER_TEXTURE, "Render Texture", NodeCategory::Texture)
+            .aliases(&[
+                "Render Target",
+                "Framebuffer",
+                "Buffer",
+                "Resize",
+                "Resolution",
+                "Downscale",
+                "Pixelate",
+                "Render Pass",
+                "Feedback",
+            ])
+            .inputs(inputs)
+            .outputs(outputs)
+            .settings(vec![render_mode_setting(), render_mips_setting()])
+            .defaults(defaults)
+            .static_outputs();
     descriptor.widget = Some(NodeWidget::Items);
     descriptor
 }

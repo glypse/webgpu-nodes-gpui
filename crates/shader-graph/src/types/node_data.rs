@@ -36,7 +36,10 @@ pub struct VectorValue {
 
 impl VectorValue {
     pub fn component(&self, index: usize) -> Option<ScalarValue> {
-        [self.x, self.y, self.z, self.w].get(index).copied().flatten()
+        [self.x, self.y, self.z, self.w]
+            .get(index)
+            .copied()
+            .flatten()
     }
 
     pub fn set(&mut self, index: usize, value: ScalarValue) {
@@ -153,7 +156,11 @@ pub struct EnumVariant {
 
 impl EnumVariant {
     pub fn new(value: i64, label: impl Into<String>) -> Self {
-        Self { value, label: label.into(), types: None }
+        Self {
+            value,
+            label: label.into(),
+            types: None,
+        }
     }
 }
 
@@ -258,7 +265,14 @@ pub fn bound_type(
             bindings
                 .get(variable)
                 .copied()
-                .or_else(|| variables.iter().find(|v| &v.id == variable)?.types.first().copied())
+                .or_else(|| {
+                    variables
+                        .iter()
+                        .find(|v| &v.id == variable)?
+                        .types
+                        .first()
+                        .copied()
+                })
                 .unwrap_or(WgslType::F32),
         ),
     }
@@ -414,7 +428,10 @@ impl NodeData {
         V: Into<InputValue>,
     {
         Self {
-            values: values.into_iter().map(|(k, v)| (k.to_owned(), v.into())).collect(),
+            values: values
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.into()))
+                .collect(),
             ..Self::default()
         }
     }

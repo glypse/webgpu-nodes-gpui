@@ -1,16 +1,16 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, Rgba, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::input::{Escape, Input, InputEvent, InputState};
-use guard::SafeListener as _;
 use graph_math::color::{
     ColorMode, ColorSpace, Hsv, Lch, Rgb, Rgba as LinearRgba, clip_to_gamut, decode_rgb, encode_in,
     hex_to_linear, hsv_keeping_hue, hsv_to_rgb, lch_keeping_hue, linear_to_hex, oklch_to_linear,
 };
+use guard::SafeListener as _;
 
 use crate::{ActiveTheme as _, ColorWheels, ColorWheelsEvent, NumberEvent, NumberField};
 
@@ -329,14 +329,18 @@ impl Render for ColorPicker {
                 Some(hex) => hex,
                 None => {
                     let hex = cx.new(|cx| InputState::new(window, cx));
-                    self._hex_subscription =
-                        Some(cx.subscribe_in(&hex, window, |this, _, event: &InputEvent, _, cx| {
+                    self._hex_subscription = Some(cx.subscribe_in(
+                        &hex,
+                        window,
+                        |this, _, event: &InputEvent, _, cx| {
                             guard::guard("ColorPicker hex", || {
-                                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur)
+                                {
                                     this.commit_hex(cx);
                                 }
                             });
-                        }));
+                        },
+                    ));
                     self.hex = Some(hex.clone());
                     hex
                 }

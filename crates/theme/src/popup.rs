@@ -7,17 +7,17 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, ParentElement as _, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, anchored, deferred,
-    div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    ParentElement as _, Pixels, Point, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, Window, anchored, deferred, div, prelude::FluentBuilder as _,
+    px,
 };
-use guard::SafeListener as _;
 use gpui_component::{
     ThemeStyled as _,
     menu::{PopupMenu, PopupMenuItem},
 };
+use guard::SafeListener as _;
 
 use crate::{ActiveTheme as _, Icon, IconName, Theme};
 
@@ -32,12 +32,25 @@ const HOVER_INTENT: Duration = Duration::from_millis(150);
 const SUBMENU_LAYER: usize = LAYER + 2;
 
 /// A menu entry with `detail` (a shortcut, or the value it holds) in muted text on the right.
-pub fn row(label: impl Into<SharedString>, detail: Option<SharedString>, destructive: bool) -> PopupMenuItem {
+pub fn row(
+    label: impl Into<SharedString>,
+    detail: Option<SharedString>,
+    destructive: bool,
+) -> PopupMenuItem {
     let label = label.into();
     PopupMenuItem::element(move |_, cx| {
         let colors = &cx.theme().colors;
-        let text = if destructive { colors.destructive } else { colors.popover_foreground };
-        let detail = detail.clone().map(|d| div().flex_none().text_color(colors.muted_foreground).child(d));
+        let text = if destructive {
+            colors.destructive
+        } else {
+            colors.popover_foreground
+        };
+        let detail = detail.clone().map(|d| {
+            div()
+                .flex_none()
+                .text_color(colors.muted_foreground)
+                .child(d)
+        });
         div()
             .flex()
             .items_center()
@@ -51,7 +64,9 @@ pub fn row(label: impl Into<SharedString>, detail: Option<SharedString>, destruc
 }
 
 /// Adapts an action that doesn't use the click to a menu item's `on_click`.
-pub fn on_select(f: impl Fn(&mut Window, &mut App) + 'static) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+pub fn on_select(
+    f: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     move |_, window, cx| {
         guard::guard("menu item", || f(window, cx));
     }
@@ -77,20 +92,30 @@ pub fn open<T: 'static>(
     let dismissed = cx.subscribe_in(&menu, window, move |this, _, _: &DismissEvent, _, cx| {
         guard::guard("popup dismiss", || on_dismiss(this, cx));
     });
-    Open { menu, _dismissed: dismissed }
+    Open {
+        menu,
+        _dismissed: dismissed,
+    }
 }
 
 impl Open {
     /// Draws the menu with its top-left corner at `position`.
     pub fn draw(&self, window: &Window, position: Point<Pixels>) -> impl IntoElement {
         let size = window.bounds().size;
-        deferred(anchored().child(
-            div()
-                .w(size.width)
-                .h(size.height)
-                .on_scroll(|_, _, cx| cx.stop_propagation())
-                .child(anchored().position(position).snap_to_window_with_margin(px(8.0)).child(self.menu.clone())),
-        ))
+        deferred(
+            anchored().child(
+                div()
+                    .w(size.width)
+                    .h(size.height)
+                    .on_scroll(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        anchored()
+                            .position(position)
+                            .snap_to_window_with_margin(px(8.0))
+                            .child(self.menu.clone()),
+                    ),
+            ),
+        )
         .with_priority(LAYER)
     }
 }
@@ -103,13 +128,18 @@ pub fn panel(
     on_dismiss: impl Fn(&mut Window, &mut App) + 'static,
     child: impl IntoElement,
 ) -> impl IntoElement {
-    deferred(anchored().position(position).snap_to_window_with_margin(px(8.0)).child(
-        div()
-            .occlude()
-            .popover_style(cx)
-            .on_mouse_down_out(move |_, window, cx| on_dismiss(window, cx))
-            .child(child),
-    ))
+    deferred(
+        anchored()
+            .position(position)
+            .snap_to_window_with_margin(px(8.0))
+            .child(
+                div()
+                    .occlude()
+                    .popover_style(cx)
+                    .on_mouse_down_out(move |_, window, cx| on_dismiss(window, cx))
+                    .child(child),
+            ),
+    )
     .with_priority(LAYER)
 }
 
@@ -189,7 +219,10 @@ impl Row {
     }
 
     pub fn trailing(mut self, label: impl Into<SharedString>, run: Pick) -> Self {
-        self.trailing = Some(Trailing { label: label.into(), run });
+        self.trailing = Some(Trailing {
+            label: label.into(),
+            run,
+        });
         self
     }
 }
@@ -234,7 +267,13 @@ fn step(rows: &[Row], from: Option<usize>, forward: bool) -> Option<usize> {
     }
     let start = from.unwrap_or(if forward { n - 1 } else { 0 });
     (1..=n)
-        .map(|k| if forward { (start + k) % n } else { (start + n - k) % n })
+        .map(|k| {
+            if forward {
+                (start + k) % n
+            } else {
+                (start + n - k) % n
+            }
+        })
         .find(|&i| rows.get(i).is_some_and(|r| !r.disabled))
 }
 
@@ -276,7 +315,10 @@ impl Cascade {
     }
 
     fn is_submenu(&self, level: usize, row: usize) -> bool {
-        matches!(self.rows_at(level).get(row).map(|r| &r.action), Some(Action::Submenu(_)))
+        matches!(
+            self.rows_at(level).get(row).map(|r| &r.action),
+            Some(Action::Submenu(_))
+        )
     }
 
     fn highlighted(&self, level: usize) -> Option<usize> {
@@ -341,7 +383,10 @@ impl Cascade {
             })
             .ok();
         });
-        self.intent = Some(Intent { level, _apply: apply });
+        self.intent = Some(Intent {
+            level,
+            _apply: apply,
+        });
     }
 
     fn click(&mut self, level: usize, row: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -351,7 +396,9 @@ impl Cascade {
 
     /// Runs the row's pick and dismisses, or opens its submenu.
     fn activate(&mut self, level: usize, row: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(r) = self.rows_at(level).get(row) else { return };
+        let Some(r) = self.rows_at(level).get(row) else {
+            return;
+        };
         if r.disabled {
             return;
         }
@@ -379,7 +426,10 @@ impl Cascade {
                 self.set_highlight(level, next);
             }
             "right" => {
-                if let Some(row) = self.highlighted(level).filter(|&row| self.is_submenu(level, row)) {
+                if let Some(row) = self
+                    .highlighted(level)
+                    .filter(|&row| self.is_submenu(level, row))
+                {
                     self.open(level, row);
                 }
             }
@@ -414,47 +464,75 @@ impl Cascade {
             .flex()
             .flex_col()
             .w(self.width)
-            .children(rows.iter().enumerate().map(|(index, row)| self.row(level, index, row, checks, &theme, cx)))
+            .children(
+                rows.iter()
+                    .enumerate()
+                    .map(|(index, row)| self.row(level, index, row, checks, &theme, cx)),
+            )
             .into_any_element()
     }
 
     fn submenu_panel(&self, level: usize, rows: &[Row], cx: &mut Context<Self>) -> AnyElement {
-        deferred(anchored().snap_to_window_with_margin(px(8.0)).child(
-            div()
-                .occlude()
-                .top(px(-4.0))
-                .left(self.width - px(4.0))
-                .popover_style(cx)
-                .p_1()
-                .child(self.rows_column(level, rows, cx)),
-        ))
+        deferred(
+            anchored().snap_to_window_with_margin(px(8.0)).child(
+                div()
+                    .occlude()
+                    .top(px(-4.0))
+                    .left(self.width - px(4.0))
+                    .popover_style(cx)
+                    .p_1()
+                    .child(self.rows_column(level, rows, cx)),
+            ),
+        )
         .with_priority(SUBMENU_LAYER + level)
         .into_any_element()
     }
 
-    fn row(&self, level: usize, index: usize, row: &Row, checks: bool, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn row(
+        &self,
+        level: usize,
+        index: usize,
+        row: &Row,
+        checks: bool,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let c = &theme.colors;
         let open = self.path.get(level) == Some(&index);
         let selected = open || self.highlighted(level) == Some(index);
         let (accent, accent_fg, muted) = (c.accent, c.accent_foreground, c.muted_foreground);
         let destructive = c.destructive;
-        let text = if row.destructive { destructive } else { c.popover_foreground };
+        let text = if row.destructive {
+            destructive
+        } else {
+            c.popover_foreground
+        };
         let disabled = row.disabled;
 
         let check = checks.then(|| {
             div()
                 .flex_none()
                 .w(px(12.0))
-                .when(row.checked == Some(true), |d| d.child(Icon::new(IconName::Check).size(px(12.0))))
+                .when(row.checked == Some(true), |d| {
+                    d.child(Icon::new(IconName::Check).size(px(12.0)))
+                })
         });
         let caret = matches!(row.action, Action::Submenu(_)).then(|| {
-            div().flex_none().text_color(muted).child(Icon::new(IconName::CaretRight).size(px(12.0)))
+            div()
+                .flex_none()
+                .text_color(muted)
+                .child(Icon::new(IconName::CaretRight).size(px(12.0)))
         });
-        let detail = row.detail.clone().map(|d| div().flex_none().text_color(muted).child(d));
+        let detail = row
+            .detail
+            .clone()
+            .map(|d| div().flex_none().text_color(muted).child(d));
         let trailing = row.trailing.as_ref().map(|t| {
             let run = t.run.clone();
             div()
-                .id(SharedString::from(format!("cascade-{level}-{index}-trailing")))
+                .id(SharedString::from(format!(
+                    "cascade-{level}-{index}-trailing"
+                )))
                 .flex_none()
                 .px_1()
                 .rounded(theme.radius.sm)
@@ -490,7 +568,9 @@ impl Cascade {
             .text_size(theme.text.sm)
             .text_color(if selected { accent_fg } else { text })
             .when(selected, |d| d.bg(accent))
-            .when(row.separated, |d| d.mt_1().border_t_1().border_color(c.border))
+            .when(row.separated, |d| {
+                d.mt_1().border_t_1().border_color(c.border)
+            })
             .when(disabled, |d| d.opacity(0.5))
             .when(!disabled, |d| d.cursor_pointer())
             .on_hover(cx.safe_listener(move |this, hovered: &bool, _, cx| {
@@ -498,7 +578,9 @@ impl Cascade {
                     this.hover(level, index, cx);
                 }
             }))
-            .on_click(cx.safe_listener(move |this, _: &ClickEvent, window, cx| this.click(level, index, window, cx)))
+            .on_click(cx.safe_listener(move |this, _: &ClickEvent, window, cx| {
+                this.click(level, index, window, cx)
+            }))
             .child(
                 div()
                     .flex()
@@ -544,14 +626,21 @@ pub fn layer(
     let (left, right) = (dismiss.clone(), dismiss);
     div()
         .child(
-            deferred(anchored().child(
-                div()
-                    .w(size.width)
-                    .h(size.height)
-                    .on_scroll(|_, _, cx| cx.stop_propagation())
-                    .on_mouse_down(MouseButton::Left, move |_: &MouseDownEvent, window, cx| left(window, cx))
-                    .on_mouse_down(MouseButton::Right, move |_: &MouseDownEvent, window, cx| right(window, cx)),
-            ))
+            deferred(
+                anchored().child(
+                    div()
+                        .w(size.width)
+                        .h(size.height)
+                        .on_scroll(|_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Left, move |_: &MouseDownEvent, window, cx| {
+                            left(window, cx)
+                        })
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            move |_: &MouseDownEvent, window, cx| right(window, cx),
+                        ),
+                ),
+            )
             .with_priority(LAYER),
         )
         .child(
@@ -589,7 +678,10 @@ mod cascade_tests {
                     Row::pick("Sine", pick(log, "sine")),
                     Row::submenu(
                         "Helpers",
-                        vec![Row::pick("Fold", pick(log, "fold")), Row::pick("Wrap", pick(log, "wrap")).disabled(true)],
+                        vec![
+                            Row::pick("Fold", pick(log, "fold")),
+                            Row::pick("Wrap", pick(log, "wrap")).disabled(true),
+                        ],
                     ),
                 ],
             ),
@@ -602,7 +694,13 @@ mod cascade_tests {
 
     impl Render for Host {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().child(layer(window, cx, point(px(10.0), px(10.0)), |_, _| {}, self.0.clone()))
+            div().size_full().child(layer(
+                window,
+                cx,
+                point(px(10.0), px(10.0)),
+                |_, _| {},
+                self.0.clone(),
+            ))
         }
     }
 
@@ -619,7 +717,9 @@ mod cascade_tests {
     }
 
     fn hover(cx: &mut VisualTestContext, selector: &'static str) {
-        let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"));
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is drawn"));
         cx.simulate_mouse_move(bounds.center(), None, Modifiers::none());
     }
 
@@ -630,7 +730,10 @@ mod cascade_tests {
         let menu = cx.update(|cx| cx.new(|cx| Cascade::new(rows, px(200.0), Vec::new(), cx)));
         let dismissed = log.clone();
         cx.update(|cx| {
-            cx.subscribe(&menu, move |_, _: &DismissEvent, _| dismissed.borrow_mut().push("dismissed")).detach();
+            cx.subscribe(&menu, move |_, _: &DismissEvent, _| {
+                dismissed.borrow_mut().push("dismissed")
+            })
+            .detach();
         });
         let host = menu.clone();
         let (_, cx) = cx.add_window_view(move |_, _| Host(host));
@@ -650,8 +753,14 @@ mod cascade_tests {
         hover(cx, "menu-row Math");
         settle(cx);
         assert_eq!(path(&menu, cx), [0]);
-        assert!(cx.debug_bounds("menu-row Sine").is_some(), "the submenu is drawn");
-        assert!(cx.debug_bounds("menu-row Vector").is_some(), "the parent's other rows stay");
+        assert!(
+            cx.debug_bounds("menu-row Sine").is_some(),
+            "the submenu is drawn"
+        );
+        assert!(
+            cx.debug_bounds("menu-row Vector").is_some(),
+            "the parent's other rows stay"
+        );
     }
 
     #[gpui::test]
@@ -663,7 +772,10 @@ mod cascade_tests {
         settle(cx);
         assert_eq!(path(&menu, cx), [0, 1]);
         assert!(cx.debug_bounds("menu-row Fold").is_some());
-        assert!(cx.debug_bounds("menu-row Sine").is_some(), "the parent submenu stays");
+        assert!(
+            cx.debug_bounds("menu-row Sine").is_some(),
+            "the parent submenu stays"
+        );
     }
 
     #[gpui::test]
@@ -677,7 +789,10 @@ mod cascade_tests {
         hover(cx, "menu-row Sine");
         settle(cx);
         assert_eq!(path(&menu, cx), [0]);
-        assert!(cx.debug_bounds("menu-row Dot").is_none(), "Vector's submenu never opened");
+        assert!(
+            cx.debug_bounds("menu-row Dot").is_none(),
+            "Vector's submenu never opened"
+        );
     }
 
     #[gpui::test]
@@ -691,7 +806,11 @@ mod cascade_tests {
         assert_eq!(path(&menu, cx), [0, 1]);
         cx.simulate_keystrokes("down");
         frame(cx);
-        assert_eq!(cx.read(|cx| menu.read(cx).highlight.clone()), [Some(0), Some(1), Some(0)], "disabled Wrap is skipped");
+        assert_eq!(
+            cx.read(|cx| menu.read(cx).highlight.clone()),
+            [Some(0), Some(1), Some(0)],
+            "disabled Wrap is skipped"
+        );
         cx.simulate_keystrokes("left left");
         frame(cx);
         assert_eq!(path(&menu, cx), Vec::<usize>::new());
@@ -713,7 +832,10 @@ mod cascade_tests {
         cx.simulate_keystrokes("escape");
         frame(cx);
         assert_eq!(path(&menu, cx), Vec::<usize>::new());
-        assert!(log.borrow().is_empty(), "the first escape only closes the submenu");
+        assert!(
+            log.borrow().is_empty(),
+            "the first escape only closes the submenu"
+        );
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert_eq!(*log.borrow(), ["dismissed"]);
@@ -761,9 +883,11 @@ mod tests {
 
     impl Render for Host {
         fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div()
-                .size_full()
-                .children(self.open.as_ref().map(|open| open.draw(window, point(px(10.0), px(10.0)))))
+            div().size_full().children(
+                self.open
+                    .as_ref()
+                    .map(|open| open.draw(window, point(px(10.0), px(10.0)))),
+            )
         }
     }
 

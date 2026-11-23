@@ -2,8 +2,7 @@
 
 use crate::curve::{CURVE_SOLVE_STEPS, CurvePoint, curve_segments, linear_curve};
 use crate::types::{
-    InputControl, NodeCategory, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
-    WgslType,
+    InputControl, NodeCategory, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget, WgslType,
 };
 
 use super::builders::{FLOATS, float_values};
@@ -72,15 +71,13 @@ pub(super) fn curve_node() -> NodeDescriptor {
             "Ease",
         ])
         .inputs(vec![
-            NodeInputDef::new("factor", "factor", &[WgslType::F32]).control(
-                InputControl::Number {
-                    min: Some(0.0),
-                    max: None,
-                    soft_min: None,
-                    soft_max: Some(1.0),
-                    compiled: false,
-                },
-            ),
+            NodeInputDef::new("factor", "factor", &[WgslType::F32]).control(InputControl::Number {
+                min: Some(0.0),
+                max: None,
+                soft_min: None,
+                soft_max: Some(1.0),
+                compiled: false,
+            }),
             NodeInputDef::new("value", "value", FLOATS),
         ])
         .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
@@ -126,11 +123,17 @@ pub(super) fn curve_node() -> NodeDescriptor {
             let mapped = if n == 1 {
                 map(&value)
             } else {
-                let each: Vec<String> = COMPONENTS[..n].iter().map(|c| map(&format!("{value}.{c}"))).collect();
+                let each: Vec<String> = COMPONENTS[..n]
+                    .iter()
+                    .map(|c| map(&format!("{value}.{c}")))
+                    .collect();
                 format!("{}({})", ty.wgsl_name(), each.join(", "))
             };
             let factor = ctx.promote_input("factor");
-            lines.push(format!("let {} = mix({value}, {mapped}, {factor});", ctx.var_name));
+            lines.push(format!(
+                "let {} = mix({value}, {mapped}, {factor});",
+                ctx.var_name
+            ));
             lines
         });
     d.widget = Some(NodeWidget::Curve);

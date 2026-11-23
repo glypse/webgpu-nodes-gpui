@@ -1,12 +1,15 @@
-use guard::SafeListener as _;
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Point, Render, SharedString, StyleRefinement, Styled as _,
     Subscription, Window, div, point, prelude::FluentBuilder as _, px,
 };
-use runtime::Timing;
-use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use gpui_component::{
+    Selectable as _, Sizable as _,
+    button::{Button, ButtonVariants as _},
+};
+use guard::SafeListener as _;
+use runtime::Timing;
 use theme::{ActiveTheme as _, IconName, NumberEvent, NumberField, popup};
 
 use crate::playback::{Playback, PlaybackEvent};
@@ -76,7 +79,8 @@ impl TimelineReadout {
             cx.observe(&playback, |this, playback, cx| {
                 guard::guard("timeline frame", || {
                     let frame = playback.read(cx).player.clock.frame;
-                    this.frame.update(cx, |field, cx| field.set_value(frame as f64, cx));
+                    this.frame
+                        .update(cx, |field, cx| field.set_value(frame as f64, cx));
                     cx.notify();
                 });
             }),
@@ -137,18 +141,23 @@ impl TimingControl {
             })
         };
         PopupMenu::build(window, cx, move |menu, _, _| {
-            let menu = FRAME_RATES.iter().fold(menu.min_w(px(176.0)), |menu, &rate| {
-                let fps = f64::from(rate);
-                menu.item(
-                    PopupMenuItem::new(format!("{fps} fps"))
-                        .checked(timing.fps == fps)
-                        .on_click(set(Timing { fps, ..timing })),
-                )
-            });
+            let menu = FRAME_RATES
+                .iter()
+                .fold(menu.min_w(px(176.0)), |menu, &rate| {
+                    let fps = f64::from(rate);
+                    menu.item(
+                        PopupMenuItem::new(format!("{fps} fps"))
+                            .checked(timing.fps == fps)
+                            .on_click(set(Timing { fps, ..timing })),
+                    )
+                });
             menu.separator().item(
                 PopupMenuItem::new("Real time")
                     .checked(timing.realtime)
-                    .on_click(set(Timing { realtime: !timing.realtime, ..timing })),
+                    .on_click(set(Timing {
+                        realtime: !timing.realtime,
+                        ..timing
+                    })),
             )
         })
     }
@@ -164,193 +173,217 @@ fn format_time(seconds: f64) -> String {
 }
 
 impl Render for TimelineBar {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { guard::render("timeline", || {
-        let playing = self.playing;
-        let playback = self.playback.clone();
-        let act = move |f: fn(&mut Playback, &mut Window, &mut Context<Playback>)| {
-            let playback = playback.clone();
-            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                guard::guard("timeline button", || playback.update(cx, |p, cx| f(p, window, cx)));
-            }
-        };
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        guard::render("timeline", || {
+            let playing = self.playing;
+            let playback = self.playback.clone();
+            let act = move |f: fn(&mut Playback, &mut Window, &mut Context<Playback>)| {
+                let playback = playback.clone();
+                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    guard::guard("timeline button", || {
+                        playback.update(cx, |p, cx| f(p, window, cx))
+                    });
+                }
+            };
 
-        // The readouts take h_full, which is 0 unless this row has a definite height.
-        div()
-            .flex()
-            .size_full()
-            .items_center()
-            .gap_1()
-            .child(
-                Button::new("to-start")
-                    .ghost()
-                    .small()
-                    .icon(IconName::SkipBackFill)
-                    .tooltip("Back to the start (Home)")
-                    .on_click(act(|p, w, cx| p.seek(0.0, w, cx))),
-            )
-            .child(
-                Button::new("previous")
-                    .ghost()
-                    .small()
-                    .icon(IconName::CaretLeftBold)
-                    .tooltip("Previous frame (,)")
-                    .on_click(act(|p, w, cx| p.step(-1, w, cx))),
-            )
-            .child(
-                Button::new("play")
-                    .ghost()
-                    .small()
-                    .icon(if playing {
-                        IconName::PauseFill
-                    } else {
-                        IconName::PlayFill
-                    })
-                    .tooltip(if playing {
-                        "Pause (Space)"
-                    } else {
-                        "Play (Space)"
-                    })
-                    .on_click(act(Playback::toggle)),
-            )
-            .child(
-                Button::new("next")
-                    .ghost()
-                    .small()
-                    .icon(IconName::CaretRightBold)
-                    .tooltip("Next frame (.)")
-                    .on_click(act(|p, w, cx| p.step(1, w, cx))),
-            )
-            .child(
-                self.readout
-                    .clone()
-                    .cached(StyleRefinement::default().flex_none().w(px(READOUT_WIDTH)).h_full()),
-            )
-            .child(div().flex_1())
-            .child(
-                self.timing
-                    .clone()
-                    .cached(StyleRefinement::default().flex_shrink_1().min_w_0().w(px(TIMING_WIDTH)).h_full()),
-            )
-    })
+            // The readouts take h_full, which is 0 unless this row has a definite height.
+            div()
+                .flex()
+                .size_full()
+                .items_center()
+                .gap_1()
+                .child(
+                    Button::new("to-start")
+                        .ghost()
+                        .small()
+                        .icon(IconName::SkipBackFill)
+                        .tooltip("Back to the start (Home)")
+                        .on_click(act(|p, w, cx| p.seek(0.0, w, cx))),
+                )
+                .child(
+                    Button::new("previous")
+                        .ghost()
+                        .small()
+                        .icon(IconName::CaretLeftBold)
+                        .tooltip("Previous frame (,)")
+                        .on_click(act(|p, w, cx| p.step(-1, w, cx))),
+                )
+                .child(
+                    Button::new("play")
+                        .ghost()
+                        .small()
+                        .icon(if playing {
+                            IconName::PauseFill
+                        } else {
+                            IconName::PlayFill
+                        })
+                        .tooltip(if playing {
+                            "Pause (Space)"
+                        } else {
+                            "Play (Space)"
+                        })
+                        .on_click(act(Playback::toggle)),
+                )
+                .child(
+                    Button::new("next")
+                        .ghost()
+                        .small()
+                        .icon(IconName::CaretRightBold)
+                        .tooltip("Next frame (.)")
+                        .on_click(act(|p, w, cx| p.step(1, w, cx))),
+                )
+                .child(
+                    self.readout.clone().cached(
+                        StyleRefinement::default()
+                            .flex_none()
+                            .w(px(READOUT_WIDTH))
+                            .h_full(),
+                    ),
+                )
+                .child(div().flex_1())
+                .child(
+                    self.timing.clone().cached(
+                        StyleRefinement::default()
+                            .flex_shrink_1()
+                            .min_w_0()
+                            .w(px(TIMING_WIDTH))
+                            .h_full(),
+                    ),
+                )
+        })
     }
 }
 
 impl Render for TimelineReadout {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("timeline readout", || {
-        let theme = cx.theme().clone();
-        let time = self.playback.read(cx).player.clock.time;
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(div().ml_2().w(px(FRAME_FIELD_WIDTH)).flex_none().child(self.frame.clone()))
-            .child(
-                div()
-                    .w(px(TIME_WIDTH))
-                    .px_2()
-                    .text_size(theme.text.xs)
-                    .text_color(theme.colors.muted_foreground)
-                    .child(format_time(time)),
-            )
-    })
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("timeline readout", || {
+            let theme = cx.theme().clone();
+            let time = self.playback.read(cx).player.clock.time;
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .ml_2()
+                        .w(px(FRAME_FIELD_WIDTH))
+                        .flex_none()
+                        .child(self.frame.clone()),
+                )
+                .child(
+                    div()
+                        .w(px(TIME_WIDTH))
+                        .px_2()
+                        .text_size(theme.text.xs)
+                        .text_color(theme.colors.muted_foreground)
+                        .child(format_time(time)),
+                )
+        })
     }
 }
 
 impl Render for TimingControl {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         guard::render("timing control", || {
-        if self.menu.as_ref().is_some_and(|m| m.popup.is_none()) {
-            let menu = self.menu(window, cx);
-            let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
-                this.menu = None;
-                cx.notify();
-            });
-            if let Some(m) = self.menu.as_mut() {
-                m.popup = Some(opened);
-            }
-        }
-        let theme = cx.theme().clone();
-        let c = &theme.colors;
-        let playback = self.playback.read(cx);
-        let timing = playback.timing();
-        let rate = playback.player.meter.rate;
-        let refresh = playback.refresh_rate.map(f64::round);
-        let target = playback.target_rate();
-        let slow = rate.is_some_and(|r| r.fps < target * SLOW_RATIO);
-        let gpu_slow = rate
-            .and_then(|r| r.gpu_time)
-            .is_some_and(|t| t > 1.0 / target);
-
-        let mut hint = Vec::new();
-        if let Some(rate) = rate {
-            hint.push(format!(
-                "Longest frame: {} ms",
-                format_ms(rate.worst_frame_time)
-            ));
-        }
-        if let Some(refresh) = refresh {
-            if timing.realtime {
-                hint.push(format!("Drawing at the display's {refresh} Hz"));
-            } else if timing.fps > refresh {
-                hint.push(format!("The display refreshes at only {refresh} Hz"));
-            }
-        }
-        hint.push("Time settings".into());
-
-        let stat = |text: String, bad: bool| {
-            div()
-                .text_color(if bad {
-                    c.destructive
-                } else {
-                    c.muted_foreground
-                })
-                .child(text)
-        };
-        let label: Vec<SharedString> = match rate {
-            Some(rate) => {
-                let mut parts = vec![
-                    format!("{}/{} fps", rate.fps.round(), target),
-                    format!("{} ms", format_ms(rate.frame_time)),
-                ];
-                if let Some(gpu) = rate.gpu_time {
-                    parts.push(format!("GPU {} ms", format_ms(gpu)));
+            if self.menu.as_ref().is_some_and(|m| m.popup.is_none()) {
+                let menu = self.menu(window, cx);
+                let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
+                    this.menu = None;
+                    cx.notify();
+                });
+                if let Some(m) = self.menu.as_mut() {
+                    m.popup = Some(opened);
                 }
-                parts.into_iter().map(Into::into).collect()
             }
-            None => vec![format!("{} fps", timing.fps).into()],
-        };
+            let theme = cx.theme().clone();
+            let c = &theme.colors;
+            let playback = self.playback.read(cx);
+            let timing = playback.timing();
+            let rate = playback.player.meter.rate;
+            let refresh = playback.refresh_rate.map(f64::round);
+            let target = playback.target_rate();
+            let slow = rate.is_some_and(|r| r.fps < target * SLOW_RATIO);
+            let gpu_slow = rate
+                .and_then(|r| r.gpu_time)
+                .is_some_and(|t| t > 1.0 / target);
 
-        div()
-            .debug_selector(|| "timing-control".into())
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_end()
-            .overflow_hidden()
-            .child(
-                Button::new("timing")
-                    .ghost()
-                    .xsmall()
-                    .tooltip(hint.join("\n"))
-                    .selected(self.menu.is_some())
-                    .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
-                        this.menu = Some(OpenMenu { at: event.position() + point(px(0.0), px(8.0)), popup: None });
-                        cx.notify();
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_1()
-                            .text_color(c.muted_foreground)
-                            .child(stat(label[0].to_string(), slow))
-                            .children(label.get(1).map(|l| stat(format!("· {l}"), slow)))
-                            .children(label.get(2).map(|l| stat(format!("· {l}"), gpu_slow)))
-                            .when(timing.realtime, |d| d.child("· real time")),
-                    ),
-            )
-            .children(self.menu.as_ref().and_then(|m| Some(m.popup.as_ref()?.draw(window, m.at).into_any_element())))
-    })
+            let mut hint = Vec::new();
+            if let Some(rate) = rate {
+                hint.push(format!(
+                    "Longest frame: {} ms",
+                    format_ms(rate.worst_frame_time)
+                ));
+            }
+            if let Some(refresh) = refresh {
+                if timing.realtime {
+                    hint.push(format!("Drawing at the display's {refresh} Hz"));
+                } else if timing.fps > refresh {
+                    hint.push(format!("The display refreshes at only {refresh} Hz"));
+                }
+            }
+            hint.push("Time settings".into());
+
+            let stat = |text: String, bad: bool| {
+                div()
+                    .text_color(if bad {
+                        c.destructive
+                    } else {
+                        c.muted_foreground
+                    })
+                    .child(text)
+            };
+            let label: Vec<SharedString> = match rate {
+                Some(rate) => {
+                    let mut parts = vec![
+                        format!("{}/{} fps", rate.fps.round(), target),
+                        format!("{} ms", format_ms(rate.frame_time)),
+                    ];
+                    if let Some(gpu) = rate.gpu_time {
+                        parts.push(format!("GPU {} ms", format_ms(gpu)));
+                    }
+                    parts.into_iter().map(Into::into).collect()
+                }
+                None => vec![format!("{} fps", timing.fps).into()],
+            };
+
+            div()
+                .debug_selector(|| "timing-control".into())
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_end()
+                .overflow_hidden()
+                .child(
+                    Button::new("timing")
+                        .ghost()
+                        .xsmall()
+                        .tooltip(hint.join("\n"))
+                        .selected(self.menu.is_some())
+                        .on_click(cx.safe_listener(|this, event: &ClickEvent, _, cx| {
+                            this.menu = Some(OpenMenu {
+                                at: event.position() + point(px(0.0), px(8.0)),
+                                popup: None,
+                            });
+                            cx.notify();
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .gap_1()
+                                .text_color(c.muted_foreground)
+                                .child(stat(label[0].to_string(), slow))
+                                .children(label.get(1).map(|l| stat(format!("· {l}"), slow)))
+                                .children(label.get(2).map(|l| stat(format!("· {l}"), gpu_slow)))
+                                .when(timing.realtime, |d| d.child("· real time")),
+                        ),
+                )
+                .children(
+                    self.menu.as_ref().and_then(|m| {
+                        Some(m.popup.as_ref()?.draw(window, m.at).into_any_element())
+                    }),
+                )
+        })
     }
 }
 
@@ -399,9 +432,17 @@ mod tests {
         cx.run_until_parked();
 
         let header = cx.debug_bounds("header").expect("the header is drawn");
-        let timing = cx.debug_bounds("timing-control").expect("the timing control is drawn");
-        assert!(timing.size.width > px(0.0), "the timing control has no width: {timing:?}");
-        assert!(timing.size.height > px(0.0), "the timing control has no height: {timing:?}");
+        let timing = cx
+            .debug_bounds("timing-control")
+            .expect("the timing control is drawn");
+        assert!(
+            timing.size.width > px(0.0),
+            "the timing control has no width: {timing:?}"
+        );
+        assert!(
+            timing.size.height > px(0.0),
+            "the timing control has no height: {timing:?}"
+        );
         assert!(
             timing.origin.x >= header.origin.x && timing.right() <= header.right() + px(0.5),
             "the timing control spills out of the header: {timing:?} in {header:?}"

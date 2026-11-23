@@ -303,7 +303,10 @@ fn ids_stay_fresh_across_operations() {
 fn a_split_is_refused_when_ids_run_out() {
     let mut s = t_layout();
     s.areas[0].id = AreaId(u64::MAX);
-    assert_eq!(s.split(AreaId(u64::MAX), Axis::Y, 0.25, Part::After, MinSize::NONE), None);
+    assert_eq!(
+        s.split(AreaId(u64::MAX), Axis::Y, 0.25, Part::After, MinSize::NONE),
+        None
+    );
     let mut s = t_layout();
     s.next_id = u64::MAX;
     assert_eq!(s.split(A, Axis::Y, 0.25, Part::After, MinSize::NONE), None);

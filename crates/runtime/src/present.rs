@@ -83,7 +83,9 @@ impl Presenter {
             layout: &self.layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&source.create_view(&Default::default())),
+                resource: wgpu::BindingResource::TextureView(
+                    &source.create_view(&Default::default()),
+                ),
             }],
         })
     }

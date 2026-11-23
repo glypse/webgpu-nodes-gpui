@@ -23,7 +23,9 @@ pub fn wgpu_format(format: TextureFormat) -> wgpu::TextureFormat {
 pub fn wgpu_sample_type(sample: TextureSampleType) -> wgpu::TextureSampleType {
     match sample {
         TextureSampleType::Float => wgpu::TextureSampleType::Float { filterable: true },
-        TextureSampleType::UnfilterableFloat => wgpu::TextureSampleType::Float { filterable: false },
+        TextureSampleType::UnfilterableFloat => {
+            wgpu::TextureSampleType::Float { filterable: false }
+        }
         TextureSampleType::Sint => wgpu::TextureSampleType::Sint,
         TextureSampleType::Uint => wgpu::TextureSampleType::Uint,
     }

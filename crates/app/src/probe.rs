@@ -98,9 +98,12 @@ pub fn save_window(path: &Path, title: Option<&str>) -> Result<()> {
     let (_, window) = best.context("this app has no window to capture")?;
     let image = window.capture_image().context("capturing the window")?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
     }
-    image.save(path).with_context(|| format!("writing {}", path.display()))
+    image
+        .save(path)
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 #[derive(Default)]
@@ -153,7 +156,9 @@ where
     fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
         let Some(span) = ctx.span(id) else { return };
         let mut extensions = span.extensions_mut();
-        let Some(open) = extensions.get_mut::<Open>() else { return };
+        let Some(open) = extensions.get_mut::<Open>() else {
+            return;
+        };
         let now = Instant::now();
         open.entered = Some(now);
         open.first_entered.get_or_insert(now);
@@ -162,7 +167,9 @@ where
     fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
         let Some(span) = ctx.span(id) else { return };
         let mut extensions = span.extensions_mut();
-        let Some(open) = extensions.get_mut::<Open>() else { return };
+        let Some(open) = extensions.get_mut::<Open>() else {
+            return;
+        };
         if let Some(entered) = open.entered.take() {
             open.busy += entered.elapsed();
         }
@@ -170,9 +177,13 @@ where
 
     fn on_close(&self, id: Id, ctx: Context<'_, S>) {
         let Some(span) = ctx.span(&id) else { return };
-        let Some(open) = span.extensions_mut().remove::<Open>() else { return };
+        let Some(open) = span.extensions_mut().remove::<Open>() else {
+            return;
+        };
         let busy = open.busy.as_secs_f64();
-        let Ok(mut recorded) = self.0.recorded.lock() else { return };
+        let Ok(mut recorded) = self.0.recorded.lock() else {
+            return;
+        };
         if open.key == "present" {
             self.0.frames.fetch_add(1, Ordering::Relaxed);
             if let Some(first) = open.first_entered {
@@ -246,7 +257,9 @@ impl Recorded {
                 stats.p50, stats.p95, stats.max
             );
         }
-        if let Some(gpu) = (!self.gpu.is_empty()).then(|| Dist::of(self.gpu.iter().map(|s| s * 1e3).collect())) {
+        if let Some(gpu) =
+            (!self.gpu.is_empty()).then(|| Dist::of(self.gpu.iter().map(|s| s * 1e3).collect()))
+        {
             let _ = writeln!(
                 out,
                 "  gpu time (ms, {} frames): mean {:.3}, p50 {:.3}, p95 {:.3}, max {:.3}",
@@ -262,11 +275,20 @@ impl Recorded {
         let mut rows: Vec<(String, Dist)> = self
             .spans
             .iter()
-            .map(|(name, busy)| (name.clone(), Dist::of(busy.iter().map(|s| s * 1e3).collect())))
+            .map(|(name, busy)| {
+                (
+                    name.clone(),
+                    Dist::of(busy.iter().map(|s| s * 1e3).collect()),
+                )
+            })
             .collect();
         rows.sort_by(|a, b| b.1.total.total_cmp(&a.1.total));
         for (name, d) in rows {
-            let share = if wall > 0.0 { format!("{:.1}%", d.total / (wall * 1e3) * 100.0) } else { "-".into() };
+            let share = if wall > 0.0 {
+                format!("{:.1}%", d.total / (wall * 1e3) * 100.0)
+            } else {
+                "-".into()
+            };
             let _ = writeln!(
                 out,
                 "    {:<36} {:>7} {:>10.2} {:>9.3} {:>9.3} {:>9.3} {:>9.3} {:>7}",

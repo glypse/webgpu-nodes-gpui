@@ -76,7 +76,11 @@ fn small_button(
         .child(label)
 }
 
-pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>) -> Option<AnyElement> {
+pub fn render_sockets(
+    editor: &mut Editor,
+    window: &mut Window,
+    cx: &mut Context<Editor>,
+) -> Option<AnyElement> {
     let (node, at, rejected) = {
         let popup = editor.sockets.as_ref()?;
         (popup.node.clone(), popup.at, popup.rejected.clone())
@@ -90,8 +94,18 @@ pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context
     let weak = cx.entity().downgrade();
     let mut panel = div().flex().flex_col().gap_4().p_2().w(px(380.0));
     for (is_input, label, hint_text, list) in [
-        (true, "Inputs", "Read by the code as parameters.", &sockets.inputs),
-        (false, "Outputs", "Variables the code sets; zero unless it does.", &sockets.outputs),
+        (
+            true,
+            "Inputs",
+            "Read by the code as parameters.",
+            &sockets.inputs,
+        ),
+        (
+            false,
+            "Outputs",
+            "Variables the code sets; zero unless it does.",
+            &sockets.outputs,
+        ),
     ] {
         let add_node = node.clone();
         let mut section = div().flex().flex_col().gap_1p5().child(
@@ -99,7 +113,13 @@ pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().flex().flex_col().child(heading(label, cx)).child(hint(hint_text, cx)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(heading(label, cx))
+                        .child(hint(hint_text, cx)),
+                )
                 .child(small_button(
                     SharedString::from(format!("add-socket-{label}")),
                     Icon::new(IconName::Plus).size(px(12.0)),
@@ -111,7 +131,16 @@ pub fn render_sockets(editor: &mut Editor, window: &mut Window, cx: &mut Context
         let count = list.len();
         for (i, socket) in list.iter().enumerate() {
             section = section.child(socket_row(
-                editor, window, &node, is_input, socket, i, count, locked, rejected.as_deref() == Some(&socket.id), cx,
+                editor,
+                window,
+                &node,
+                is_input,
+                socket,
+                i,
+                count,
+                locked,
+                rejected.as_deref() == Some(&socket.id),
+                cx,
             ));
         }
         panel = panel.child(section);
@@ -213,11 +242,22 @@ fn socket_row(
         .flex()
         .items_center()
         .gap_1()
-        .child(div().flex_1().when(rejected, |d| d.border_1().border_color(theme.colors.destructive)).child(boxed(input, cx)))
+        .child(
+            div()
+                .flex_1()
+                .when(rejected, |d| {
+                    d.border_1().border_color(theme.colors.destructive)
+                })
+                .child(boxed(input, cx)),
+        )
         .child(type_button)
-        .child(small_button(SharedString::from(format!("up-{}", socket.id)), Icon::new(IconName::ArrowUp).size(px(12.0)), !locked && index > 0, cx, move |e, cx| {
-            e.move_custom_socket(&up.0, is_input, &up.1, -1, cx)
-        }))
+        .child(small_button(
+            SharedString::from(format!("up-{}", socket.id)),
+            Icon::new(IconName::ArrowUp).size(px(12.0)),
+            !locked && index > 0,
+            cx,
+            move |e, cx| e.move_custom_socket(&up.0, is_input, &up.1, -1, cx),
+        ))
         .child(small_button(
             SharedString::from(format!("down-{}", socket.id)),
             Icon::new(IconName::ArrowDown).size(px(12.0)),
@@ -225,7 +265,11 @@ fn socket_row(
             cx,
             move |e, cx| e.move_custom_socket(&down.0, is_input, &down.1, 1, cx),
         ))
-        .child(small_button(SharedString::from(format!("remove-{}", socket.id)), Icon::new(IconName::Trash).size(px(12.0)), !locked, cx, move |e, cx| {
-            e.remove_custom_socket(&remove.0, is_input, &remove.1, cx)
-        }))
+        .child(small_button(
+            SharedString::from(format!("remove-{}", socket.id)),
+            Icon::new(IconName::Trash).size(px(12.0)),
+            !locked,
+            cx,
+            move |e, cx| e.remove_custom_socket(&remove.0, is_input, &remove.1, cx),
+        ))
 }

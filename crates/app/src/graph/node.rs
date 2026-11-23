@@ -2,22 +2,21 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_flow::{HandleType, NodeProps, Position};
+use shader_graph::color::{ColorSpace as DisplayGamut, Rgb};
 use shader_graph::graph::{
     GROUP_OUTPUT, GraphModel, GraphNode, GroupSide, LAYOUT_FRAME, NODE_GROUP, REROUTE, TypeChoice,
     VariableChoice, frame_note, frame_tint,
 };
 use shader_graph::nodes::CUSTOM_WGSL;
 use shader_graph::types::{
-    InputControl, InputValue, ScalarKind, WgslType, enum_value,
-    input_control,
+    InputControl, InputValue, ScalarKind, WgslType, enum_value, input_control,
 };
 use shader_graph::zones::{NEW_ITEM_HANDLE, is_zone_node_type};
-use shader_graph::color::{ColorSpace as DisplayGamut, Rgb};
 use theme::{ActiveTheme as _, ColorWheels, Icon, IconName, linear_to_hsla};
 
 use super::fields::{Edit, Scrub, Stack, checkbox, picker};
@@ -108,10 +107,16 @@ impl NodeView {
         self.gamut = gamut;
         self.missing_file = model.missing_asset(&node.id, |a| files.contains_key(a));
         self.widget = widgets.view(model, node, self.locked, gamut, files, cx);
-        let linked: HashSet<String> =
-            model.active_document().edges_into(&node.id).map(|e| e.target_handle.clone()).collect();
+        let linked: HashSet<String> = model
+            .active_document()
+            .edges_into(&node.id)
+            .map(|e| e.target_handle.clone())
+            .collect();
         for input in &self.inputs {
-            if matches!(input.control, Some(InputControl::Wheel)) && !input.variadic && !linked.contains(&input.id) {
+            if matches!(input.control, Some(InputControl::Wheel))
+                && !input.variadic
+                && !linked.contains(&input.id)
+            {
                 let component = |i| input.value.as_ref().map_or(0.0, |v| v.component(i));
                 let rgb = [component(0), component(1), component(2)];
                 let wheel = widgets.input_wheel(&self.id, &input.id, rgb, self.locked, gamut, cx);
@@ -133,7 +138,11 @@ pub fn node_width(node_type: &str) -> f32 {
 /// with an unlocked `group` while their definition is locked, so the definition counts too.
 pub fn is_locked_group(model: &GraphModel, node: &GraphNode) -> bool {
     node.group.as_ref().is_some_and(|g| {
-        g.locked || model.project().document(&g.definition_ref).is_some_and(|d| d.locked)
+        g.locked
+            || model
+                .project()
+                .document(&g.definition_ref)
+                .is_some_and(|d| d.locked)
     })
 }
 
@@ -149,7 +158,10 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         let side = node.side()?;
         let def = doc.interface(side).iter().find(|h| h.id == handle)?;
         let variable = def.ty.variable()?;
-        variables.iter().find(|v| v.id == variable).map(|v| v.name.clone())
+        variables
+            .iter()
+            .find(|v| v.id == variable)
+            .map(|v| v.name.clone())
     };
     let boundary = node.side().is_some();
     let hidden = model.hidden_inputs(id);
@@ -166,9 +178,11 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
                 .or_else(|| descriptor.default_data.values.get(&def.id))
                 .copied();
             InputView {
-                control: def.control.as_ref().map(|_| input_control(&def, ty)).or_else(|| {
-                    (!def.variadic && !def.fallback).then(|| input_control(&def, ty))
-                }),
+                control: def
+                    .control
+                    .as_ref()
+                    .map(|_| input_control(&def, ty))
+                    .or_else(|| (!def.variadic && !def.fallback).then(|| input_control(&def, ty))),
                 shared: shared_of(&def.id, boundary),
                 id: def.id,
                 label: def.label,
@@ -194,7 +208,11 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         .iter()
         .map(|s| SettingView {
             key: s.key.to_owned(),
-            options: s.options.iter().map(|(v, l)| ((*v).to_owned(), (*l).to_owned())).collect(),
+            options: s
+                .options
+                .iter()
+                .map(|(v, l)| ((*v).to_owned(), (*l).to_owned()))
+                .collect(),
             value: s.value(&node.data).to_owned(),
         })
         .collect();
@@ -214,7 +232,11 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
         zone: is_zone_node_type(&node.node_type),
         reroute_type: node.is(REROUTE).then(|| model.resolve_input_type(id, "in")),
         variables: if node.is(NODE_GROUP) {
-            model.variable_choices(id).into_iter().filter(|c| c.variable.types.len() > 1).collect()
+            model
+                .variable_choices(id)
+                .into_iter()
+                .filter(|c| c.variable.types.len() > 1)
+                .collect()
         } else {
             Vec::new()
         },
@@ -243,7 +265,12 @@ pub fn view_of(model: &GraphModel, node: &GraphNode) -> NodeView {
 }
 
 /// The colour of warnings.
-const WARNING_AMBER: gpui::Hsla = gpui::Hsla { h: 38.0 / 360.0, s: 0.92, l: 0.50, a: 1.0 };
+const WARNING_AMBER: gpui::Hsla = gpui::Hsla {
+    h: 38.0 / 360.0,
+    s: 0.92,
+    l: 0.50,
+    a: 1.0,
+};
 
 const PAD: f32 = 12.0;
 
@@ -254,7 +281,11 @@ fn node_type_picker(id: &str, choice: &TypeChoice) -> TypePicker {
     let (pick_id, reset_id) = (id.to_owned(), id.to_owned());
     TypePicker {
         types: choice.types.clone(),
-        value: if choice.inferable { choice.forced } else { choice.forced.or(Some(choice.inferred)) },
+        value: if choice.inferable {
+            choice.forced
+        } else {
+            choice.forced.or(Some(choice.inferred))
+        },
         inferred: choice.inferable.then_some(choice.inferred),
         on_pick: Rc::new(move |ty, e, cx| e.set_node_type(&pick_id, Some(ty), cx)),
         on_reset: Some(Rc::new(move |e, cx| e.set_node_type(&reset_id, None, cx))),
@@ -267,14 +298,20 @@ fn variable_type_picker(id: &str, choice: &VariableChoice) -> TypePicker {
     let (pick_var, reset_var) = (choice.variable.id.clone(), choice.variable.id.clone());
     TypePicker {
         types: choice.variable.types.clone(),
-        value: if choice.inferable { choice.forced } else { choice.forced.or(Some(choice.ty)) },
+        value: if choice.inferable {
+            choice.forced
+        } else {
+            choice.forced.or(Some(choice.ty))
+        },
         inferred: choice.inferable.then_some(choice.inferred),
         on_pick: Rc::new(move |ty, e, cx| {
             if !ty.is_texture() {
                 e.set_variable_type(&pick_id, &pick_var, Some(ty), cx);
             }
         }),
-        on_reset: Some(Rc::new(move |e, cx| e.set_variable_type(&reset_id, &reset_var, None, cx))),
+        on_reset: Some(Rc::new(move |e, cx| {
+            e.set_variable_type(&reset_id, &reset_var, None, cx)
+        })),
         extra: Vec::new(),
     }
 }
@@ -302,12 +339,15 @@ fn value_control(
             let items: Vec<ListItem> = variants
                 .iter()
                 .map(|v| {
-                    let (ed, node, handle, value) = (ed.clone(), node.clone(), handle.clone(), v.value);
+                    let (ed, node, handle, value) =
+                        (ed.clone(), node.clone(), handle.clone(), v.value);
                     ListItem::new(
                         v.label.clone(),
                         Some(Some(value) == current),
                         Rc::new(move |_, cx| {
-                            super::update_editor(&ed, cx, |e, cx| e.set_enum(&node, &handle, value, cx));
+                            super::update_editor(&ed, cx, |e, cx| {
+                                e.set_enum(&node, &handle, value, cx)
+                            });
                         }),
                     )
                 })
@@ -347,11 +387,27 @@ fn value_control(
                             cx,
                             move |checked, _, cx| {
                                 super::update_editor(&ed, cx, |e, cx| {
-                                    e.set_component(&node, &handle, ty, i, f64::from(u8::from(checked)), Edit::Commit, cx);
+                                    e.set_component(
+                                        &node,
+                                        &handle,
+                                        ty,
+                                        i,
+                                        f64::from(u8::from(checked)),
+                                        Edit::Commit,
+                                        cx,
+                                    );
                                 });
                             },
                         ))
-                        .children((n > 1).then(|| ["x", "y", "z", "w"].get(i).map(|c| label_text((*c).to_owned(), z, cx))).flatten())
+                        .children(
+                            (n > 1)
+                                .then(|| {
+                                    ["x", "y", "z", "w"]
+                                        .get(i)
+                                        .map(|c| label_text((*c).to_owned(), z, cx))
+                                })
+                                .flatten(),
+                        )
                 }))
                 .into_any_element()
         }
@@ -359,7 +415,11 @@ fn value_control(
             let n = ty.components();
             let kind = ty.kind();
             let integer = kind != ScalarKind::F32;
-            let min = if kind == ScalarKind::U32 { Some(min.unwrap_or(0.0).max(0.0)) } else { *min };
+            let min = if kind == ScalarKind::U32 {
+                Some(min.unwrap_or(0.0).max(0.0))
+            } else {
+                *min
+            };
             let max = *max;
             div()
                 .flex()
@@ -367,14 +427,20 @@ fn value_control(
                 .children((0..n).map(|i| {
                     let value = input.value.as_ref().map_or(0.0, |v| v.component(i));
                     let (ed, node, handle) = (ed.clone(), node.clone(), handle.clone());
-                    Scrub::new(SharedString::from(format!("n-{node}-{handle}-{i}")), value, z)
-                        .stack(Stack::of(i, n))
-                        .integer(integer)
-                        .range(min, max)
-                        .readonly(readonly)
-                        .on_change(move |v, edit, _, cx| {
-                            super::update_editor(&ed, cx, |e, cx| e.set_component(&node, &handle, ty, i, v, edit, cx));
-                        })
+                    Scrub::new(
+                        SharedString::from(format!("n-{node}-{handle}-{i}")),
+                        value,
+                        z,
+                    )
+                    .stack(Stack::of(i, n))
+                    .integer(integer)
+                    .range(min, max)
+                    .readonly(readonly)
+                    .on_change(move |v, edit, _, cx| {
+                        super::update_editor(&ed, cx, |e, cx| {
+                            e.set_component(&node, &handle, ty, i, v, edit, cx)
+                        });
+                    })
                 }))
                 .into_any_element()
         }
@@ -400,11 +466,20 @@ fn value_control(
                     cx.stop_propagation();
                     if !readonly {
                         let (node, handle, at) = (node.clone(), handle.clone(), e.position);
-                        super::update_editor(&ed, cx, |ed, cx| ed.open_color_picker(at, &node, &handle, ty, cx));
+                        super::update_editor(&ed, cx, |ed, cx| {
+                            ed.open_color_picker(at, &node, &handle, ty, cx)
+                        });
                     }
                 })
                 .child(div().flex_1().bg(opaque))
-                .when(alpha, |d| d.child(div().flex_1().bg(gpui::hsla(0.0, 0.0, 0.5, 1.0)).child(div().size_full().bg(translucent))))
+                .when(alpha, |d| {
+                    d.child(
+                        div()
+                            .flex_1()
+                            .bg(gpui::hsla(0.0, 0.0, 0.5, 1.0))
+                            .child(div().size_full().bg(translucent)),
+                    )
+                })
                 .into_any_element()
         }
         InputControl::Wheel => {
@@ -421,7 +496,9 @@ fn value_control(
                         .range(Some(0.0), None)
                         .readonly(readonly)
                         .on_change(move |v, edit, _, cx| {
-                            super::update_editor(&ed, cx, |e, cx| e.set_component(&node, &handle, ty, 3, v, edit, cx));
+                            super::update_editor(&ed, cx, |e, cx| {
+                                e.set_component(&node, &handle, ty, 3, v, edit, cx)
+                            });
                         })
                 }))
                 .into_any_element()
@@ -442,7 +519,20 @@ fn reroute(props: &NodeProps, view: &NodeView, cx: &App) -> AnyElement {
     let ty = view.reroute_type.unwrap_or(WgslType::F32);
     let z = props.zoom;
     let mk = |kind: HandleType, position: Position| {
-        let spec = SocketSpec { id: Some(if kind == HandleType::Target { "in" } else { "out" }.into()), kind, position, ty, inset: 0.0 };
+        let spec = SocketSpec {
+            id: Some(
+                if kind == HandleType::Target {
+                    "in"
+                } else {
+                    "out"
+                }
+                .into(),
+            ),
+            kind,
+            position,
+            ty,
+            inset: 0.0,
+        };
         let h = socket(props, &spec, theme);
         h.left(px(0.0)).mt(px(-4.0 * z)).ml(px(5.0 * z))
     };
@@ -450,7 +540,9 @@ fn reroute(props: &NodeProps, view: &NodeView, cx: &App) -> AnyElement {
         .relative()
         .size(px(18.0 * z))
         .rounded_full()
-        .when(props.selected, |d| d.border(px(z)).border_color(theme.colors.primary))
+        .when(props.selected, |d| {
+            d.border(px(z)).border_color(theme.colors.primary)
+        })
         .child(mk(HandleType::Target, Position::Left))
         .child(mk(HandleType::Source, Position::Right))
         .into_any_element()
@@ -459,7 +551,11 @@ fn reroute(props: &NodeProps, view: &NodeView, cx: &App) -> AnyElement {
 /// The outline of a selected card, which contrasts with the canvas. Its border
 /// is transparent otherwise, so selecting a card never shifts its contents.
 fn card_outline(selected: bool, colors: &theme::Colors) -> gpui::Hsla {
-    if selected { colors.foreground } else { gpui::transparent_black() }
+    if selected {
+        colors.foreground
+    } else {
+        gpui::transparent_black()
+    }
 }
 
 pub fn render_node(
@@ -485,10 +581,14 @@ pub fn render_node(
     let theme = cx.theme().clone();
     let c = &theme.colors;
     let s = |v: f32| px(v * z);
-    let widget = view.widget.as_ref().map(|w| widgets::render(w, &view.id, z, view.locked, ed, window, cx));
+    let widget = view
+        .widget
+        .as_ref()
+        .map(|w| widgets::render(w, &view.id, z, view.locked, ed, window, cx));
     let linked_in = props.connected_handles(HandleType::Target);
     let linked_out = props.connected_handles(HandleType::Source);
-    let is_linked = |set: &HashSet<Option<gpui_flow::Id>>, id: &str| set.contains(&Some(id.to_owned().into()));
+    let is_linked =
+        |set: &HashSet<Option<gpui_flow::Id>>, id: &str| set.contains(&Some(id.to_owned().into()));
 
     let settings_ed = ed.clone();
     let settings_id = view.id.clone();
@@ -710,60 +810,110 @@ pub fn render_node(
             ))
         }));
 
-    let row = || div().relative().flex().items_center().gap(s(6.0)).min_h(s(24.0));
+    let row = || {
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .gap(s(6.0))
+            .min_h(s(24.0))
+    };
 
-    let outputs = view.outputs.iter().filter(|o| !view.only_linked || is_linked(&linked_out, &o.id)).map(|o| {
-        let spec = SocketSpec { id: Some(o.id.clone()), kind: HandleType::Source, position: Position::Right, ty: o.ty, inset: PAD };
-        let shared = o.shared.as_ref().map(|n| format!(" ({n})")).unwrap_or_default();
-        row()
-            .justify_end()
-            .child(label_text(format!("{}: {}{shared}", o.label, o.ty.id()), z, cx))
-            .child(socket(props, &spec, &theme))
-    });
-
-    let hidden_handles = view.parked.iter().filter(|id| is_linked(&linked_in, id)).map(|id| {
-        props
-            .handle(Some(id.clone().into()), HandleType::Target, Position::Left)
-            .connectable(false)
-            .custom_look()
-            .free()
-            .absolute()
-            .size(px(1.0))
-            .opacity(0.0)
-    });
-
-    let inputs = view.inputs.iter().filter(|i| !view.only_linked || is_linked(&linked_in, &i.id)).map(|i| {
-        let linked = is_linked(&linked_in, &i.id);
-        let spec = SocketSpec { id: Some(i.id.clone()), kind: HandleType::Target, position: Position::Left, ty: i.ty, inset: PAD };
-        let shared = i.shared.as_ref().map(|n| format!(" ({n})")).unwrap_or_default();
-        let body: AnyElement = if i.variadic {
-            label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
-        } else if view.elsewhere.contains(&i.id) {
-            label_text(format!("{}: {} (elsewhere)", i.label, i.ty.id()), z, cx).opacity(0.6).into_any_element()
-        } else if linked {
-            label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
-        } else if i.fallback {
-            label_text(format!("{}: {} (default)", i.label, i.ty.id()), z, cx).into_any_element()
-        } else if i.control.is_some() {
-            let enum_control = matches!(i.control, Some(InputControl::Enum { .. }));
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w_0()
-                .gap(s(2.0))
+    let outputs = view
+        .outputs
+        .iter()
+        .filter(|o| !view.only_linked || is_linked(&linked_out, &o.id))
+        .map(|o| {
+            let spec = SocketSpec {
+                id: Some(o.id.clone()),
+                kind: HandleType::Source,
+                position: Position::Right,
+                ty: o.ty,
+                inset: PAD,
+            };
+            let shared = o
+                .shared
+                .as_ref()
+                .map(|n| format!(" ({n})"))
+                .unwrap_or_default();
+            row()
+                .justify_end()
                 .child(label_text(
-                    if enum_control { i.label.clone() } else { format!("{}: {}", i.label, i.ty.id()) },
+                    format!("{}: {}{shared}", o.label, o.ty.id()),
                     z,
                     cx,
                 ))
-                .child(value_control(props, view, i, ed, cx))
-                .into_any_element()
-        } else {
-            label_text(format!("{}: {}", i.label, i.ty.id()), z, cx).into_any_element()
-        };
-        row().child(socket(props, &spec, &theme)).child(body)
-    });
+                .child(socket(props, &spec, &theme))
+        });
+
+    let hidden_handles = view
+        .parked
+        .iter()
+        .filter(|id| is_linked(&linked_in, id))
+        .map(|id| {
+            props
+                .handle(Some(id.clone().into()), HandleType::Target, Position::Left)
+                .connectable(false)
+                .custom_look()
+                .free()
+                .absolute()
+                .size(px(1.0))
+                .opacity(0.0)
+        });
+
+    let inputs = view
+        .inputs
+        .iter()
+        .filter(|i| !view.only_linked || is_linked(&linked_in, &i.id))
+        .map(|i| {
+            let linked = is_linked(&linked_in, &i.id);
+            let spec = SocketSpec {
+                id: Some(i.id.clone()),
+                kind: HandleType::Target,
+                position: Position::Left,
+                ty: i.ty,
+                inset: PAD,
+            };
+            let shared = i
+                .shared
+                .as_ref()
+                .map(|n| format!(" ({n})"))
+                .unwrap_or_default();
+            let body: AnyElement = if i.variadic {
+                label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
+            } else if view.elsewhere.contains(&i.id) {
+                label_text(format!("{}: {} (elsewhere)", i.label, i.ty.id()), z, cx)
+                    .opacity(0.6)
+                    .into_any_element()
+            } else if linked {
+                label_text(format!("{}: {}{shared}", i.label, i.ty.id()), z, cx).into_any_element()
+            } else if i.fallback {
+                label_text(format!("{}: {} (default)", i.label, i.ty.id()), z, cx)
+                    .into_any_element()
+            } else if i.control.is_some() {
+                let enum_control = matches!(i.control, Some(InputControl::Enum { .. }));
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(s(2.0))
+                    .child(label_text(
+                        if enum_control {
+                            i.label.clone()
+                        } else {
+                            format!("{}: {}", i.label, i.ty.id())
+                        },
+                        z,
+                        cx,
+                    ))
+                    .child(value_control(props, view, i, ed, cx))
+                    .into_any_element()
+            } else {
+                label_text(format!("{}: {}", i.label, i.ty.id()), z, cx).into_any_element()
+            };
+            row().child(socket(props, &spec, &theme)).child(body)
+        });
 
     let (add_boundary, add_zone) = (
         view.boundary.is_some() && !view.locked && !view.only_linked,
@@ -775,7 +925,15 @@ pub fn render_node(
 
     let virtual_row = |kind: HandleType| {
         let handle = props
-            .handle(Some(NEW_ITEM_HANDLE.to_owned().into()), kind, if kind == HandleType::Target { Position::Left } else { Position::Right })
+            .handle(
+                Some(NEW_ITEM_HANDLE.to_owned().into()),
+                kind,
+                if kind == HandleType::Target {
+                    Position::Left
+                } else {
+                    Position::Right
+                },
+            )
             .sized(8.0)
             .custom_look()
             .free()
@@ -785,7 +943,11 @@ pub fn render_node(
             .rounded_full()
             .border(s(1.0))
             .border_color(c.muted_foreground);
-        let handle = if kind == HandleType::Target { handle.left(px(-(PAD + 4.0) * z)) } else { handle.right(px(-(PAD + 4.0) * z)) };
+        let handle = if kind == HandleType::Target {
+            handle.left(px(-(PAD + 4.0) * z))
+        } else {
+            handle.right(px(-(PAD + 4.0) * z))
+        };
         row()
             .when(kind == HandleType::Source, |d| d.justify_end())
             .child(label_text("new item".to_owned(), z, cx).opacity(0.6))
@@ -844,11 +1006,16 @@ pub fn render_node(
                 .children(outputs)
                 .children(widget)
                 .children(add_top.map(|b| div().flex().child(b)))
-                .when(view.zone && add_zone && !view.outputs.is_empty(), |d| d.child(virtual_row(HandleType::Source)))
+                .when(view.zone && add_zone && !view.outputs.is_empty(), |d| {
+                    d.child(virtual_row(HandleType::Source))
+                })
                 .children(hidden_handles)
                 .children(inputs)
                 .children(add_bottom.map(|b| div().flex().child(b)))
-                .when(add_zone, |d| d.child(virtual_row(HandleType::Target)).child(div().flex().child(zone_add))),
+                .when(add_zone, |d| {
+                    d.child(virtual_row(HandleType::Target))
+                        .child(div().flex().child(zone_add))
+                }),
         )
         .into_any_element()
 }

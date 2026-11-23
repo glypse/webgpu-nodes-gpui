@@ -12,8 +12,8 @@ use gpui::{
 };
 use gpui_flow::{Flow, Layer, LayerContext, NodeProps, Xy};
 use shader_graph::graph::{
-    Bounds, FrameAnalysis, FrameItem, FrameTint, Point as GraphPoint, Size,
-    analyze_frame_items, estimate_frame_header, frame_rects, union_of,
+    Bounds, FrameAnalysis, FrameItem, FrameTint, Point as GraphPoint, Size, analyze_frame_items,
+    estimate_frame_header, frame_rects, union_of,
 };
 use theme::{ActiveTheme as _, Theme, oklch};
 
@@ -45,10 +45,21 @@ pub fn tint_color(tint: Option<FrameTint>, theme: &Theme) -> Hsla {
 fn mix(a: Hsla, b: Hsla, amount: f32) -> Hsla {
     let (a, b) = (Rgba::from(a), Rgba::from(b));
     let lerp = |x: f32, y: f32| x * amount + y * (1.0 - amount);
-    Rgba { r: lerp(a.r, b.r), g: lerp(a.g, b.g), b: lerp(a.b, b.b), a: lerp(a.a, b.a) }.into()
+    Rgba {
+        r: lerp(a.r, b.r),
+        g: lerp(a.g, b.g),
+        b: lerp(a.b, b.b),
+        a: lerp(a.a, b.a),
+    }
+    .into()
 }
 
-pub fn header(view: &FrameView, props: &NodeProps, ed: &WeakEntity<Editor>, cx: &App) -> AnyElement {
+pub fn header(
+    view: &FrameView,
+    props: &NodeProps,
+    ed: &WeakEntity<Editor>,
+    cx: &App,
+) -> AnyElement {
     let theme = cx.theme();
     let color = tint_color(view.tint, theme);
     let s = |v: f32| props.scaled(v);
@@ -149,22 +160,36 @@ impl Drag {
         let set: HashSet<&String> = dragged.iter().collect();
         let mut inside = HashMap::new();
         for id in dragged {
-            let Some(frame) = analysis.frames.get(id) else { continue };
+            let Some(frame) = analysis.frames.get(id) else {
+                continue;
+            };
             for held in &frame.descendants {
                 if let (false, Some(p)) = (set.contains(held), positions.get(held)) {
                     inside.insert(held.clone(), *p);
                 }
             }
         }
-        let from: HashMap<String, GraphPoint> =
-            dragged.iter().filter_map(|id| Some((id.clone(), *positions.get(id)?))).collect();
+        let from: HashMap<String, GraphPoint> = dragged
+            .iter()
+            .filter_map(|id| Some((id.clone(), *positions.get(id)?)))
+            .collect();
         let loose: HashSet<String> = dragged
             .iter()
             .filter(|id| !analysis.frames_around(id).iter().any(|f| set.contains(f)))
             .cloned()
             .collect();
-        let moving = dragged.iter().cloned().chain(inside.keys().cloned()).collect();
-        Self { from, inside, moving, loose, drop_frame: None }
+        let moving = dragged
+            .iter()
+            .cloned()
+            .chain(inside.keys().cloned())
+            .collect();
+        Self {
+            from,
+            inside,
+            moving,
+            loose,
+            drop_frame: None,
+        }
     }
 }
 
@@ -184,16 +209,22 @@ pub fn boxes(
         analyze_frame_items(snapshot.items.iter().map(|i| FrameItem {
             id: &i.id,
             is_frame: i.is_frame,
-            frame: if loose.contains(&i.id) { None } else { i.frame.as_deref() },
+            frame: if loose.contains(&i.id) {
+                None
+            } else {
+                i.frame.as_deref()
+            },
         }))
     };
     let rects = node_rects(flow);
     let header = |id: &str| match flow.node_rect(&id.to_owned().into()) {
-        Some(r) => Size { width: r.width, height: r.height },
-        None => snapshot
-            .looks
-            .get(id)
-            .map_or(Size::default(), |l| estimate_frame_header(&l.label, l.note.as_deref())),
+        Some(r) => Size {
+            width: r.width,
+            height: r.height,
+        },
+        None => snapshot.looks.get(id).map_or(Size::default(), |l| {
+            estimate_frame_header(&l.label, l.note.as_deref())
+        }),
     };
     let bubbles: Vec<(&ZoneBox, Bounds)> = snapshot
         .zones
@@ -205,11 +236,20 @@ pub fn boxes(
                 .filter_map(|id| rects.get(id).copied())
                 .collect();
             let b = union_of(&held)?;
-            Some((zone, Bounds { y: b.y - zone.padding, height: b.height + 2.0 * zone.padding, ..b }))
+            Some((
+                zone,
+                Bounds {
+                    y: b.y - zone.padding,
+                    height: b.height + 2.0 * zone.padding,
+                    ..b
+                },
+            ))
         })
         .collect();
     let around = |id: &str| -> Vec<Bounds> {
-        let Some(inside) = analysis.frames.get(id).map(|f| &f.descendants) else { return Vec::new() };
+        let Some(inside) = analysis.frames.get(id).map(|f| &f.descendants) else {
+            return Vec::new();
+        };
         bubbles
             .iter()
             .filter(|(z, _)| inside.contains(&z.input) && inside.contains(&z.output))
@@ -225,8 +265,18 @@ pub fn node_rects(flow: &Flow) -> HashMap<String, Bounds> {
     flow.nodes()
         .iter()
         .map(|n| {
-            let (width, height) = flow.node_rect(&n.id).map_or(ESTIMATED_NODE, |r| (r.width, r.height));
-            (n.id.to_string(), Bounds { x: n.position.x, y: n.position.y, width, height })
+            let (width, height) = flow
+                .node_rect(&n.id)
+                .map_or(ESTIMATED_NODE, |r| (r.width, r.height));
+            (
+                n.id.to_string(),
+                Bounds {
+                    x: n.position.x,
+                    y: n.position.y,
+                    width,
+                    height,
+                },
+            )
         })
         .collect()
 }
@@ -265,7 +315,9 @@ pub fn drop_targets(
         if analysis.frames_around(id).iter().any(|f| ids.contains(f)) {
             continue;
         }
-        let Some(rect) = boxes.get(id).or_else(|| rects.get(id)) else { continue };
+        let Some(rect) = boxes.get(id).or_else(|| rects.get(id)) else {
+            continue;
+        };
         let center = rect.center();
         let target = frame_at(boxes, analysis, center, moving);
         match targets.iter_mut().find(|(t, _)| *t == target) {
@@ -288,14 +340,22 @@ pub fn layer(flow: WeakEntity<Flow>, snapshot: Rc<Snapshot>, drag: SharedDrag) -
             };
             let (boxes, analysis) = boxes(&snapshot, flow, &loose);
             let mut ordered: Vec<(&String, &Bounds)> = boxes.iter().collect();
-            ordered.sort_by_key(|(id, _)| (analysis.frames.get(*id).map_or(0, |f| f.depth), (*id).clone()));
+            ordered.sort_by_key(|(id, _)| {
+                (
+                    analysis.frames.get(*id).map_or(0, |f| f.depth),
+                    (*id).clone(),
+                )
+            });
             let theme = cx.theme().clone();
             let zoom = ctx.viewport.zoom;
             for (id, b) in ordered {
                 let tint = snapshot.looks.get(id).and_then(|l| l.tint);
                 let color = tint_color(tint, &theme);
                 let dropping = drop_frame.as_ref() == Some(id);
-                let selected = flow.nodes().iter().any(|n| n.selected && n.id.as_ref() == id.as_str());
+                let selected = flow
+                    .nodes()
+                    .iter()
+                    .any(|n| n.selected && n.id.as_ref() == id.as_str());
                 let bounds = gpui::Bounds {
                     origin: ctx.to_window(Xy::new(b.x, b.y)),
                     size: size(px(b.width * zoom), px(b.height * zoom)),
@@ -326,35 +386,62 @@ mod tests {
     use shader_graph::graph::{GraphNode, LAYOUT_FRAME, analyze_frames};
 
     fn node(id: &str, frame_type: bool, frame: Option<&str>) -> GraphNode {
-        let mut n = GraphNode::new(if frame_type { LAYOUT_FRAME } else { "sin" }, GraphPoint::default());
+        let mut n = GraphNode::new(
+            if frame_type { LAYOUT_FRAME } else { "sin" },
+            GraphPoint::default(),
+        );
         n.id = id.to_owned();
         n.frame = frame.map(str::to_owned);
         n
     }
 
     fn bounds(x: f32, y: f32, w: f32, h: f32) -> Bounds {
-        Bounds { x, y, width: w, height: h }
+        Bounds {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
     }
 
     #[test]
     fn the_innermost_frame_under_a_point_takes_a_drop() {
-        let nodes = [node("outer", true, None), node("inner", true, Some("outer"))];
+        let nodes = [
+            node("outer", true, None),
+            node("inner", true, Some("outer")),
+        ];
         let analysis = analyze_frames(&nodes);
         let boxes = HashMap::from([
             ("outer".to_owned(), bounds(0.0, 0.0, 100.0, 100.0)),
             ("inner".to_owned(), bounds(10.0, 10.0, 30.0, 30.0)),
         ]);
         let none = HashSet::new();
-        assert_eq!(frame_at(&boxes, &analysis, GraphPoint::new(20.0, 20.0), &none).as_deref(), Some("inner"));
-        assert_eq!(frame_at(&boxes, &analysis, GraphPoint::new(80.0, 80.0), &none).as_deref(), Some("outer"));
-        assert_eq!(frame_at(&boxes, &analysis, GraphPoint::new(200.0, 0.0), &none), None);
+        assert_eq!(
+            frame_at(&boxes, &analysis, GraphPoint::new(20.0, 20.0), &none).as_deref(),
+            Some("inner")
+        );
+        assert_eq!(
+            frame_at(&boxes, &analysis, GraphPoint::new(80.0, 80.0), &none).as_deref(),
+            Some("outer")
+        );
+        assert_eq!(
+            frame_at(&boxes, &analysis, GraphPoint::new(200.0, 0.0), &none),
+            None
+        );
         let moving = HashSet::from(["inner".to_owned()]);
-        assert_eq!(frame_at(&boxes, &analysis, GraphPoint::new(20.0, 20.0), &moving).as_deref(), Some("outer"));
+        assert_eq!(
+            frame_at(&boxes, &analysis, GraphPoint::new(20.0, 20.0), &moving).as_deref(),
+            Some("outer")
+        );
     }
 
     #[test]
     fn dragging_a_frame_takes_what_it_holds_and_leaves_the_frame_to_the_drop() {
-        let nodes = [node("f", true, None), node("a", false, Some("f")), node("b", false, None)];
+        let nodes = [
+            node("f", true, None),
+            node("a", false, Some("f")),
+            node("b", false, None),
+        ];
         let analysis = analyze_frames(&nodes);
         let positions: HashMap<String, GraphPoint> =
             nodes.iter().map(|n| (n.id.clone(), n.position)).collect();
@@ -370,7 +457,11 @@ mod tests {
 
     #[test]
     fn nodes_are_dropped_by_their_centre_and_those_in_dragged_frames_stay() {
-        let nodes = [node("f", true, None), node("a", false, None), node("b", false, None)];
+        let nodes = [
+            node("f", true, None),
+            node("a", false, None),
+            node("b", false, None),
+        ];
         let analysis = analyze_frames(&nodes);
         let boxes = HashMap::from([("f".to_owned(), bounds(0.0, 0.0, 100.0, 100.0))]);
         let rects = HashMap::from([

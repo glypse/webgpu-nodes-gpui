@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::graph::{GROUP_INPUT, GraphDocument, GraphEdge, GraphNode, GraphProject, REROUTE};
 use crate::types::{
-    EnumVariant, GroupHandleDef, InputOwner, TypeBindings, TypeOwner,
-    TypeVariable, WgslType, enum_value, InputValue,
+    EnumVariant, GroupHandleDef, InputOwner, InputValue, TypeBindings, TypeOwner, TypeVariable,
+    WgslType, enum_value,
 };
 
 pub const MATCH: &str = "match";
@@ -38,7 +38,12 @@ pub fn is_case_handle(handle: &str) -> bool {
 
 /// A value for a new variant: one no variant of `variants` has.
 pub fn next_variant_value(variants: &[EnumVariant]) -> i64 {
-    variants.iter().map(|v| v.value.saturating_add(1)).max().unwrap_or(0).max(0)
+    variants
+        .iter()
+        .map(|v| v.value.saturating_add(1))
+        .max()
+        .unwrap_or(0)
+        .max(0)
 }
 
 /// The type an input of a node resolves to.
@@ -57,7 +62,12 @@ pub struct EnumDocument<'a> {
 
 impl<'a> EnumDocument<'a> {
     pub fn of(doc: &'a GraphDocument) -> Self {
-        Self { nodes: &doc.nodes, edges: &doc.edges, inputs: &doc.inputs, input_type: None }
+        Self {
+            nodes: &doc.nodes,
+            edges: &doc.edges,
+            inputs: &doc.inputs,
+            input_type: None,
+        }
     }
 
     fn node(&self, id: &str) -> Option<&GraphNode> {
@@ -65,7 +75,9 @@ impl<'a> EnumDocument<'a> {
     }
 
     fn feed(&self, node: &str, input: &str) -> Option<&GraphEdge> {
-        self.edges.iter().find(|e| e.target == node && e.target_handle == input)
+        self.edges
+            .iter()
+            .find(|e| e.target == node && e.target_handle == input)
     }
 
     /// The enum an output carries: a group input's enum handle, through nodes
@@ -73,7 +85,12 @@ impl<'a> EnumDocument<'a> {
     pub fn enum_of_output(&self, node: &str, handle: &str) -> Option<&[EnumVariant]> {
         let node = self.node(node)?;
         if node.is(GROUP_INPUT) {
-            return self.inputs.iter().find(|h| h.id == handle)?.variants.as_deref();
+            return self
+                .inputs
+                .iter()
+                .find(|h| h.id == handle)?
+                .variants
+                .as_deref();
         }
         if node.is(REROUTE) {
             return self.enum_at(&node.id, "in");
@@ -108,14 +125,13 @@ impl<'a> EnumDocument<'a> {
 
     /// The case input a Match node uses while compiling, when its enum's value
     /// is known. A value matching no variant picks the first one.
-    pub fn matched_case(
-        &self,
-        node: &str,
-        constants: &BTreeMap<String, i64>,
-    ) -> Option<String> {
+    pub fn matched_case(&self, node: &str, constants: &BTreeMap<String, i64>) -> Option<String> {
         let value = self.constant_at(node, MATCH_SELECTOR, constants)?;
         let variants = self.enum_at(node, MATCH_SELECTOR).unwrap_or(&[]);
-        let variant = variants.iter().find(|v| v.value == value).or(variants.first())?;
+        let variant = variants
+            .iter()
+            .find(|v| v.value == value)
+            .or(variants.first())?;
         Some(case_handle(variant.value))
     }
 
@@ -127,7 +143,11 @@ impl<'a> EnumDocument<'a> {
 
     /// `edges` without those whose value is never used while compiling with
     /// `constants`: links into the cases a Match or Width Switch doesn't pick.
-    pub fn live_edges(&self, edges: &[GraphEdge], constants: &BTreeMap<String, i64>) -> Vec<GraphEdge> {
+    pub fn live_edges(
+        &self,
+        edges: &[GraphEdge],
+        constants: &BTreeMap<String, i64>,
+    ) -> Vec<GraphEdge> {
         let mut picked: BTreeMap<String, Option<String>> = BTreeMap::new();
         edges
             .iter()
@@ -158,7 +178,10 @@ pub fn owner_chain(handles: &[GroupHandleDef], handle: &GroupHandleDef) -> Vec<I
         if !seen.insert(o.enum_id.clone()) {
             break;
         }
-        owner = handles.iter().find(|h| h.id == o.enum_id).and_then(|h| h.owner.clone());
+        owner = handles
+            .iter()
+            .find(|h| h.id == o.enum_id)
+            .and_then(|h| h.owner.clone());
         chain.push(o);
     }
     chain
@@ -203,12 +226,19 @@ pub fn offered_for(variant: &EnumVariant, ty: Option<WgslType>) -> bool {
 }
 
 fn offered_always(variant: &EnumVariant) -> EnumVariant {
-    EnumVariant { types: None, ..variant.clone() }
+    EnumVariant {
+        types: None,
+        ..variant.clone()
+    }
 }
 
 /// The variants of an enum offered with its group's variables bound to `bindings`.
 pub fn available_variants(handle: &GroupHandleDef, bindings: &TypeBindings) -> Vec<EnumVariant> {
-    let ty = handle.variants_by.as_ref().and_then(|v| bindings.get(v)).copied();
+    let ty = handle
+        .variants_by
+        .as_ref()
+        .and_then(|v| bindings.get(v))
+        .copied();
     handle
         .variants
         .iter()
@@ -221,9 +251,12 @@ pub fn available_variants(handle: &GroupHandleDef, bindings: &TypeBindings) -> V
 /// The types of `variable` an enum is shown for, each needing a variant to offer.
 pub fn variant_types(handle: &GroupHandleDef, variable: &TypeVariable) -> Vec<WgslType> {
     match &handle.type_owner {
-        Some(owner) if owner.variable == variable.id => {
-            variable.types.iter().copied().filter(|t| owner.types.contains(t)).collect()
-        }
+        Some(owner) if owner.variable == variable.id => variable
+            .types
+            .iter()
+            .copied()
+            .filter(|t| owner.types.contains(t))
+            .collect(),
         _ => variable.types.clone(),
     }
 }
@@ -232,7 +265,9 @@ pub fn variant_types(handle: &GroupHandleDef, variable: &TypeVariable) -> Vec<Wg
 /// shown for, a type none would offer is offered by all. Without its
 /// variable, its variants are offered whatever the types.
 pub fn fit_variants(handle: &GroupHandleDef, variables: &[TypeVariable]) -> GroupHandleDef {
-    let Some(by) = &handle.variants_by else { return handle.clone() };
+    let Some(by) = &handle.variants_by else {
+        return handle.clone();
+    };
     let mut fitted = handle.clone();
     let variants = handle.variants.clone().unwrap_or_default();
     let Some(variable) = variables.iter().find(|v| &v.id == by) else {
@@ -250,7 +285,9 @@ pub fn fit_variants(handle: &GroupHandleDef, variables: &[TypeVariable]) -> Grou
         variants
             .iter()
             .map(|variant| {
-                let Some(offered) = &variant.types else { return variant.clone() };
+                let Some(offered) = &variant.types else {
+                    return variant.clone();
+                };
                 let kept: Vec<_> = types
                     .iter()
                     .copied()
@@ -292,8 +329,9 @@ pub fn hidden_inputs_of(
             let off_variant = owner_chain(handles, handle)
                 .iter()
                 .any(|o| values.get(&o.enum_id).is_some_and(|v| *v != o.value));
-            let off_type =
-                type_owners(handles, handle).iter().any(|o| !owned_by(Some(o), bindings));
+            let off_type = type_owners(handles, handle)
+                .iter()
+                .any(|o| !owned_by(Some(o), bindings));
             off_variant || off_type
         })
         .map(|h| h.id.clone())
@@ -304,9 +342,10 @@ pub fn hidden_inputs_of(
 /// variants of an enum, or are owned by none of the same types of a variable.
 pub fn shown_apart(handles: &[GroupHandleDef], a: &GroupHandleDef, b: &GroupHandleDef) -> bool {
     let of_b = owner_chain(handles, b);
-    let variants = owner_chain(handles, a)
-        .iter()
-        .any(|o| of_b.iter().any(|p| p.enum_id == o.enum_id && p.value != o.value));
+    let variants = owner_chain(handles, a).iter().any(|o| {
+        of_b.iter()
+            .any(|p| p.enum_id == o.enum_id && p.value != o.value)
+    });
     let owners_b = type_owners(handles, b);
     let types = type_owners(handles, a).iter().any(|o| {
         owners_b
@@ -328,22 +367,33 @@ pub fn group_constants(
 ) -> BTreeMap<String, i64> {
     let definition = node.definition_ref().and_then(|r| project.document(r));
     let mut values = BTreeMap::new();
-    let Some(definition) = definition else { return values };
+    let Some(definition) = definition else {
+        return values;
+    };
     for handle in &definition.inputs {
         if handle.variants.is_none() && handle.compiled != Some(true) {
             continue;
         }
-        let linked = doc.edges.iter().any(|e| e.target == node.id && e.target_handle == handle.id);
+        let linked = doc
+            .edges
+            .iter()
+            .any(|e| e.target == node.id && e.target_handle == handle.id);
         let known = if linked {
             doc.constant_at(&node.id, &handle.id, constants)
         } else {
-            let stored: Option<&InputValue> =
-                node.data.values.get(&handle.id).or_else(|| definition.defaults.get(&handle.id));
+            let stored: Option<&InputValue> = node
+                .data
+                .values
+                .get(&handle.id)
+                .or_else(|| definition.defaults.get(&handle.id));
             Some(stored.map_or(0, InputValue::as_i64))
         };
         let Some(known) = known else { continue };
         let value = if handle.variants.is_some() {
-            enum_value(Some(&InputValue::from(known as f64)), &available_variants(handle, bindings))
+            enum_value(
+                Some(&InputValue::from(known as f64)),
+                &available_variants(handle, bindings),
+            )
         } else {
             Some(known)
         };

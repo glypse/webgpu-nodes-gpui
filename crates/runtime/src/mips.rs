@@ -56,10 +56,19 @@ impl MipGenerator {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        Self { module, layout, pipeline_layout, pipelines: HashMap::new() }
+        Self {
+            module,
+            layout,
+            pipeline_layout,
+            pipelines: HashMap::new(),
+        }
     }
 
-    fn pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &wgpu::RenderPipeline {
+    fn pipeline(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> &wgpu::RenderPipeline {
         self.pipelines.entry(format).or_insert_with(|| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("mips"),

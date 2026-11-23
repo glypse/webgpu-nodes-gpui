@@ -90,7 +90,12 @@ pub fn edge_ends(
     if !source.initialized() || !target.initialized() {
         return None;
     }
-    let s = find_handle(source, HandleType::Source, source_handle, ConnectionMode::Strict)?;
+    let s = find_handle(
+        source,
+        HandleType::Source,
+        source_handle,
+        ConnectionMode::Strict,
+    )?;
     let t = find_handle(target, HandleType::Target, target_handle, mode)?;
     Some(EdgeEnds {
         source: handle_position(source, Some(s), false),
@@ -136,8 +141,18 @@ pub fn closest_handle(
             let center = handle_position(node, Some(handle), true);
             let d = center.distance(at);
             (d <= radius).then(|| {
-                let near = Near { node: node.id.clone(), handle: handle.clone(), center };
-                (d, handle.kind != wanted, node.id.as_ref(), handle.id.as_deref(), near)
+                let near = Near {
+                    node: node.id.clone(),
+                    handle: handle.clone(),
+                    center,
+                };
+                (
+                    d,
+                    handle.kind != wanted,
+                    node.id.as_ref(),
+                    handle.id.as_deref(),
+                    near,
+                )
             })
         })
         .min_by(|a, b| {
@@ -157,9 +172,18 @@ pub fn handle_under(at: Xy, lookup: &Lookup, from: (&Id, HandleType, Option<&Id>
         .flat_map(|node| node.handles.iter().map(move |h| (node, h)))
         .filter(|(node, h)| !is_origin(from, &node.id, h))
         .filter_map(|(node, h)| {
-            let rect = Rect::new(node.position.x + h.x, node.position.y + h.y, h.width, h.height);
+            let rect = Rect::new(
+                node.position.x + h.x,
+                node.position.y + h.y,
+                h.width,
+                h.height,
+            );
             rect.contains(at).then(|| {
-                let near = Near { node: node.id.clone(), handle: h.clone(), center: rect.center() };
+                let near = Near {
+                    node: node.id.clone(),
+                    handle: h.clone(),
+                    center: rect.center(),
+                };
                 (node.id.as_ref(), h.id.as_deref(), near)
             })
         })
@@ -241,19 +265,41 @@ mod tests {
     }
 
     fn lookup() -> Lookup {
-        let a = node("a", 0.0, 0.0, vec![handle("out", HandleType::Source, Position::Right, 96.0, 21.0)]);
-        let b = node("b", 300.0, 100.0, vec![
-            handle("in", HandleType::Target, Position::Left, -4.0, 21.0),
-            handle("out", HandleType::Source, Position::Right, 96.0, 21.0),
-        ]);
+        let a = node(
+            "a",
+            0.0,
+            0.0,
+            vec![handle(
+                "out",
+                HandleType::Source,
+                Position::Right,
+                96.0,
+                21.0,
+            )],
+        );
+        let b = node(
+            "b",
+            300.0,
+            100.0,
+            vec![
+                handle("in", HandleType::Target, Position::Left, -4.0, 21.0),
+                handle("out", HandleType::Source, Position::Right, 96.0, 21.0),
+            ],
+        );
         [a, b].into_iter().map(|n| (n.id.clone(), n)).collect()
     }
 
     #[test]
     fn edge_ends_sit_on_the_handle_edge() {
         let l = lookup();
-        let ends = edge_ends(&l["a"], Some(&"out".into()), &l["b"], Some(&"in".into()), ConnectionMode::Strict)
-            .unwrap();
+        let ends = edge_ends(
+            &l["a"],
+            Some(&"out".into()),
+            &l["b"],
+            Some(&"in".into()),
+            ConnectionMode::Strict,
+        )
+        .unwrap();
         assert_eq!(ends.source, Xy::new(104.0, 25.0));
         assert_eq!(ends.target, Xy::new(296.0, 125.0));
         assert_eq!(ends.source_position, Position::Right);
@@ -272,11 +318,35 @@ mod tests {
         let l = lookup();
         let a: Id = "a".into();
         let out: Id = "out".into();
-        let near = closest_handle(Xy::new(298.0, 126.0), 20.0, &l, (&a, HandleType::Source, Some(&out)));
-        assert_eq!(near.unwrap().handle.id.as_ref().map(|s| s.as_str()), Some("in"));
-        assert!(closest_handle(Xy::new(200.0, 400.0), 20.0, &l, (&a, HandleType::Source, Some(&out))).is_none());
+        let near = closest_handle(
+            Xy::new(298.0, 126.0),
+            20.0,
+            &l,
+            (&a, HandleType::Source, Some(&out)),
+        );
+        assert_eq!(
+            near.unwrap().handle.id.as_ref().map(|s| s.as_str()),
+            Some("in")
+        );
+        assert!(
+            closest_handle(
+                Xy::new(200.0, 400.0),
+                20.0,
+                &l,
+                (&a, HandleType::Source, Some(&out))
+            )
+            .is_none()
+        );
         // The handle being dragged from isn't a candidate for itself.
-        assert!(closest_handle(Xy::new(100.0, 25.0), 20.0, &l, (&a, HandleType::Source, Some(&out))).is_none());
+        assert!(
+            closest_handle(
+                Xy::new(100.0, 25.0),
+                20.0,
+                &l,
+                (&a, HandleType::Source, Some(&out))
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -293,7 +363,11 @@ mod tests {
         let v = validate(from, &to_target, ConnectionMode::Strict, None);
         assert!(v.valid);
         assert_eq!(v.connection.target.as_ref(), "b");
-        let to_source = Near { node: "b".into(), handle: l["b"].handles[1].clone(), center: Xy::ZERO };
+        let to_source = Near {
+            node: "b".into(),
+            handle: l["b"].handles[1].clone(),
+            center: Xy::ZERO,
+        };
         assert!(!validate(from, &to_source, ConnectionMode::Strict, None).valid);
         assert!(validate(from, &to_source, ConnectionMode::Loose, None).valid);
     }
@@ -303,8 +377,17 @@ mod tests {
         let l = lookup();
         let b: Id = "b".into();
         let input: Id = "in".into();
-        let to = Near { node: "a".into(), handle: l["a"].handles[0].clone(), center: Xy::ZERO };
-        let v = validate((&b, HandleType::Target, Some(&input)), &to, ConnectionMode::Strict, None);
+        let to = Near {
+            node: "a".into(),
+            handle: l["a"].handles[0].clone(),
+            center: Xy::ZERO,
+        };
+        let v = validate(
+            (&b, HandleType::Target, Some(&input)),
+            &to,
+            ConnectionMode::Strict,
+            None,
+        );
         assert!(v.valid);
         assert_eq!(v.connection.source.as_ref(), "a");
         assert_eq!(v.connection.target.as_ref(), "b");
@@ -315,9 +398,21 @@ mod tests {
         let l = lookup();
         let a: Id = "a".into();
         let out: Id = "out".into();
-        let to = Near { node: "b".into(), handle: l["b"].handles[0].clone(), center: Xy::ZERO };
+        let to = Near {
+            node: "b".into(),
+            handle: l["b"].handles[0].clone(),
+            center: Xy::ZERO,
+        };
         let veto = |_: &Connection| false;
-        assert!(!validate((&a, HandleType::Source, Some(&out)), &to, ConnectionMode::Strict, Some(&veto)).valid);
+        assert!(
+            !validate(
+                (&a, HandleType::Source, Some(&out)),
+                &to,
+                ConnectionMode::Strict,
+                Some(&veto)
+            )
+            .valid
+        );
     }
 
     #[test]
@@ -327,8 +422,20 @@ mod tests {
         let out: Id = "out".into();
         let mut h = l["b"].handles[0].clone();
         h.connectable_end = false;
-        let to = Near { node: "b".into(), handle: h, center: Xy::ZERO };
-        assert!(!validate((&a, HandleType::Source, Some(&out)), &to, ConnectionMode::Strict, None).valid);
+        let to = Near {
+            node: "b".into(),
+            handle: h,
+            center: Xy::ZERO,
+        };
+        assert!(
+            !validate(
+                (&a, HandleType::Source, Some(&out)),
+                &to,
+                ConnectionMode::Strict,
+                None
+            )
+            .valid
+        );
     }
 
     #[test]
@@ -336,20 +443,37 @@ mod tests {
         let l = lookup();
         let a: Id = "a".into();
         let out: Id = "out".into();
-        let hit = handle_under(Xy::new(297.0, 126.0), &l, (&a, HandleType::Source, Some(&out)));
-        assert_eq!(hit.unwrap().handle.id.as_ref().map(|s| s.as_str()), Some("in"));
+        let hit = handle_under(
+            Xy::new(297.0, 126.0),
+            &l,
+            (&a, HandleType::Source, Some(&out)),
+        );
+        assert_eq!(
+            hit.unwrap().handle.id.as_ref().map(|s| s.as_str()),
+            Some("in")
+        );
     }
 
     #[test]
     fn handle_under_breaks_overlaps_by_id() {
         let mut l = lookup();
         // A second node whose target handle sits on the same spot as b's.
-        let c = node("c", 300.0, 100.0, vec![handle("in", HandleType::Target, Position::Left, -4.0, 21.0)]);
+        let c = node(
+            "c",
+            300.0,
+            100.0,
+            vec![handle("in", HandleType::Target, Position::Left, -4.0, 21.0)],
+        );
         l.insert(c.id.clone(), c);
         let a: Id = "a".into();
         let out: Id = "out".into();
         for _ in 0..8 {
-            let hit = handle_under(Xy::new(297.0, 126.0), &l, (&a, HandleType::Source, Some(&out))).unwrap();
+            let hit = handle_under(
+                Xy::new(297.0, 126.0),
+                &l,
+                (&a, HandleType::Source, Some(&out)),
+            )
+            .unwrap();
             assert_eq!(hit.node.as_ref(), "b");
         }
     }

@@ -12,15 +12,19 @@ pub(super) fn dev_nodes() -> Vec<D> {
         .dev()
         .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
         .wgsl(|ctx| vec![format!("let {} = this_is_not_valid_wgsl;", ctx.var_name)]);
-    let runtime_error = D::new("test-runtime-error", "⚠ Test: Runtime Error", NodeCategory::Misc)
-        .dev()
-        .inputs(vec![NodeInputDef::new("e", "e", FLOAT_TYPES)])
-        .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
-        .defaults(float_values([("e", 0.0)]))
-        .wgsl(|ctx| {
-            let e = ctx.promote_input("e");
-            vec![format!("let {} = {e} / f32(0.0);", ctx.var_name)]
-        });
+    let runtime_error = D::new(
+        "test-runtime-error",
+        "⚠ Test: Runtime Error",
+        NodeCategory::Misc,
+    )
+    .dev()
+    .inputs(vec![NodeInputDef::new("e", "e", FLOAT_TYPES)])
+    .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
+    .defaults(float_values([("e", 0.0)]))
+    .wgsl(|ctx| {
+        let e = ctx.promote_input("e");
+        vec![format!("let {} = {e} / f32(0.0);", ctx.var_name)]
+    });
     vec![invalid, runtime_error]
 }
 

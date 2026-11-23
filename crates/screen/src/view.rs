@@ -1,13 +1,16 @@
-use guard::SafeListener as _;
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle,
     DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
-    Pixels, Point, Render, StatefulInteractiveElement as _, Styled as _, StyleRefinement, Window,
+    Pixels, Point, Render, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Window,
     canvas, div, point, prelude::FluentBuilder as _, px, relative,
 };
-use gpui_component::{Sizable as _, Selectable as _, button::{Button, ButtonVariants as _}};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use gpui_component::{
+    Selectable as _, Sizable as _,
+    button::{Button, ButtonVariants as _},
+};
+use guard::SafeListener as _;
 use theme::{ActiveTheme as _, IconName, popup};
 
 use crate::gestures::{self, Outcome, Pixels as ScreenPixels};
@@ -268,7 +271,13 @@ impl<E: Editor> ScreenView<E> {
         cx.notify();
     }
 
-    fn start_corner_drag(&mut self, area: AreaId, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_corner_drag(
+        &mut self,
+        area: AreaId,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.maximized.is_some() || self.gesture_active() {
             return;
         }
@@ -282,16 +291,28 @@ impl<E: Editor> ScreenView<E> {
     }
 
     fn update_split(&mut self) {
-        let Some(axis) = self.splitting.as_ref().map(|s| s.axis) else { return };
-        let (area, at) =
-            match gestures::split_at(&self.screen, axis, self.pointer, self.pixels(), self.min_size()) {
-                Some((area, at)) => (Some(area), at),
-                None => (None, 0.0),
-            };
+        let Some(axis) = self.splitting.as_ref().map(|s| s.axis) else {
+            return;
+        };
+        let (area, at) = match gestures::split_at(
+            &self.screen,
+            axis,
+            self.pointer,
+            self.pixels(),
+            self.min_size(),
+        ) {
+            Some((area, at)) => (Some(area), at),
+            None => (None, 0.0),
+        };
         self.splitting = Some(Splitting { axis, area, at });
     }
 
-    fn gesture_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn gesture_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.pointer = self.local(event.position);
         if self.corner.is_some() && event.pressed_button != Some(MouseButton::Left) {
             // The button was let go where we couldn't see it.
@@ -322,7 +343,14 @@ impl<E: Editor> ScreenView<E> {
     fn finish_corner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let drag = self.corner.take();
         self.end_gesture(window, cx);
-        let Some(CornerDrag { source, outcome: Some(outcome), .. }) = drag else { return };
+        let Some(CornerDrag {
+            source,
+            outcome: Some(outcome),
+            ..
+        }) = drag
+        else {
+            return;
+        };
         if let Some(screen) = gestures::apply(&self.screen, source, &outcome, self.min_size()) {
             self.set_screen(screen, cx);
         }
@@ -331,8 +359,21 @@ impl<E: Editor> ScreenView<E> {
     fn finish_split(&mut self, confirm: bool, window: &mut Window, cx: &mut Context<Self>) {
         let split = self.splitting.take();
         self.end_gesture(window, cx);
-        let (true, Some(Splitting { axis, area: Some(area), at })) = (confirm, split) else { return };
-        if let Some((screen, _)) = self.screen.split(area, axis, at, Part::After, self.min_size()) {
+        let (
+            true,
+            Some(Splitting {
+                axis,
+                area: Some(area),
+                at,
+            }),
+        ) = (confirm, split)
+        else {
+            return;
+        };
+        if let Some((screen, _)) = self
+            .screen
+            .split(area, axis, at, Part::After, self.min_size())
+        {
             self.set_screen(screen, cx);
         }
     }
@@ -349,13 +390,22 @@ impl<E: Editor> ScreenView<E> {
         }
         let (x, y) = self.fractions(position);
         let grab = self.grab_size();
-        let Some(edge) = self.screen.edge_at(x, y, grab, false) else { return };
-        let offset = 2.0 * if edge.axis == Axis::X { grab.width } else { grab.height };
+        let Some(edge) = self.screen.edge_at(x, y, grab, false) else {
+            return;
+        };
+        let offset = 2.0
+            * if edge.axis == Axis::X {
+                grab.width
+            } else {
+                grab.height
+            };
         let beside = |delta: f64| match edge.axis {
             Axis::X => self.screen.area_at(edge.position + delta, y),
             Axis::Y => self.screen.area_at(x, edge.position + delta),
         };
-        let (Some(before), Some(after)) = (beside(-offset), beside(offset)) else { return };
+        let (Some(before), Some(after)) = (beside(-offset), beside(offset)) else {
+            return;
+        };
         if before.id == after.id {
             return;
         }
@@ -454,7 +504,9 @@ impl<E: Editor> ScreenView<E> {
                             .child(theme::Icon::new(IconName::CaretDown).size(px(12.0))),
                     )
                     .tooltip("Editor type")
-                    .on_click(cx.safe_listener(move |this, event, _, cx| open_type(this, event, cx))),
+                    .on_click(
+                        cx.safe_listener(move |this, event, _, cx| open_type(this, event, cx)),
+                    ),
             )
             .children(toolbar.map(toolbar_slot))
             .into_any_element()
@@ -470,7 +522,9 @@ impl<E: Editor> ScreenView<E> {
     ) -> Option<AnyElement> {
         if self.popup_slot(slot)?.0.is_none() {
             let menu = build(self, window, cx)?;
-            let opened = popup::open(window, cx, menu, move |this: &mut Self, cx| this.clear_popup(slot, cx));
+            let opened = popup::open(window, cx, menu, move |this: &mut Self, cx| {
+                this.clear_popup(slot, cx)
+            });
             if let Some((popup, _)) = self.popup_slot(slot) {
                 *popup = Some(opened);
             }
@@ -494,7 +548,11 @@ impl<E: Editor> ScreenView<E> {
         cx.notify();
     }
 
-    fn render_edge_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_edge_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         self.draw_popup(PopupSlot::EdgeMenu, window, cx, |this, window, cx| {
             let open = this.edge_menu.as_ref()?;
             let axis = open.axis;
@@ -505,7 +563,11 @@ impl<E: Editor> ScreenView<E> {
                 move |window: &mut Window, cx: &mut App| {
                     guard::guard("split from an edge", || {
                         view.update(cx, |this, cx| {
-                            this.splitting = Some(Splitting { axis: split_axis, area: None, at: 0.0 });
+                            this.splitting = Some(Splitting {
+                                axis: split_axis,
+                                area: None,
+                                at: 0.0,
+                            });
                             this.update_split();
                             this.begin_gesture(window, cx);
                         });
@@ -518,7 +580,11 @@ impl<E: Editor> ScreenView<E> {
                     guard::guard("join from an edge", || {
                         view.update(cx, |this, cx| {
                             let next = this.edge_menu.as_ref().and_then(|m| {
-                                if forward { m.forward.clone() } else { m.backward.clone() }
+                                if forward {
+                                    m.forward.clone()
+                                } else {
+                                    m.backward.clone()
+                                }
                             });
                             if let Some(screen) = next {
                                 this.set_screen(screen, cx);
@@ -543,21 +609,56 @@ impl<E: Editor> ScreenView<E> {
                     });
                 }
             };
-            let (forward_icon, backward_icon, swap_icon, forward_label, backward_label) = match axis {
-                Axis::X => (IconName::ArrowLineRight, IconName::ArrowLineLeft, IconName::ArrowsLeftRight, "Join right", "Join left"),
-                Axis::Y => (IconName::ArrowLineDown, IconName::ArrowLineUp, IconName::ArrowsDownUp, "Join down", "Join up"),
+            let (forward_icon, backward_icon, swap_icon, forward_label, backward_label) = match axis
+            {
+                Axis::X => (
+                    IconName::ArrowLineRight,
+                    IconName::ArrowLineLeft,
+                    IconName::ArrowsLeftRight,
+                    "Join right",
+                    "Join left",
+                ),
+                Axis::Y => (
+                    IconName::ArrowLineDown,
+                    IconName::ArrowLineUp,
+                    IconName::ArrowsDownUp,
+                    "Join down",
+                    "Join up",
+                ),
             };
             Some(PopupMenu::build(window, cx, move |menu, _, _| {
                 menu.min_w(px(208.0))
                     .label("Area edge options")
                     .separator()
-                    .item(PopupMenuItem::new("Vertical split").icon(IconName::SquareSplitHorizontal).on_click(popup::on_select(split(Axis::X))))
-                    .item(PopupMenuItem::new("Horizontal split").icon(IconName::SquareSplitVertical).on_click(popup::on_select(split(Axis::Y))))
+                    .item(
+                        PopupMenuItem::new("Vertical split")
+                            .icon(IconName::SquareSplitHorizontal)
+                            .on_click(popup::on_select(split(Axis::X))),
+                    )
+                    .item(
+                        PopupMenuItem::new("Horizontal split")
+                            .icon(IconName::SquareSplitVertical)
+                            .on_click(popup::on_select(split(Axis::Y))),
+                    )
                     .separator()
-                    .item(PopupMenuItem::new(forward_label).icon(forward_icon).disabled(!forward).on_click(popup::on_select(join(true))))
-                    .item(PopupMenuItem::new(backward_label).icon(backward_icon).disabled(!backward).on_click(popup::on_select(join(false))))
+                    .item(
+                        PopupMenuItem::new(forward_label)
+                            .icon(forward_icon)
+                            .disabled(!forward)
+                            .on_click(popup::on_select(join(true))),
+                    )
+                    .item(
+                        PopupMenuItem::new(backward_label)
+                            .icon(backward_icon)
+                            .disabled(!backward)
+                            .on_click(popup::on_select(join(false))),
+                    )
                     .separator()
-                    .item(PopupMenuItem::new("Swap areas").icon(swap_icon).on_click(popup::on_select(swap)))
+                    .item(
+                        PopupMenuItem::new("Swap areas")
+                            .icon(swap_icon)
+                            .on_click(popup::on_select(swap)),
+                    )
             }))
         })
     }
@@ -595,21 +696,39 @@ impl<E: Editor> ScreenView<E> {
                         })
                         .collect();
                     PopupMenu::build(window, cx, move |menu, _, _| {
-                        items.into_iter().fold(menu.min_w(px(176.0)), |menu, item| menu.item(item))
+                        items
+                            .into_iter()
+                            .fold(menu.min_w(px(176.0)), |menu, item| menu.item(item))
                     })
                 }
-                MenuKind::Area => PopupMenu::build(window, cx, move |menu, _, _| {
-                    menu.min_w(px(208.0))
-                        .item(PopupMenuItem::new("Vertical split").on_click(popup::on_select(act(|this, id, cx| this.split(id, Axis::X, cx)))))
-                        .item(PopupMenuItem::new("Horizontal split").on_click(popup::on_select(act(|this, id, cx| this.split(id, Axis::Y, cx)))))
-                        .separator()
-                        .item(
-                            PopupMenuItem::new(if maximized { "Restore area" } else { "Maximize area" })
+                MenuKind::Area => {
+                    PopupMenu::build(window, cx, move |menu, _, _| {
+                        menu.min_w(px(208.0))
+                            .item(
+                                PopupMenuItem::new("Vertical split").on_click(popup::on_select(
+                                    act(|this, id, cx| this.split(id, Axis::X, cx)),
+                                )),
+                            )
+                            .item(PopupMenuItem::new("Horizontal split").on_click(
+                                popup::on_select(act(|this, id, cx| this.split(id, Axis::Y, cx))),
+                            ))
+                            .separator()
+                            .item(
+                                PopupMenuItem::new(if maximized {
+                                    "Restore area"
+                                } else {
+                                    "Maximize area"
+                                })
                                 .on_click(popup::on_select(act(Self::toggle_maximized))),
-                        )
-                        .separator()
-                        .item(PopupMenuItem::new("Close area").disabled(!can_close).on_click(popup::on_select(act(Self::close))))
-                }),
+                            )
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Close area")
+                                    .disabled(!can_close)
+                                    .on_click(popup::on_select(act(Self::close))),
+                            )
+                    })
+                }
             })
         })
     }
@@ -650,14 +769,20 @@ impl<E: Editor> ScreenView<E> {
             let area = self.screen.area(split.area?)?;
             let r = area.rect;
             let rect = match split.axis {
-                Axis::X => crate::Rect { left: split.at, ..r },
+                Axis::X => crate::Rect {
+                    left: split.at,
+                    ..r
+                },
                 Axis::Y => crate::Rect { top: split.at, ..r },
             };
             return Some((rect, "Split"));
         }
         let corner = self.corner.as_ref()?;
         let outcome = corner.outcome?;
-        Some((gestures::highlight(&self.screen, corner.source, &outcome)?, outcome.label()))
+        Some((
+            gestures::highlight(&self.screen, corner.source, &outcome)?,
+            outcome.label(),
+        ))
     }
 
     fn gesture_cursor(&self) -> CursorStyle {
@@ -688,9 +813,11 @@ impl<E: Editor> ScreenView<E> {
                 .size_full()
                 .occlude()
                 .cursor(self.gesture_cursor())
-                .on_mouse_move(cx.safe_listener(|this, event: &MouseMoveEvent, window, cx| {
-                    this.gesture_move(event, window, cx);
-                }))
+                .on_mouse_move(
+                    cx.safe_listener(|this, event: &MouseMoveEvent, window, cx| {
+                        this.gesture_move(event, window, cx);
+                    }),
+                )
                 .on_mouse_up(
                     MouseButton::Left,
                     cx.safe_listener(|this, _: &MouseUpEvent, window, cx| {
@@ -779,144 +906,145 @@ impl<E: Editor> ScreenView<E> {
 }
 
 impl<E: Editor> Render for ScreenView<E> {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("screen", || {
-        let theme = cx.theme().clone();
-        let (background, border) = (theme.colors.background, theme.colors.border);
-        let view = cx.entity();
-        let maximized = self.maximized;
-        let rendered: Vec<AnyElement> = self
-            .screen
-            .areas()
-            .iter()
-            .filter(|area| maximized.is_none_or(|id| id == area.id))
-            .map(|area| {
-                let content = (self.render_area)(area.id, &area.editor, window, cx);
-                let header = self.render_header(area, content.toolbar, cx);
-                let r = area.rect;
-                let rect = if maximized.is_some() {
-                    crate::Rect::FULL
-                } else {
-                    r
-                };
-                let id = area.id;
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("screen", || {
+            let theme = cx.theme().clone();
+            let (background, border) = (theme.colors.background, theme.colors.border);
+            let view = cx.entity();
+            let maximized = self.maximized;
+            let rendered: Vec<AnyElement> = self
+                .screen
+                .areas()
+                .iter()
+                .filter(|area| maximized.is_none_or(|id| id == area.id))
+                .map(|area| {
+                    let content = (self.render_area)(area.id, &area.editor, window, cx);
+                    let header = self.render_header(area, content.toolbar, cx);
+                    let r = area.rect;
+                    let rect = if maximized.is_some() {
+                        crate::Rect::FULL
+                    } else {
+                        r
+                    };
+                    let id = area.id;
+                    div()
+                        .id(("area", id.0 as usize))
+                        .absolute()
+                        .left(relative(rect.left as f32))
+                        .top(relative(rect.top as f32))
+                        .w(relative(rect.width() as f32))
+                        .h(relative(rect.height() as f32))
+                        .on_hover(cx.safe_listener(move |this, hovered: &bool, _, _| {
+                            if *hovered {
+                                this.hovered = Some(id);
+                            } else if this.hovered == Some(id) {
+                                this.hovered = None;
+                            }
+                        }))
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .bg(background)
+                        .when(is_interior(rect.right), |d| {
+                            d.border_r_1().border_color(border)
+                        })
+                        .when(is_interior(rect.bottom), |d| {
+                            d.border_b_1().border_color(border)
+                        })
+                        .child(header)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .relative()
+                                .overflow_hidden()
+                                .children(content.body.map(|body| {
+                                    body.cached(StyleRefinement::default().size_full())
+                                })),
+                        )
+                        .children(self.corner_handles(id, cx))
+                        .into_any_element()
+                })
+                .collect();
+            let dividers = if maximized.is_some() {
+                Vec::new()
+            } else {
+                self.dividers(cx)
+            };
+            let highlight = self.highlight().map(|(rect, label)| {
                 div()
-                    .id(("area", id.0 as usize))
                     .absolute()
                     .left(relative(rect.left as f32))
                     .top(relative(rect.top as f32))
                     .w(relative(rect.width() as f32))
                     .h(relative(rect.height() as f32))
-                    .on_hover(cx.safe_listener(move |this, hovered: &bool, _, _| {
-                        if *hovered {
-                            this.hovered = Some(id);
-                        } else if this.hovered == Some(id) {
-                            this.hovered = None;
-                        }
-                    }))
                     .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .bg(background)
-                    .when(is_interior(rect.right), |d| {
-                        d.border_r_1().border_color(border)
-                    })
-                    .when(is_interior(rect.bottom), |d| {
-                        d.border_b_1().border_color(border)
-                    })
-                    .child(header)
+                    .items_center()
+                    .justify_center()
+                    .rounded(theme.radius.md)
+                    .border_2()
+                    .border_color(theme.colors.primary)
+                    .bg(theme.colors.primary.opacity(0.15))
                     .child(
                         div()
-                            .flex_1()
-                            .min_h_0()
-                            .relative()
-                            .overflow_hidden()
-                            .children(
-                                content
-                                    .body
-                                    .map(|body| body.cached(StyleRefinement::default().size_full())),
-                            ),
+                            .px_2()
+                            .py(px(2.0))
+                            .rounded(theme.radius.sm)
+                            .bg(theme.colors.background.opacity(0.8))
+                            .text_size(theme.text.xs)
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child(label),
                     )
-                    .children(self.corner_handles(id, cx))
-                    .into_any_element()
-            })
-            .collect();
-        let dividers = if maximized.is_some() {
-            Vec::new()
-        } else {
-            self.dividers(cx)
-        };
-        let highlight = self.highlight().map(|(rect, label)| {
+            });
+            let overlay = self.gesture_overlay(cx);
             div()
-                .absolute()
-                .left(relative(rect.left as f32))
-                .top(relative(rect.top as f32))
-                .w(relative(rect.width() as f32))
-                .h(relative(rect.height() as f32))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(theme.radius.md)
-                .border_2()
-                .border_color(theme.colors.primary)
-                .bg(theme.colors.primary.opacity(0.15))
+                .relative()
+                .size_full()
+                .bg(background)
+                .on_key_down(cx.safe_listener(|this, event: &KeyDownEvent, _, cx| {
+                    let m = event.keystroke.modifiers;
+                    if event.keystroke.key == "space"
+                        && m.control
+                        && !m.platform
+                        && !m.alt
+                        && let Some(hovered) = this.hovered
+                    {
+                        this.toggle_maximized(hovered, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .font_family(theme.font.clone())
+                .text_size(theme.text.sm)
+                .text_color(theme.colors.foreground)
                 .child(
-                    div()
-                        .px_2()
-                        .py(px(2.0))
-                        .rounded(theme.radius.sm)
-                        .bg(theme.colors.background.opacity(0.8))
-                        .text_size(theme.text.xs)
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(label),
+                    canvas(
+                        move |bounds, _, cx| {
+                            guard::guard("view measure", || {
+                                view.update(cx, |this, cx| {
+                                    if this.bounds != bounds {
+                                        this.bounds = bounds;
+                                        cx.notify();
+                                    }
+                                });
+                            });
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_full(),
                 )
-        });
-        let overlay = self.gesture_overlay(cx);
-        div()
-            .relative()
-            .size_full()
-            .bg(background)
-            .on_key_down(cx.safe_listener(|this, event: &KeyDownEvent, _, cx| {
-                let m = event.keystroke.modifiers;
-                if event.keystroke.key == "space"
-                    && m.control
-                    && !m.platform
-                    && !m.alt
-                    && let Some(hovered) = this.hovered
-                {
-                    this.toggle_maximized(hovered, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .font_family(theme.font.clone())
-            .text_size(theme.text.sm)
-            .text_color(theme.colors.foreground)
-            .child(
-                canvas(
-                    move |bounds, _, cx| { guard::guard("view measure", || {
-                        view.update(cx, |this, cx| {
-                            if this.bounds != bounds {
-                                this.bounds = bounds;
-                                cx.notify();
-                            }
-                        });
-                    }); },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .size_full(),
-            )
-            .children(rendered)
-            .children(dividers)
-            .children(highlight)
-            .children(overlay)
-            .on_drag_move::<EdgeDrag>(cx.safe_listener(
-                |this, event: &DragMoveEvent<EdgeDrag>, _, cx| {
-                    this.drag_edge(event.event.position, cx);
-                },
-            ))
-            .children(self.render_menu(window, cx))
-            .children(self.render_edge_menu(window, cx))
-    })
+                .children(rendered)
+                .children(dividers)
+                .children(highlight)
+                .children(overlay)
+                .on_drag_move::<EdgeDrag>(cx.safe_listener(
+                    |this, event: &DragMoveEvent<EdgeDrag>, _, cx| {
+                        this.drag_edge(event.event.position, cx);
+                    },
+                ))
+                .children(self.render_menu(window, cx))
+                .children(self.render_edge_menu(window, cx))
+        })
     }
 }
 
@@ -956,7 +1084,10 @@ mod ui_tests {
             ]);
             ScreenView::new(
                 screen,
-                |_, _, _, _| AreaContent { toolbar: None, body: None },
+                |_, _, _, _| AreaContent {
+                    toolbar: None,
+                    body: None,
+                },
                 cx,
             )
         });
@@ -965,7 +1096,12 @@ mod ui_tests {
         (view, cx)
     }
 
-    fn drag_corner(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>, modifiers: Modifiers) {
+    fn drag_corner(
+        cx: &mut VisualTestContext,
+        from: Point<Pixels>,
+        to: Point<Pixels>,
+        modifiers: Modifiers,
+    ) {
         cx.simulate_mouse_down(from, MouseButton::Left, modifiers);
         cx.simulate_mouse_move(to, MouseButton::Left, modifiers);
         cx.simulate_mouse_up(to, MouseButton::Left, modifiers);
@@ -975,39 +1111,73 @@ mod ui_tests {
     #[gpui::test]
     fn dragging_a_corner_into_a_neighbour_joins_it(cx: &mut TestAppContext) {
         let (view, cx) = open(cx);
-        drag_corner(cx, point(px(495.0), px(795.0)), point(px(560.0), px(300.0)), Modifiers::default());
+        drag_corner(
+            cx,
+            point(px(495.0), px(795.0)),
+            point(px(560.0), px(300.0)),
+            Modifiers::default(),
+        );
         assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 1);
     }
 
     #[gpui::test]
     fn dragging_a_corner_with_control_swaps_the_editors(cx: &mut TestAppContext) {
         let (view, cx) = open(cx);
-        let control = Modifiers { control: true, ..Modifiers::default() };
-        drag_corner(cx, point(px(495.0), px(795.0)), point(px(800.0), px(300.0)), control);
-        let editors: Vec<Panel> =
-            view.read_with(cx, |v, _| v.screen().areas().iter().map(|a| a.editor.clone()).collect());
+        let control = Modifiers {
+            control: true,
+            ..Modifiers::default()
+        };
+        drag_corner(
+            cx,
+            point(px(495.0), px(795.0)),
+            point(px(800.0), px(300.0)),
+            control,
+        );
+        let editors: Vec<Panel> = view.read_with(cx, |v, _| {
+            v.screen()
+                .areas()
+                .iter()
+                .map(|a| a.editor.clone())
+                .collect()
+        });
         assert_eq!(editors, [Panel::B, Panel::A]);
     }
 
     #[gpui::test]
     fn dragging_a_corner_into_its_own_area_splits_it(cx: &mut TestAppContext) {
         let (view, cx) = open(cx);
-        drag_corner(cx, point(px(5.0), px(5.0)), point(px(200.0), px(60.0)), Modifiers::default());
+        drag_corner(
+            cx,
+            point(px(5.0), px(5.0)),
+            point(px(200.0), px(60.0)),
+            Modifiers::default(),
+        );
         assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 3);
     }
 
     #[gpui::test]
     fn a_short_corner_drag_changes_nothing(cx: &mut TestAppContext) {
         let (view, cx) = open(cx);
-        drag_corner(cx, point(px(5.0), px(5.0)), point(px(10.0), px(10.0)), Modifiers::default());
+        drag_corner(
+            cx,
+            point(px(5.0), px(5.0)),
+            point(px(10.0), px(10.0)),
+            Modifiers::default(),
+        );
         assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 2);
         assert!(view.read_with(cx, |v, _| v.corner.is_none()));
     }
 
     #[gpui::test]
-    fn the_edge_menu_opens_on_a_right_click_over_an_edge_and_split_follows_the_pointer(cx: &mut TestAppContext) {
+    fn the_edge_menu_opens_on_a_right_click_over_an_edge_and_split_follows_the_pointer(
+        cx: &mut TestAppContext,
+    ) {
         let (view, cx) = open(cx);
-        cx.simulate_mouse_down(point(px(500.0), px(300.0)), MouseButton::Right, Modifiers::default());
+        cx.simulate_mouse_down(
+            point(px(500.0), px(300.0)),
+            MouseButton::Right,
+            Modifiers::default(),
+        );
         cx.run_until_parked();
         let (before, after, axis) = view.read_with(cx, |v, _| {
             let m = v.edge_menu.as_ref().expect("the edge menu opened");
@@ -1017,13 +1187,21 @@ mod ui_tests {
         // Splitting is started by the menu's item: follow, then click to put it down.
         view.update(cx, |v, cx| {
             v.edge_menu = None;
-            v.splitting = Some(Splitting { axis: Axis::X, area: None, at: 0.0 });
+            v.splitting = Some(Splitting {
+                axis: Axis::X,
+                area: None,
+                at: 0.0,
+            });
             v.update_split();
             cx.notify();
         });
         cx.run_until_parked();
         cx.simulate_mouse_move(point(px(750.0), px(300.0)), None, Modifiers::default());
-        cx.simulate_mouse_down(point(px(750.0), px(300.0)), MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_down(
+            point(px(750.0), px(300.0)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
         cx.run_until_parked();
         assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 3);
     }
@@ -1032,11 +1210,19 @@ mod ui_tests {
     fn right_click_cancels_a_split_in_progress(cx: &mut TestAppContext) {
         let (view, cx) = open(cx);
         view.update(cx, |v, cx| {
-            v.splitting = Some(Splitting { axis: Axis::Y, area: None, at: 0.0 });
+            v.splitting = Some(Splitting {
+                axis: Axis::Y,
+                area: None,
+                at: 0.0,
+            });
             cx.notify();
         });
         cx.run_until_parked();
-        cx.simulate_mouse_down(point(px(750.0), px(300.0)), MouseButton::Right, Modifiers::default());
+        cx.simulate_mouse_down(
+            point(px(750.0), px(300.0)),
+            MouseButton::Right,
+            Modifiers::default(),
+        );
         cx.run_until_parked();
         assert!(view.read_with(cx, |v, _| v.splitting.is_none()));
         assert_eq!(view.read_with(cx, |v, _| v.screen().areas().len()), 2);

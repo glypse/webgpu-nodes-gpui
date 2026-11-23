@@ -547,7 +547,12 @@ pub fn evaluate_converted(stops: &[RampColorStop], x: f64, modes: RampModes) -> 
         .rev()
         .find(|(_, stop)| stop.position <= x)
         .map_or(0, |(k, _)| k);
-    let at = |k: isize| stops.get(k.clamp(0, count as isize - 1) as usize).copied().unwrap_or(*only);
+    let at = |k: isize| {
+        stops
+            .get(k.clamp(0, count as isize - 1) as usize)
+            .copied()
+            .unwrap_or(*only)
+    };
     let i_signed = i as isize;
     let around = [
         at(i_signed - 1),

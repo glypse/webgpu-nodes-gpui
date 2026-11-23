@@ -47,7 +47,10 @@ pub struct ColorWidgetMode {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum GroupWidget {
     /// A color picker: `mode` is the input choosing among `modes`.
-    Color { mode: String, modes: BTreeMap<String, ColorWidgetMode> },
+    Color {
+        mode: String,
+        modes: BTreeMap<String, ColorWidgetMode>,
+    },
 }
 
 /// Which side of a group's interface: its inputs, or its outputs.
@@ -261,7 +264,9 @@ fn serialize_user_definitions<S: serde::Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     serializer.collect_map(
-        definitions.iter().filter(|(key, _)| key.as_str() == ROOT_ID || !crate::library::is_library_ref(key)),
+        definitions
+            .iter()
+            .filter(|(key, _)| key.as_str() == ROOT_ID || !crate::library::is_library_ref(key)),
     )
 }
 
@@ -328,7 +333,13 @@ impl Default for GraphProject {
 
 impl GraphProject {
     pub fn from_definitions(definitions: BTreeMap<String, GraphDocument>) -> Self {
-        let mut project = Self { definitions, assets: Vec::new(), extra: BTreeMap::new(), index: HashMap::new(), fallbacks: FallbackCache::default() };
+        let mut project = Self {
+            definitions,
+            assets: Vec::new(),
+            extra: BTreeMap::new(),
+            index: HashMap::new(),
+            fallbacks: FallbackCache::default(),
+        };
         project.reindex();
         project
     }
@@ -336,7 +347,11 @@ impl GraphProject {
     /// Rebuild the node lookup; call after nodes were added or removed
     /// through the public fields.
     pub fn reindex(&mut self) {
-        self.fallbacks.0.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        self.fallbacks
+            .0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         self.index = self
             .definitions
             .iter()
@@ -345,18 +360,29 @@ impl GraphProject {
     }
 
     pub(crate) fn cached_fallbacks(&self, reference: &str) -> Option<Arc<BTreeSet<String>>> {
-        self.fallbacks.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(reference).cloned()
+        self.fallbacks
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(reference)
+            .cloned()
     }
 
     pub(crate) fn remember_fallbacks(&self, reference: &str, handles: Arc<BTreeSet<String>>) {
-        self.fallbacks.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(reference.to_owned(), handles);
+        self.fallbacks
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(reference.to_owned(), handles);
     }
 
     /// A project without a root is reported by `project_issues`; reading one
     /// gives an empty root rather than panicking.
     pub fn root(&self) -> &GraphDocument {
         static EMPTY: OnceLock<GraphDocument> = OnceLock::new();
-        self.definitions.get(ROOT_ID).unwrap_or_else(|| EMPTY.get_or_init(GraphDocument::default))
+        self.definitions
+            .get(ROOT_ID)
+            .unwrap_or_else(|| EMPTY.get_or_init(GraphDocument::default))
     }
 
     pub fn root_mut(&mut self) -> &mut GraphDocument {

@@ -42,7 +42,14 @@ fn number(n: f64) -> String {
 /// A file's frames, with its size in pixels.
 pub(super) fn image_node() -> NodeDescriptor {
     let mut d = NodeDescriptor::new(IMAGE, "Image", NodeCategory::Texture)
-        .aliases(&["Image Texture", "Picture", "Photo", "Bitmap", "Movie File In", "Texture Sample"])
+        .aliases(&[
+            "Image Texture",
+            "Picture",
+            "Photo",
+            "Bitmap",
+            "Movie File In",
+            "Texture Sample",
+        ])
         .static_outputs()
         .outputs(vec![
             NodeOutputDef::new(MEDIA_TEXTURE, "texture", WgslType::Texture),
@@ -50,7 +57,10 @@ pub(super) fn image_node() -> NodeDescriptor {
         ])
         .wgsl(|ctx| {
             let texture = ctx.texture(MEDIA_TEXTURE);
-            vec![format!("let {} = vec2f(textureDimensions({texture}));", ctx.output_var("size"))]
+            vec![format!(
+                "let {} = vec2f(textureDimensions({texture}));",
+                ctx.output_var("size")
+            )]
         });
     d.widget = Some(NodeWidget::Asset(AssetKind::Image));
     d
@@ -76,11 +86,21 @@ pub(super) fn video_node() -> NodeDescriptor {
         .defaults(NodeData::default())
         .wgsl(|ctx| {
             let asset = ctx.asset();
-            let duration = asset.as_ref().and_then(|a| a.video()).map_or(0.0, |v| v.duration);
+            let duration = asset
+                .as_ref()
+                .and_then(|a| a.video())
+                .map_or(0.0, |v| v.duration);
             let texture = ctx.texture(MEDIA_TEXTURE);
             vec![
-                format!("let {} = vec2f(textureDimensions({texture}));", ctx.output_var("size")),
-                format!("let {} = {};", ctx.output_var(VIDEO_DURATION), number(duration)),
+                format!(
+                    "let {} = vec2f(textureDimensions({texture}));",
+                    ctx.output_var("size")
+                ),
+                format!(
+                    "let {} = {};",
+                    ctx.output_var(VIDEO_DURATION),
+                    number(duration)
+                ),
                 format!(
                     "let {} = {};",
                     ctx.output_var(VIDEO_INTERVAL),

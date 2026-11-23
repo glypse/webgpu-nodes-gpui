@@ -77,7 +77,13 @@ pub enum InputControl {
 
 impl InputControl {
     pub fn number() -> Self {
-        InputControl::Number { min: None, max: None, soft_min: None, soft_max: None, compiled: false }
+        InputControl::Number {
+            min: None,
+            max: None,
+            soft_min: None,
+            soft_max: None,
+            compiled: false,
+        }
     }
 
     /// Whether values edited by it are passed to the shader as uniforms, so
@@ -161,7 +167,10 @@ pub fn input_family_key(input: &NodeInputDef, inputs: &[NodeInputDef]) -> String
 
 /// The control editing an input of resolved type `ty`.
 pub fn input_control(input: &NodeInputDef, ty: WgslType) -> InputControl {
-    let color = matches!(input.control, Some(InputControl::Color | InputControl::Wheel));
+    let color = matches!(
+        input.control,
+        Some(InputControl::Color | InputControl::Wheel)
+    );
     if color && !matches!(ty, WgslType::Vec3f | WgslType::Vec4f) {
         return InputControl::number();
     }
@@ -185,7 +194,11 @@ pub struct NodeOutputDef {
 
 impl NodeOutputDef {
     pub fn new(id: impl Into<String>, label: impl Into<String>, ty: WgslType) -> Self {
-        Self { id: id.into(), label: label.into(), ty }
+        Self {
+            id: id.into(),
+            label: label.into(),
+            ty,
+        }
     }
 }
 
@@ -204,7 +217,11 @@ impl NodeSetting {
         label: &'static str,
         options: &[(&'static str, &'static str)],
     ) -> Self {
-        Self { key, label, options: options.to_vec() }
+        Self {
+            key,
+            label,
+            options: options.to_vec(),
+        }
     }
 
     /// The selected option's value: the stored one, or the first option.
@@ -374,7 +391,10 @@ impl WgslCtx<'_> {
     }
 
     pub fn output_var(&self, id: &str) -> String {
-        self.output_vars.get(id).cloned().unwrap_or_else(|| self.var_name.clone())
+        self.output_vars
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| self.var_name.clone())
     }
 
     /// The expressions linked into an input, or none.

@@ -6,15 +6,20 @@ use crate::properties::MAX_SECONDS;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use export::{Codec, Container, Depth, DnxhrProfile, Export, ExportError, ProResProfile, Scene, Settings};
-use gpui::{ClickEvent, Context, EventEmitter, FontWeight, IntoElement, ParentElement as _, Render, Styled as _, div};
+use export::{
+    Codec, Container, Depth, DnxhrProfile, Export, ExportError, ProResProfile, Scene, Settings,
+};
+use gpui::{
+    ClickEvent, Context, EventEmitter, FontWeight, IntoElement, ParentElement as _, Render,
+    Styled as _, div,
+};
 use gpui_component::Sizable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::progress::Progress as ProgressBar;
-use theme::ActiveTheme as _;
 use guard::SafeListener as _;
 use serde_json::{Value, json};
 use shader_graph::graph::{GraphProject, MAX_FPS};
+use theme::ActiveTheme as _;
 
 /// The key of the output settings in the project's JSON, beside the layout and settings.
 const KEY: &str = "export";
@@ -101,7 +106,11 @@ impl OutputSettings {
         let codec = named(CODECS, object.get("codec"))
             .filter(|codec| codec.supports_container(container))
             .unwrap_or(Codec::DEFAULT);
-        let alpha = object.get("alpha").and_then(Value::as_bool).unwrap_or(false) && codec.supports_alpha();
+        let alpha = object
+            .get("alpha")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && codec.supports_alpha();
         let seconds = |key: &str, default: f64| {
             object
                 .get(key)
@@ -138,11 +147,17 @@ impl OutputSettings {
 
 fn named<T: Copy>(table: &[(&str, T)], key: Option<&Value>) -> Option<T> {
     let key = key?.as_str()?;
-    table.iter().find(|(name, _)| *name == key).map(|(_, value)| *value)
+    table
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, value)| *value)
 }
 
 fn name_of<T: Copy + PartialEq>(table: &[(&'static str, T)], value: T) -> &'static str {
-    table.iter().find(|(_, v)| *v == value).map_or("", |(name, _)| name)
+    table
+        .iter()
+        .find(|(_, v)| *v == value)
+        .map_or("", |(name, _)| name)
 }
 
 /// What a project saved under the output key, to read back with `from_stored`.
@@ -152,7 +167,9 @@ pub fn stored(project: &GraphProject) -> Option<Value> {
 
 /// The output settings a project saved, or the defaults at `fps` when there are none.
 pub fn from_stored(stored: Option<&Value>, fps: f64) -> OutputSettings {
-    stored.and_then(|value| OutputSettings::from_json(value, fps)).unwrap_or_else(|| OutputSettings::new(fps))
+    stored
+        .and_then(|value| OutputSettings::from_json(value, fps))
+        .unwrap_or_else(|| OutputSettings::new(fps))
 }
 
 pub fn store(project: &mut GraphProject, output: &OutputSettings) {
@@ -216,15 +233,23 @@ impl ExportJob {
         cx: &mut Context<Self>,
     ) -> Result<(), ExportError> {
         let export = Export::start(scene, settings, path)?;
-        self.running = Some(Running { progress: export.progress(), export: Some(export) });
+        self.running = Some(Running {
+            progress: export.progress(),
+            export: Some(export),
+        });
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
-                let Some(Ok(finished)) = guard::guard("export poll", || this.update(cx, |job, cx| job.poll(cx))) else {
+                let Some(Ok(finished)) =
+                    guard::guard("export poll", || this.update(cx, |job, cx| job.poll(cx)))
+                else {
                     return;
                 };
                 let Some(export) = finished else { continue };
-                let result = cx.background_executor().spawn(async move { export.wait() }).await;
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { export.wait() })
+                    .await;
                 guard::guard("export finished", || {
                     this.update(cx, |job, cx| {
                         job.running = None;
@@ -260,10 +285,16 @@ impl ExportJob {
 impl Render for ExportJob {
     fn render(&mut self, _: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         guard::render("export progress", || {
-            let Some(running) = &self.running else { return div().into_any_element() };
+            let Some(running) = &self.running else {
+                return div().into_any_element();
+            };
             let muted = cx.theme().colors.muted_foreground;
             let progress = running.progress;
-            let fraction = if progress.total == 0 { 0.0 } else { progress.done as f32 / progress.total as f32 };
+            let fraction = if progress.total == 0 {
+                0.0
+            } else {
+                progress.done as f32 / progress.total as f32
+            };
             div()
                 .flex()
                 .flex_col()
@@ -287,7 +318,9 @@ impl Render for ExportJob {
                                 .label("Cancel")
                                 .ghost()
                                 .small()
-                                .on_click(cx.safe_listener(|this, _: &ClickEvent, _, cx| this.cancel(cx))),
+                                .on_click(
+                                    cx.safe_listener(|this, _: &ClickEvent, _, cx| this.cancel(cx)),
+                                ),
                         ),
                 )
                 .into_any_element()
@@ -309,33 +342,52 @@ mod tests {
             duration: 2.25,
             fps: 24.0,
         };
-        assert_eq!(OutputSettings::from_json(&output.to_json(), 60.0), Some(output));
+        assert_eq!(
+            OutputSettings::from_json(&output.to_json(), 60.0),
+            Some(output)
+        );
         let prores = OutputSettings {
             container: Container::Mov,
             codec: Codec::ProRes(ProResProfile::P4444Xq),
             alpha: true,
             ..output
         };
-        assert_eq!(OutputSettings::from_json(&prores.to_json(), 60.0), Some(prores));
+        assert_eq!(
+            OutputSettings::from_json(&prores.to_json(), 60.0),
+            Some(prores)
+        );
     }
 
     #[test]
     fn a_project_stores_and_loads_its_output() {
         let mut project = GraphProject::default();
-        assert_eq!(from_stored(stored(&project).as_ref(), 25.0), OutputSettings::new(25.0), "no output means the defaults");
-        let output = OutputSettings { start: 3.0, ..OutputSettings::new(25.0) };
+        assert_eq!(
+            from_stored(stored(&project).as_ref(), 25.0),
+            OutputSettings::new(25.0),
+            "no output means the defaults"
+        );
+        let output = OutputSettings {
+            start: 3.0,
+            ..OutputSettings::new(25.0)
+        };
         store(&mut project, &output);
         assert_eq!(from_stored(stored(&project).as_ref(), 60.0), output);
         let json = project.to_json();
         let reloaded = GraphProject::from_json(&json).expect("loads");
-        assert_eq!(from_stored(stored(&reloaded).as_ref(), 60.0), output, "the output survives a save");
+        assert_eq!(
+            from_stored(stored(&reloaded).as_ref(), 60.0),
+            output,
+            "the output survives a save"
+        );
     }
 
     #[test]
     fn unusable_values_fall_back_to_defaults() {
         let read = |value: Value| OutputSettings::from_json(&value, 30.0).expect("an object");
         assert_eq!(read(json!({})), OutputSettings::new(30.0));
-        let odd = read(json!({ "container": "avi", "codec": "h264", "start": -2, "duration": "long", "fps": 10000 }));
+        let odd = read(
+            json!({ "container": "avi", "codec": "h264", "start": -2, "duration": "long", "fps": 10000 }),
+        );
         assert_eq!(odd, OutputSettings::new(30.0));
         // QuickTime Animation has no Matroska form, so the default codec takes its place.
         let wrong = read(json!({ "container": "mkv", "codec": "qtrle" }));
@@ -352,6 +404,7 @@ mod tests {
     }
 
     fn read_alpha(codec: &str) -> OutputSettings {
-        OutputSettings::from_json(&json!({ "codec": codec, "alpha": true }), 30.0).expect("an object")
+        OutputSettings::from_json(&json!({ "codec": codec, "alpha": true }), 30.0)
+            .expect("an object")
     }
 }

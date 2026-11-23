@@ -1,8 +1,8 @@
 use gpui::{
-    AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Div, Empty, Entity, EventEmitter,
-    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TextAlign, Window,
-    div, prelude::FluentBuilder as _, px,
+    AppContext as _, ClickEvent, Context, CursorStyle, Div, DragMoveEvent, Empty, Entity,
+    EventEmitter, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, TextAlign, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::input::{Escape, Input, InputEvent, InputState, MaskPattern};
 use guard::SafeListener as _;
@@ -182,14 +182,17 @@ impl NumberField {
                         fraction: None,
                     })
                 });
-                self._input_subscription =
-                    Some(cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
+                self._input_subscription = Some(cx.subscribe_in(
+                    &input,
+                    window,
+                    |this, _, event: &InputEvent, _, cx| {
                         guard::guard("NumberField input", || {
                             if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                                 this.commit(cx);
                             }
                         });
-                    }));
+                    },
+                ));
                 self.input = Some(input.clone());
                 input
             }
@@ -355,7 +358,9 @@ mod tests {
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            guard::render("number field host", || div().w(px(200.0)).child(self.0.clone()))
+            guard::render("number field host", || {
+                div().w(px(200.0)).child(self.0.clone())
+            })
         }
     }
 
@@ -417,17 +422,24 @@ mod tests {
         let height_at = |cx: &mut VisualTestContext, zoom: f32| {
             cx.update(|_, cx| field.update(cx, |f, cx| f.set_zoom(zoom, cx)));
             cx.run_until_parked();
-            cx.debug_bounds("number-field").expect("the field is drawn").size.height
+            cx.debug_bounds("number-field")
+                .expect("the field is drawn")
+                .size
+                .height
         };
         let (small, large) = (height_at(cx, 0.5), height_at(cx, 2.0));
         assert_eq!((small, large), (px(16.0), px(64.0)));
         cx.update(|window, cx| field.update(cx, |f, cx| f.start_editing(window, cx)));
         cx.run_until_parked();
-        let entry = cx.debug_bounds("number-field-entry").expect("the entry is drawn");
+        let entry = cx
+            .debug_bounds("number-field-entry")
+            .expect("the entry is drawn");
         assert_eq!(entry.size.height, px(64.0));
         cx.update(|_, cx| field.update(cx, |f, cx| f.set_zoom(0.5, cx)));
         cx.run_until_parked();
-        let entry = cx.debug_bounds("number-field-entry").expect("the entry is drawn");
+        let entry = cx
+            .debug_bounds("number-field-entry")
+            .expect("the entry is drawn");
         assert_eq!(entry.size.height, px(16.0));
     }
 

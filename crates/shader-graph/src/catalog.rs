@@ -16,13 +16,19 @@ use crate::zones::{NEW_ITEM_HANDLE, ZoneKind, paired_output_id};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EntryKind {
-    Node { node_type: String },
+    Node {
+        node_type: String,
+    },
     /// An instance of an existing group definition.
-    Group { definition_ref: String },
+    Group {
+        definition_ref: String,
+    },
     Zone(ZoneKind),
     /// A link from a reroute of the document whose links are hidden, or a
     /// reroute it feeds.
-    Link { source: String },
+    Link {
+        source: String,
+    },
 }
 
 /// One of an entry's choices: `label` names it after the entry's own.
@@ -102,7 +108,9 @@ pub fn with_options(entry: &AddMenuEntry, options: &[EntryOption]) -> AddMenuEnt
     label.extend(&labels);
     let data = options
         .iter()
-        .fold(entry.data.clone().unwrap_or_default(), |data, o| merge_data(&data, &o.data));
+        .fold(entry.data.clone().unwrap_or_default(), |data, o| {
+            merge_data(&data, &o.data)
+        });
     AddMenuEntry {
         key: key.join("~"),
         label: label.join(" "),
@@ -116,7 +124,10 @@ pub fn with_options(entry: &AddMenuEntry, options: &[EntryOption]) -> AddMenuEnt
 /// choices share one.
 fn choice_options(choices: Vec<(String, Vec<EntryOption>)>) -> Vec<Vec<EntryOption>> {
     let useful: Vec<_> = choices.into_iter().filter(|(_, o)| o.len() > 1).collect();
-    let labels: Vec<&str> = useful.iter().flat_map(|(_, o)| o.iter().map(|o| o.label.as_str())).collect();
+    let labels: Vec<&str> = useful
+        .iter()
+        .flat_map(|(_, o)| o.iter().map(|o| o.label.as_str()))
+        .collect();
     let ambiguous: HashSet<String> = labels
         .iter()
         .enumerate()
@@ -130,7 +141,10 @@ fn choice_options(choices: Vec<(String, Vec<EntryOption>)>) -> Vec<Vec<EntryOpti
                 .into_iter()
                 .map(|o| {
                     if ambiguous.contains(&o.label) {
-                        EntryOption { label: format!("{name} {}", o.label), ..o }
+                        EntryOption {
+                            label: format!("{name} {}", o.label),
+                            ..o
+                        }
                     } else {
                         o
                     }
@@ -161,7 +175,11 @@ fn node_choices(descriptor: &NodeDescriptor) -> Vec<Vec<EntryOption>> {
                 .map(|t| {
                     let mut data = NodeData::default();
                     data.types.insert(pickable.key.clone(), *t);
-                    EntryOption { label: t.id().to_owned(), data, is_default: Some(*t) == default }
+                    EntryOption {
+                        label: t.id().to_owned(),
+                        data,
+                        is_default: Some(*t) == default,
+                    }
                 })
                 .collect(),
         ));
@@ -195,7 +213,11 @@ fn group_choices(definition: &crate::graph::GraphDocument) -> Vec<Vec<EntryOptio
                 .map(|t| {
                     let mut data = NodeData::default();
                     data.types.insert(variable.id.clone(), *t);
-                    EntryOption { label: t.id().to_owned(), data, is_default: false }
+                    EntryOption {
+                        label: t.id().to_owned(),
+                        data,
+                        is_default: false,
+                    }
                 })
                 .collect(),
         ));
@@ -211,8 +233,13 @@ fn group_choices(definition: &crate::graph::GraphDocument) -> Vec<Vec<EntryOptio
                 .iter()
                 .map(|v: &EnumVariant| {
                     let mut data = NodeData::default();
-                    data.values.insert(input.id.clone(), InputValue::from(v.value));
-                    EntryOption { label: v.label.clone(), data, is_default: Some(v.value) == default }
+                    data.values
+                        .insert(input.id.clone(), InputValue::from(v.value));
+                    EntryOption {
+                        label: v.label.clone(),
+                        data,
+                        is_default: Some(v.value) == default,
+                    }
                 })
                 .collect(),
         ));
@@ -252,13 +279,26 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
     entries.push(zone(
         "zone:simulation",
         "Simulation Zone",
-        &["Feedback", "Previous Frame", "Persistent", "State", "Ping Pong"],
+        &[
+            "Feedback",
+            "Previous Frame",
+            "Persistent",
+            "State",
+            "Ping Pong",
+        ],
         ZoneKind::Simulation,
     ));
     entries.push(zone(
         "zone:passes",
         "Repeat Passes",
-        &["Loop", "Iterate", "Multipass", "Feedback Loop", "Ping Pong", "For Loop"],
+        &[
+            "Loop",
+            "Iterate",
+            "Multipass",
+            "Feedback Loop",
+            "Ping Pong",
+            "For Loop",
+        ],
         ZoneKind::Passes,
     ));
     for descriptor in registered_nodes() {
@@ -272,14 +312,21 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
             heading: category_label(descriptor.category).to_owned(),
             section: Vec::new(),
             search_section: None,
-            kind: EntryKind::Node { node_type: descriptor.type_id.clone() },
+            kind: EntryKind::Node {
+                node_type: descriptor.type_id.clone(),
+            },
             data: None,
             choices: node_choices(descriptor),
             disabled: false,
             deletable: false,
         });
     }
-    for node in model.active_document().nodes.iter().filter(|n| n.is(REROUTE) && n.data.hide_links == Some(true)) {
+    for node in model
+        .active_document()
+        .nodes
+        .iter()
+        .filter(|n| n.is(REROUTE) && n.data.hide_links == Some(true))
+    {
         entries.push(AddMenuEntry {
             key: format!("link:{}", node.id),
             label: model.node_label(&node.id),
@@ -287,7 +334,9 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
             heading: category_label(NodeCategory::Layout).to_owned(),
             section: vec![NAMED_REROUTES.to_owned()],
             search_section: None,
-            kind: EntryKind::Link { source: node.id.clone() },
+            kind: EntryKind::Link {
+                source: node.id.clone(),
+            },
             data: None,
             choices: Vec::new(),
             disabled: false,
@@ -296,8 +345,18 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
     }
     if model.active_definition_ref() != ROOT_ID {
         for (ty, label, category, aliases) in [
-            (GROUP_INPUT, "Group Input", NodeCategory::Input, ["Parameters", "Arguments"]),
-            (GROUP_OUTPUT, "Group Output", NodeCategory::Misc, ["Result", "Return"]),
+            (
+                GROUP_INPUT,
+                "Group Input",
+                NodeCategory::Input,
+                ["Parameters", "Arguments"],
+            ),
+            (
+                GROUP_OUTPUT,
+                "Group Output",
+                NodeCategory::Misc,
+                ["Result", "Return"],
+            ),
         ] {
             entries.push(AddMenuEntry {
                 key: format!("node:{ty}"),
@@ -306,7 +365,9 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
                 heading: category_label(category).to_owned(),
                 section: Vec::new(),
                 search_section: None,
-                kind: EntryKind::Node { node_type: ty.to_owned() },
+                kind: EntryKind::Node {
+                    node_type: ty.to_owned(),
+                },
                 data: None,
                 choices: Vec::new(),
                 disabled: false,
@@ -323,9 +384,15 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
             heading: heading_of(&entry.category),
             section: entry.section.clone(),
             search_section: entry.search_section.clone(),
-            kind: EntryKind::Group { definition_ref: reference.clone() },
+            kind: EntryKind::Group {
+                definition_ref: reference.clone(),
+            },
             data: None,
-            choices: model.project().document(reference).map(group_choices).unwrap_or_default(),
+            choices: model
+                .project()
+                .document(reference)
+                .map(group_choices)
+                .unwrap_or_default(),
             disabled: model.would_create_group_cycle(reference),
             deletable: false,
         });
@@ -347,7 +414,9 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
             heading: GROUPS_HEADING.to_owned(),
             section: Vec::new(),
             search_section: None,
-            kind: EntryKind::Group { definition_ref: reference.clone() },
+            kind: EntryKind::Group {
+                definition_ref: reference.clone(),
+            },
             data: None,
             choices: group_choices(doc),
             disabled: model.would_create_group_cycle(reference),
@@ -358,7 +427,11 @@ pub fn add_menu_entries_with(model: &GraphModel, developer_tools: bool) -> Vec<A
         NodeCategory::ALL
             .iter()
             .position(|c| category_label(*c) == heading)
-            .unwrap_or(if heading == GROUPS_HEADING { NodeCategory::ALL.len() } else { usize::MAX })
+            .unwrap_or(if heading == GROUPS_HEADING {
+                NodeCategory::ALL.len()
+            } else {
+                usize::MAX
+            })
     };
     entries.sort_by_key(|e| rank(&e.heading));
     entries
@@ -394,11 +467,18 @@ fn sections_of<'a>(entries: &[&'a AddMenuEntry], depth: usize) -> Vec<MenuSectio
     names
         .into_iter()
         .map(|name| {
-            let inside: Vec<&AddMenuEntry> =
-                entries.iter().copied().filter(|e| e.section.get(depth).map(String::as_str) == Some(name)).collect();
+            let inside: Vec<&AddMenuEntry> = entries
+                .iter()
+                .copied()
+                .filter(|e| e.section.get(depth).map(String::as_str) == Some(name))
+                .collect();
             MenuSection {
                 name: name.to_owned(),
-                entries: inside.iter().copied().filter(|e| e.section.len() == depth + 1).collect(),
+                entries: inside
+                    .iter()
+                    .copied()
+                    .filter(|e| e.section.len() == depth + 1)
+                    .collect(),
                 sections: sections_of(&inside, depth + 1),
             }
         })
@@ -412,7 +492,11 @@ pub fn group_by_heading_and_section(
     group_by_heading(entries)
         .into_iter()
         .map(|(heading, under)| {
-            let loose = under.iter().copied().filter(|e| e.section.is_empty()).collect();
+            let loose = under
+                .iter()
+                .copied()
+                .filter(|e| e.section.is_empty())
+                .collect();
             let sections = sections_of(&under, 0);
             (heading, loose, sections)
         })
@@ -486,13 +570,18 @@ fn fresh_node(entry: &AddMenuEntry) -> Option<GraphNode> {
 
 /// The handle of a freshly created `entry` a link dragged from `pending`
 /// would connect to; handles of the dragged value's scalar kind first.
-pub fn entry_handle_for(model: &GraphModel, entry: &AddMenuEntry, pending: &Pending) -> Option<String> {
+pub fn entry_handle_for(
+    model: &GraphModel,
+    entry: &AddMenuEntry,
+    pending: &Pending,
+) -> Option<String> {
     if matches!(entry.kind, EntryKind::Zone(_)) {
         return Some(NEW_ITEM_HANDLE.to_owned());
     }
     if let EntryKind::Link { source } = &entry.kind {
         let link = crate::graph::Connection::new(source, "out", &pending.node, &pending.handle);
-        return (!pending.from_output && model.is_valid_connection(&link)).then(|| "out".to_owned());
+        return (!pending.from_output && model.is_valid_connection(&link))
+            .then(|| "out".to_owned());
     }
     let node = fresh_node(entry)?;
     let descriptor = resolve_descriptor(&node, model.project());
@@ -540,7 +629,11 @@ pub fn entry_handle_for(model: &GraphModel, entry: &AddMenuEntry, pending: &Pend
 }
 
 /// The entries a link dragged from `pending` can be dropped into.
-pub fn connectable_entries(model: &GraphModel, entries: &[AddMenuEntry], pending: &Pending) -> Vec<AddMenuEntry> {
+pub fn connectable_entries(
+    model: &GraphModel,
+    entries: &[AddMenuEntry],
+    pending: &Pending,
+) -> Vec<AddMenuEntry> {
     entries
         .iter()
         .filter(|e| entry_handle_for(model, e, pending).is_some())
@@ -559,7 +652,12 @@ pub fn add_entry_connected(
     // A named reroute is linked to straight away, wherever it is.
     if let EntryKind::Link { source } = &entry.kind {
         let handle = handle?;
-        model.connect(crate::graph::Connection::new(source, handle, &pending.node, &pending.handle));
+        model.connect(crate::graph::Connection::new(
+            source,
+            handle,
+            &pending.node,
+            &pending.handle,
+        ));
         return Some(source.clone());
     }
     // Feeding an input: the new node's outputs sit at the drop point.
@@ -572,7 +670,9 @@ pub fn add_entry_connected(
         180.0
     };
     let created = add_entry(model, entry, Point::new(position.x - offset, position.y))?;
-    let Some(handle) = handle else { return Some(created) };
+    let Some(handle) = handle else {
+        return Some(created);
+    };
     let node = if matches!(entry.kind, EntryKind::Zone(_)) && upstream {
         model
             .active_document()
@@ -609,9 +709,14 @@ pub struct SearchResult {
 /// Search results in their search sections: the main results first, then
 /// each section's in the order they first appear, keeping the results' order
 /// within each.
-pub fn group_by_search_section(results: &[SearchResult]) -> Vec<(Option<String>, Vec<&SearchResult>)> {
+pub fn group_by_search_section(
+    results: &[SearchResult],
+) -> Vec<(Option<String>, Vec<&SearchResult>)> {
     let mut sections: Vec<Option<String>> = vec![None];
-    for section in results.iter().filter_map(|r| r.entry.search_section.as_ref()) {
+    for section in results
+        .iter()
+        .filter_map(|r| r.entry.search_section.as_ref())
+    {
         if !sections.contains(&Some(section.clone())) {
             sections.push(Some(section.clone()));
         }
@@ -619,8 +724,10 @@ pub fn group_by_search_section(results: &[SearchResult]) -> Vec<(Option<String>,
     sections
         .into_iter()
         .filter_map(|section| {
-            let inside: Vec<&SearchResult> =
-                results.iter().filter(|r| r.entry.search_section == section).collect();
+            let inside: Vec<&SearchResult> = results
+                .iter()
+                .filter(|r| r.entry.search_section == section)
+                .collect();
             (!inside.is_empty()).then_some((section, inside))
         })
         .collect()
@@ -718,7 +825,14 @@ fn match_text(query: &[String], name: &str, heading: &str) -> Option<(u8, Vec<(u
             if let Some((kind, r)) = match_word(q, word)
                 && best.as_ref().is_none_or(|b| kind < b.0)
             {
-                best = Some((kind, i, r.into_iter().map(|(a, b)| (a + offset, b + offset)).collect(), false));
+                best = Some((
+                    kind,
+                    i,
+                    r.into_iter()
+                        .map(|(a, b)| (a + offset, b + offset))
+                        .collect(),
+                    false,
+                ));
             }
         }
         if best.is_none() {
@@ -773,7 +887,9 @@ pub fn search_entries(
     }
     let named = |label: &str| {
         let l = label.to_lowercase();
-        words.iter().any(|w| (w.len() >= 2 || l == *w) && l.contains(w.as_str()))
+        words
+            .iter()
+            .any(|w| (w.len() >= 2 || l == *w) && l.contains(w.as_str()))
     };
     struct Hit {
         key: String,
@@ -805,17 +921,30 @@ pub fn search_entries(
         for picked in combos {
             let created = with_options(entry, &picked);
             let key = std::iter::once(entry.key.clone())
-                .chain(picked.iter().filter(|o| !o.is_default).map(|o| o.label.clone()))
+                .chain(
+                    picked
+                        .iter()
+                        .filter(|o| !o.is_default)
+                        .map(|o| o.label.clone()),
+                )
                 .collect::<Vec<_>>()
                 .join("~");
             if !picked.is_empty() && !accepts(&created) {
                 continue;
             }
-            let option_text = picked.iter().map(|o| o.label.as_str()).collect::<Vec<_>>().join(" ");
+            let option_text = picked
+                .iter()
+                .map(|o| o.label.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
             let names = std::iter::once((entry.label.as_str(), None))
                 .chain(entry.aliases.iter().map(|a| (a.as_str(), Some(a.as_str()))));
             for (name, alias) in names {
-                let text = if option_text.is_empty() { name.to_owned() } else { format!("{name} {option_text}") };
+                let text = if option_text.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{name} {option_text}")
+                };
                 let Some((mut tier, ranges)) = match_text(&words, &text, &entry.heading) else {
                     continue;
                 };
@@ -832,10 +961,17 @@ pub fn search_entries(
                 // A label shifts nothing; an alias keeps its own ranges.
                 // Ranges past the name fall in the option text, which isn't displayed with it.
                 let clip = |len: usize| -> Vec<(usize, usize)> {
-                    ranges.iter().filter(|r| r.0 < len).map(|r| (r.0, r.1.min(len))).collect()
+                    ranges
+                        .iter()
+                        .filter(|r| r.0 < len)
+                        .map(|r| (r.0, r.1.min(len)))
+                        .collect()
                 };
-                let (label_ranges, alias_ranges) =
-                    if alias.is_some() { (Vec::new(), clip(name.len())) } else { (clip(created.label.len()), Vec::new()) };
+                let (label_ranges, alias_ranges) = if alias.is_some() {
+                    (Vec::new(), clip(name.len()))
+                } else {
+                    (clip(created.label.len()), Vec::new())
+                };
                 hits.push(Hit {
                     key: key.clone(),
                     tier,
@@ -879,7 +1015,10 @@ mod tests {
     }
 
     fn found(query: &str) -> Vec<String> {
-        search_entries(&entries(), query, &|_| true).into_iter().map(|r| r.entry.label).collect()
+        search_entries(&entries(), query, &|_| true)
+            .into_iter()
+            .map(|r| r.entry.label)
+            .collect()
     }
 
     #[test]
@@ -911,14 +1050,27 @@ mod tests {
 
     #[test]
     fn highlights_stay_inside_the_displayed_text() {
-        for query in ["value vec2i", "declare vec3f", "math f32", "mix vec4f", "a b c d"] {
+        for query in [
+            "value vec2i",
+            "declare vec3f",
+            "math f32",
+            "mix vec4f",
+            "a b c d",
+        ] {
             for hit in search_entries(&entries(), query, &|_| true) {
                 for &(start, end) in &hit.label_ranges {
-                    assert!(hit.entry.label.get(start..end).is_some(), "{query}: {start}..{end} in {:?}", hit.entry.label);
+                    assert!(
+                        hit.entry.label.get(start..end).is_some(),
+                        "{query}: {start}..{end} in {:?}",
+                        hit.entry.label
+                    );
                 }
                 if let Some(alias) = &hit.alias {
                     for &(start, end) in &hit.alias_ranges {
-                        assert!(alias.get(start..end).is_some(), "{query}: {start}..{end} in {alias:?}");
+                        assert!(
+                            alias.get(start..end).is_some(),
+                            "{query}: {start}..{end} in {alias:?}"
+                        );
                     }
                 }
             }
@@ -941,9 +1093,20 @@ mod tests {
     #[test]
     fn dropped_links_only_offer_nodes_that_can_take_them() {
         let model = GraphModel::default();
-        let output = model.root().nodes.iter().find(|n| n.is(FRAG_OUTPUT)).unwrap().id.clone();
+        let output = model
+            .root()
+            .nodes
+            .iter()
+            .find(|n| n.is(FRAG_OUTPUT))
+            .unwrap()
+            .id
+            .clone();
         let input = model.resolve_node_inputs(&output)[0].id.clone();
-        let pending = Pending { node: output, handle: input, from_output: false };
+        let pending = Pending {
+            node: output,
+            handle: input,
+            from_output: false,
+        };
         let offered = connectable_entries(&model, &entries(), &pending);
         assert!(!offered.is_empty() && offered.len() < entries().len());
     }
@@ -952,16 +1115,28 @@ mod tests {
     fn developer_tool_nodes_are_listed_only_with_developer_tools() {
         let model = GraphModel::default();
         let keys = |dev: bool| -> Vec<String> {
-            add_menu_entries_with(&model, dev).into_iter().map(|e| e.key).collect()
+            add_menu_entries_with(&model, dev)
+                .into_iter()
+                .map(|e| e.key)
+                .collect()
         };
         let dev_keys = ["node:test-invalid-wgsl", "node:test-runtime-error"];
         let off = keys(false);
         let on = keys(true);
         for key in dev_keys {
             assert!(!off.iter().any(|k| k == key), "{key} is hidden by default");
-            assert!(on.iter().any(|k| k == key), "{key} is listed with developer tools");
+            assert!(
+                on.iter().any(|k| k == key),
+                "{key} is listed with developer tools"
+            );
         }
         assert!(off.iter().any(|k| k == "node:add"));
-        assert_eq!(keys(false), add_menu_entries(&model).into_iter().map(|e| e.key).collect::<Vec<_>>());
+        assert_eq!(
+            keys(false),
+            add_menu_entries(&model)
+                .into_iter()
+                .map(|e| e.key)
+                .collect::<Vec<_>>()
+        );
     }
 }

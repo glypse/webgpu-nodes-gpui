@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use gpui::{
     Bounds, Div, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels,
-    RenderOnce, Styled, StyleRefinement, WeakEntity, canvas, div, px, relative,
+    RenderOnce, StyleRefinement, Styled, WeakEntity, canvas, div, px, relative,
 };
 
 use crate::edge_path::Position;
@@ -102,7 +102,8 @@ impl NodeProps {
             ..HandleState::default()
         };
         if let Some(c) = &self.connection {
-            let from = c.from_node == self.id && c.from_type == kind && c.from_handle.as_ref() == handle;
+            let from =
+                c.from_node == self.id && c.from_type == kind && c.from_handle.as_ref() == handle;
             let to = c.to_node.as_ref() == Some(&self.id)
                 && c.to_handle.as_ref() == handle
                 && c.from_type != kind;
@@ -115,7 +116,12 @@ impl NodeProps {
 
     /// A connection point. Positioned at the node's border
     /// for `position`, in the nearest positioned ancestor.
-    pub fn handle(&self, id: impl Into<Option<Id>>, kind: HandleType, position: Position) -> Handle {
+    pub fn handle(
+        &self,
+        id: impl Into<Option<Id>>,
+        kind: HandleType,
+        position: Position,
+    ) -> Handle {
         let id = id.into();
         Handle {
             base: div(),
@@ -208,106 +214,122 @@ impl ParentElement for Handle {
 }
 
 impl RenderOnce for Handle {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement { guard::render("flow handle", || {
-        let z = self.zoom;
-        let size = px(self.size * z);
-        let half = px(-self.size * z / 2.0);
-        let mut base = self.base.size(size);
-        if !self.free {
-            base = base.absolute();
-            base = match self.position {
-                Position::Left => base.left(half).top(relative(0.5)).mt(half),
-                Position::Right => base.right(half).top(relative(0.5)).mt(half),
-                Position::Top => base.top(half).left(relative(0.5)).ml(half),
-                Position::Bottom => base.bottom(half).left(relative(0.5)).ml(half),
-            };
-        }
-        if !self.custom_look {
-            let theme = self.theme;
-            let color = if self.state.connecting_to {
-                if self.state.valid { theme.handle_valid } else { theme.handle_invalid }
-            } else {
-                theme.handle
-            };
-            base = base
-                .rounded_full()
-                .bg(color)
-                .border(px(z.max(0.5)))
-                .border_color(theme.handle_border);
-        }
-
-        let key = (self.id.clone(), self.kind);
-        let node = self.node.clone();
-        let position = self.position;
-        let (connectable, start, end) = (self.connectable, self.connectable_start, self.connectable_end);
-        let measure = self.measure.clone();
-        let flow = self.flow.clone();
-        let (measure_key, measure_node) = (key.clone(), node.clone());
-        let measurer = canvas(
-            move |bounds, _, cx| { guard::guard("node measure", || {
-                let mut m = measure.borrow_mut();
-                let Measure { nodes, generation } = &mut *m;
-                let Some(entry) = nodes.get_mut(&measure_node) else {
-                    return;
+    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+        guard::render("flow handle", || {
+            let z = self.zoom;
+            let size = px(self.size * z);
+            let half = px(-self.size * z / 2.0);
+            let mut base = self.base.size(size);
+            if !self.free {
+                base = base.absolute();
+                base = match self.position {
+                    Position::Left => base.left(half).top(relative(0.5)).mt(half),
+                    Position::Right => base.right(half).top(relative(0.5)).mt(half),
+                    Position::Top => base.top(half).left(relative(0.5)).ml(half),
+                    Position::Bottom => base.bottom(half).left(relative(0.5)).ml(half),
                 };
-                let moved = entry.previous.get(&measure_key).is_none_or(|p| {
-                    let rel = |b: &Bounds<Pixels>, n: &Bounds<Pixels>| {
-                        (
-                            f32::from(b.origin.x - n.origin.x),
-                            f32::from(b.origin.y - n.origin.y),
-                            f32::from(b.size.width),
-                            f32::from(b.size.height),
-                        )
-                    };
-                    let (a, b) = (rel(&p.bounds, &entry.bounds), rel(&bounds, &entry.bounds));
-                    (a.0 - b.0).abs() > 0.5
-                        || (a.1 - b.1).abs() > 0.5
-                        || (a.2 - b.2).abs() > 0.5
-                        || (a.3 - b.3).abs() > 0.5
-                        || p.position != position
-                        || p.connectable != connectable
-                        || p.connectable_start != start
-                        || p.connectable_end != end
-                });
-                entry.handles.insert(
-                    measure_key.clone(),
-                    HandleMeasure {
-                        bounds,
-                        position,
-                        connectable,
-                        connectable_start: start,
-                        connectable_end: end,
-                    },
-                );
-                if moved {
-                    *generation += 1;
-                }
-                drop(m);
-                if moved {
-                    flow.update(cx, |_, cx| cx.notify()).ok();
-                }
-            }); },
-            |_, _, _, _| {},
-        )
-        .absolute()
-        .size_full();
-
-        let down_flow = self.flow.clone();
-        let kind = self.kind;
-        let id = self.id.clone();
-        let can_start = connectable && start;
-        base.on_mouse_down(MouseButton::Left, move |event, window, cx| { guard::guard("flow handle", || {
-            cx.stop_propagation();
-            if !can_start {
-                return;
             }
-            let (node, id) = (node.clone(), id.clone());
-            let event = event.clone();
-            down_flow
-                .update(cx, |flow, cx| flow.start_connection(node, id, kind, &event, window, cx))
-                .ok();
-        }); })
-        .child(measurer)
-    })
+            if !self.custom_look {
+                let theme = self.theme;
+                let color = if self.state.connecting_to {
+                    if self.state.valid {
+                        theme.handle_valid
+                    } else {
+                        theme.handle_invalid
+                    }
+                } else {
+                    theme.handle
+                };
+                base = base
+                    .rounded_full()
+                    .bg(color)
+                    .border(px(z.max(0.5)))
+                    .border_color(theme.handle_border);
+            }
+
+            let key = (self.id.clone(), self.kind);
+            let node = self.node.clone();
+            let position = self.position;
+            let (connectable, start, end) = (
+                self.connectable,
+                self.connectable_start,
+                self.connectable_end,
+            );
+            let measure = self.measure.clone();
+            let flow = self.flow.clone();
+            let (measure_key, measure_node) = (key.clone(), node.clone());
+            let measurer = canvas(
+                move |bounds, _, cx| {
+                    guard::guard("node measure", || {
+                        let mut m = measure.borrow_mut();
+                        let Measure { nodes, generation } = &mut *m;
+                        let Some(entry) = nodes.get_mut(&measure_node) else {
+                            return;
+                        };
+                        let moved = entry.previous.get(&measure_key).is_none_or(|p| {
+                            let rel = |b: &Bounds<Pixels>, n: &Bounds<Pixels>| {
+                                (
+                                    f32::from(b.origin.x - n.origin.x),
+                                    f32::from(b.origin.y - n.origin.y),
+                                    f32::from(b.size.width),
+                                    f32::from(b.size.height),
+                                )
+                            };
+                            let (a, b) =
+                                (rel(&p.bounds, &entry.bounds), rel(&bounds, &entry.bounds));
+                            (a.0 - b.0).abs() > 0.5
+                                || (a.1 - b.1).abs() > 0.5
+                                || (a.2 - b.2).abs() > 0.5
+                                || (a.3 - b.3).abs() > 0.5
+                                || p.position != position
+                                || p.connectable != connectable
+                                || p.connectable_start != start
+                                || p.connectable_end != end
+                        });
+                        entry.handles.insert(
+                            measure_key.clone(),
+                            HandleMeasure {
+                                bounds,
+                                position,
+                                connectable,
+                                connectable_start: start,
+                                connectable_end: end,
+                            },
+                        );
+                        if moved {
+                            *generation += 1;
+                        }
+                        drop(m);
+                        if moved {
+                            flow.update(cx, |_, cx| cx.notify()).ok();
+                        }
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full();
+
+            let down_flow = self.flow.clone();
+            let kind = self.kind;
+            let id = self.id.clone();
+            let can_start = connectable && start;
+            base.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                guard::guard("flow handle", || {
+                    cx.stop_propagation();
+                    if !can_start {
+                        return;
+                    }
+                    let (node, id) = (node.clone(), id.clone());
+                    let event = event.clone();
+                    down_flow
+                        .update(cx, |flow, cx| {
+                            flow.start_connection(node, id, kind, &event, window, cx)
+                        })
+                        .ok();
+                });
+            })
+            .child(measurer)
+        })
     }
 }

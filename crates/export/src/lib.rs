@@ -57,7 +57,14 @@ pub enum ProResProfile {
 }
 
 impl ProResProfile {
-    pub const ALL: [Self; 6] = [Self::Proxy, Self::Lt, Self::Standard, Self::Hq, Self::P4444, Self::P4444Xq];
+    pub const ALL: [Self; 6] = [
+        Self::Proxy,
+        Self::Lt,
+        Self::Standard,
+        Self::Hq,
+        Self::P4444,
+        Self::P4444Xq,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -308,7 +315,11 @@ impl Export {
 fn validate(settings: &Settings) -> Result<(), ExportError> {
     let invalid = |why: &str| Err(ExportError::Invalid(why.to_owned()));
     if !settings.codec.supports_container(settings.container) {
-        return invalid(&format!("{} can't be written to {}", settings.codec.label(), settings.container.label()));
+        return invalid(&format!(
+            "{} can't be written to {}",
+            settings.codec.label(),
+            settings.container.label()
+        ));
     }
     if settings.alpha && !settings.codec.supports_alpha() {
         return invalid(&format!("{} has no alpha channel", settings.codec.label()));
@@ -331,7 +342,10 @@ fn validate(settings: &Settings) -> Result<(), ExportError> {
 
 /// Encoders subsample chroma by two, so frames need even sides.
 pub fn video_size(size: Size) -> Size {
-    Size::new(size.width.saturating_sub(size.width % 2).max(2), size.height.saturating_sub(size.height % 2).max(2))
+    Size::new(
+        size.width.saturating_sub(size.width % 2).max(2),
+        size.height.saturating_sub(size.height % 2).max(2),
+    )
 }
 
 /// The number of frames exported: at least one.
@@ -362,7 +376,11 @@ mod tests {
     #[test]
     fn frames_are_counted_on_the_fps_grid() {
         assert_eq!(frame_count(&settings(0.0, 2.0, 30.0)), 60);
-        assert_eq!(frame_count(&settings(0.0, 1.0 / 60.0, 30.0)), 1, "at least one frame");
+        assert_eq!(
+            frame_count(&settings(0.0, 1.0 / 60.0, 30.0)),
+            1,
+            "at least one frame"
+        );
         assert_eq!(frame_count(&settings(0.0, 1.0, 29.97)), 30);
     }
 
@@ -392,10 +410,34 @@ mod tests {
     #[test]
     fn alpha_is_refused_where_the_codec_has_none() {
         let prores_422 = settings(0.0, 1.0, 30.0);
-        assert!(validate(&Settings { alpha: true, ..prores_422 }).is_err());
-        let prores_4444 = Settings { codec: Codec::ProRes(ProResProfile::P4444), ..prores_422 };
-        assert!(validate(&Settings { alpha: true, ..prores_4444 }).is_ok());
-        let dnxhr = Settings { codec: Codec::Dnxhr(DnxhrProfile::Hq), ..prores_422 };
-        assert!(validate(&Settings { alpha: true, ..dnxhr }).is_err());
+        assert!(
+            validate(&Settings {
+                alpha: true,
+                ..prores_422
+            })
+            .is_err()
+        );
+        let prores_4444 = Settings {
+            codec: Codec::ProRes(ProResProfile::P4444),
+            ..prores_422
+        };
+        assert!(
+            validate(&Settings {
+                alpha: true,
+                ..prores_4444
+            })
+            .is_ok()
+        );
+        let dnxhr = Settings {
+            codec: Codec::Dnxhr(DnxhrProfile::Hq),
+            ..prores_422
+        };
+        assert!(
+            validate(&Settings {
+                alpha: true,
+                ..dnxhr
+            })
+            .is_err()
+        );
     }
 }

@@ -134,13 +134,41 @@ pub struct TypeSet {
 }
 
 pub const TYPE_SETS: &[TypeSet] = &[
-    TypeSet { id: "float", label: "Float", types: FLOAT_TYPES },
-    TypeSet { id: "int", label: "Integer", types: INT_TYPES },
-    TypeSet { id: "uint", label: "Unsigned", types: UINT_TYPES },
-    TypeSet { id: "bool", label: "Boolean", types: BOOL_TYPES },
-    TypeSet { id: "signed", label: "Signed number", types: SIGNED_TYPES },
-    TypeSet { id: "number", label: "Any number", types: NUMERIC_TYPES },
-    TypeSet { id: "any", label: "Any", types: &WgslType::ALL },
+    TypeSet {
+        id: "float",
+        label: "Float",
+        types: FLOAT_TYPES,
+    },
+    TypeSet {
+        id: "int",
+        label: "Integer",
+        types: INT_TYPES,
+    },
+    TypeSet {
+        id: "uint",
+        label: "Unsigned",
+        types: UINT_TYPES,
+    },
+    TypeSet {
+        id: "bool",
+        label: "Boolean",
+        types: BOOL_TYPES,
+    },
+    TypeSet {
+        id: "signed",
+        label: "Signed number",
+        types: SIGNED_TYPES,
+    },
+    TypeSet {
+        id: "number",
+        label: "Any number",
+        types: NUMERIC_TYPES,
+    },
+    TypeSet {
+        id: "any",
+        label: "Any",
+        types: &WgslType::ALL,
+    },
 ];
 
 /// The named set `types` make up, in whatever order.
@@ -230,7 +258,11 @@ pub fn convert_var(expr: &str, source: WgslType, target: WgslType) -> String {
         } else {
             format!("{}({expr})", to_kind.name())
         };
-        return if to_n == 1 { scalar } else { format!("{target_name}({scalar})") };
+        return if to_n == 1 {
+            scalar
+        } else {
+            format!("{target_name}({scalar})")
+        };
     }
 
     if from_n > to_n {
@@ -265,8 +297,16 @@ pub fn fit_type(wanted: WgslType, allowed: &[WgslType]) -> WgslType {
         return wanted;
     }
     let fallback = allowed[0].kind();
-    let kind = if allowed.iter().any(|t| t.kind() == wanted.kind()) { wanted.kind() } else { fallback };
-    let mut same_kind: Vec<_> = allowed.iter().copied().filter(|t| t.kind() == kind).collect();
+    let kind = if allowed.iter().any(|t| t.kind() == wanted.kind()) {
+        wanted.kind()
+    } else {
+        fallback
+    };
+    let mut same_kind: Vec<_> = allowed
+        .iter()
+        .copied()
+        .filter(|t| t.kind() == kind)
+        .collect();
     same_kind.sort_by_key(|t| t.components());
     same_kind
         .iter()
@@ -288,12 +328,24 @@ pub fn highest_type(candidates: &[WgslType], allowed: &[WgslType]) -> WgslType {
     if allowed.contains(&Texture) && candidates.iter().all(|t| t.is_texture()) {
         return Texture;
     }
-    let values: Vec<WgslType> = allowed.iter().copied().filter(|t| !t.is_texture()).collect();
+    let values: Vec<WgslType> = allowed
+        .iter()
+        .copied()
+        .filter(|t| !t.is_texture())
+        .collect();
     if values.is_empty() && !allowed.is_empty() {
         return fallback;
     }
-    let joined = candidates.iter().map(|t| t.value_type()).reduce(join_types).unwrap_or(fallback);
-    if values.is_empty() { joined } else { fit_type(joined, &values) }
+    let joined = candidates
+        .iter()
+        .map(|t| t.value_type())
+        .reduce(join_types)
+        .unwrap_or(fallback);
+    if values.is_empty() {
+        joined
+    } else {
+        fit_type(joined, &values)
+    }
 }
 
 #[cfg(test)]
@@ -324,7 +376,10 @@ mod tests {
     fn type_ids_round_trip() {
         for t in WgslType::ALL {
             assert_eq!(WgslType::from_id(t.id()), Some(t));
-            assert_eq!(serde_json::to_string(&t).unwrap(), format!("\"{}\"", t.id()));
+            assert_eq!(
+                serde_json::to_string(&t).unwrap(),
+                format!("\"{}\"", t.id())
+            );
         }
     }
 }

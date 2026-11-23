@@ -31,9 +31,9 @@ use clap::Parser as _;
 use gpui::{AsyncApp, WindowHandle};
 use preferences::ToggleDeveloperTools;
 use shell::{
-    ExportFrame, ExportVideo, ImportGroups, ImportMedia, MenuActualSizePreview, MenuFitPreview, MenuZoomPreviewIn,
-    MenuZoomPreviewOut, NewProject, OpenPreferences, OpenProject, OpenProjectSettings, SaveProject,
-    SaveProjectAs, Shell, Start, ToggleMode, TogglePlayback,
+    ExportFrame, ExportVideo, ImportGroups, ImportMedia, MenuActualSizePreview, MenuFitPreview,
+    MenuZoomPreviewIn, MenuZoomPreviewOut, NewProject, OpenPreferences, OpenProject,
+    OpenProjectSettings, SaveProject, SaveProjectAs, Shell, Start, ToggleMode, TogglePlayback,
 };
 use windows::{CloseWindow, NewOutputWindow, ToggleFullscreen, ToggleOutputStretch};
 
@@ -51,13 +51,18 @@ impl Global for MenuState {}
 /// they are set, so this runs again whenever either changes.
 pub(crate) fn refresh_menus(cx: &mut App) {
     let developer_tools = preferences::developer_tools_on(cx);
-    let playing = cx.try_global::<MenuState>().is_some_and(|state| state.playing);
+    let playing = cx
+        .try_global::<MenuState>()
+        .is_some_and(|state| state.playing);
     cx.set_menus(menus(developer_tools, playing));
 }
 
 /// Records whether playback runs, for the Play and Pause item.
 pub(crate) fn set_playing(cx: &mut App, playing: bool) {
-    if cx.try_global::<MenuState>().is_some_and(|state| state.playing == playing) {
+    if cx
+        .try_global::<MenuState>()
+        .is_some_and(|state| state.playing == playing)
+    {
         return;
     }
     cx.set_global(MenuState { playing });
@@ -115,7 +120,10 @@ fn menus(developer_tools: bool, playing: bool) -> Vec<Menu> {
                 MenuItem::action("Layout graph", editor::LayoutGraph),
                 MenuItem::action("Layout document", editor::LayoutDocument),
                 MenuItem::separator(),
-                MenuItem::action("Remove all unused group references", editor::PruneUnusedGroups),
+                MenuItem::action(
+                    "Remove all unused group references",
+                    editor::PruneUnusedGroups,
+                ),
                 MenuItem::separator(),
                 MenuItem::action("Enter node group", editor::EnterNodeGroup),
                 MenuItem::action("Exit node group", editor::ExitNodeGroup),
@@ -169,66 +177,77 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let launch = cli.clone();
-    gpui_platform::application().with_assets(theme::Assets).run(move |cx| {
-        theme::init(cx);
-        preferences::init(cx);
-        shell::init(cx);
-        windows::init(cx);
-        editor::init(cx);
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        // Global listeners run while the focused window is updated, so quitting waits until it is done.
-        cx.on_action(|_: &Quit, cx| cx.defer(shell::request_quit));
-        refresh_menus(cx);
-        let window_size = launch.window.map_or(windows::DEFAULT_SIZE, |size| (size.width, size.height));
-        let opened = windows::open_project(Start::Launch(launch.project.clone()), launch.zoom, None, Some(window_size), cx);
-        match opened {
-            Ok(handle) => {
-                if launch.play
-                    && let Err(error) = handle.update(cx, |root, window, cx| {
-                        guard::guard("start playback", || {
-                            if let Ok(shell) = root.view().clone().downcast::<Shell>() {
-                                shell.update(cx, |shell, cx| shell.play(window, cx));
-                            }
-                        });
-                    })
-                {
-                    log::error!("failed to start playback: {error:#}");
+    gpui_platform::application()
+        .with_assets(theme::Assets)
+        .run(move |cx| {
+            theme::init(cx);
+            preferences::init(cx);
+            shell::init(cx);
+            windows::init(cx);
+            editor::init(cx);
+            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+            // Global listeners run while the focused window is updated, so quitting waits until it is done.
+            cx.on_action(|_: &Quit, cx| cx.defer(shell::request_quit));
+            refresh_menus(cx);
+            let window_size = launch
+                .window
+                .map_or(windows::DEFAULT_SIZE, |size| (size.width, size.height));
+            let opened = windows::open_project(
+                Start::Launch(launch.project.clone()),
+                launch.zoom,
+                None,
+                Some(window_size),
+                cx,
+            );
+            match opened {
+                Ok(handle) => {
+                    if launch.play
+                        && let Err(error) = handle.update(cx, |root, window, cx| {
+                            guard::guard("start playback", || {
+                                if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                                    shell.update(cx, |shell, cx| shell.play(window, cx));
+                                }
+                            });
+                        })
+                    {
+                        log::error!("failed to start playback: {error:#}");
+                    }
+                    if launch.output
+                        && let Err(error) = handle.update(cx, |root, window, cx| {
+                            guard::guard("open the output window", || {
+                                if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                                    let owner = window.window_handle();
+                                    shell.update(cx, |shell, cx| shell.new_output(owner, cx));
+                                }
+                            });
+                        })
+                    {
+                        log::error!("failed to open the output window: {error:#}");
+                    }
+                    if launch.bounded() || launch.screenshot.is_some() {
+                        let launch = launch.clone();
+                        cx.spawn(async move |cx| wind_down(launch, handle, cx).await)
+                            .detach();
+                    }
                 }
-                if launch.output
-                    && let Err(error) = handle.update(cx, |root, window, cx| {
-                        guard::guard("open the output window", || {
-                            if let Ok(shell) = root.view().clone().downcast::<Shell>() {
-                                let owner = window.window_handle();
-                                shell.update(cx, |shell, cx| shell.new_output(owner, cx));
-                            }
-                        });
-                    })
-                {
-                    log::error!("failed to open the output window: {error:#}");
-                }
-                if launch.bounded() || launch.screenshot.is_some() {
-                    let launch = launch.clone();
-                    cx.spawn(async move |cx| wind_down(launch, handle, cx).await).detach();
+                Err(e) => {
+                    log::error!("failed to open the window: {e:#}");
+                    cx.quit();
                 }
             }
-            Err(e) => {
-                log::error!("failed to open the window: {e:#}");
-                cx.quit();
-            }
-        }
-        cx.on_app_quit(|_| {
-            probe::finish();
-            std::future::ready(())
-        })
-        .detach();
-        cx.on_window_closed(|cx, _| {
-            if windows::project_windows(cx).is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
-        cx.activate(true);
-    });
+            cx.on_app_quit(|_| {
+                probe::finish();
+                std::future::ready(())
+            })
+            .detach();
+            cx.on_window_closed(|cx, _| {
+                if windows::project_windows(cx).is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+            cx.activate(true);
+        });
     if SCREENSHOT_FAILED.load(Ordering::Relaxed) {
         ExitCode::FAILURE
     } else {
@@ -238,19 +257,28 @@ fn main() -> ExitCode {
 
 /// Quits once the `--seconds` or `--frames` bound is reached, after taking the
 /// `--screenshot` if asked for.
-async fn wind_down(launch: cli::Cli, handle: WindowHandle<gpui_component::Root>, cx: &mut AsyncApp) {
+async fn wind_down(
+    launch: cli::Cli,
+    handle: WindowHandle<gpui_component::Root>,
+    cx: &mut AsyncApp,
+) {
     if launch.bounded() {
         let started = Instant::now();
         let mut frames = probe::frames();
         let mut last_change = Instant::now();
         loop {
-            cx.background_executor().timer(Duration::from_millis(10)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(10))
+                .await;
             let now = probe::frames();
             if now != frames {
                 frames = now;
                 last_change = Instant::now();
             }
-            if launch.seconds.is_some_and(|s| started.elapsed().as_secs_f64() >= s) {
+            if launch
+                .seconds
+                .is_some_and(|s| started.elapsed().as_secs_f64() >= s)
+            {
                 break;
             }
             if launch.frames.is_some_and(|n| frames >= n) {
@@ -265,10 +293,15 @@ async fn wind_down(launch: cli::Cli, handle: WindowHandle<gpui_component::Root>,
     if let Some(path) = &launch.screenshot {
         // Draw a few frames more, so the window shows the state the run ended in.
         for _ in 0..3 {
-            if cx.update_window(handle.into(), |_, window, _| window.refresh()).is_err() {
+            if cx
+                .update_window(handle.into(), |_, window, _| window.refresh())
+                .is_err()
+            {
                 break;
             }
-            cx.background_executor().timer(Duration::from_millis(100)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
         }
         if let Err(error) = probe::save_window(path, launch.output.then_some("Output")) {
             log::error!("screenshot failed: {error:#}");
@@ -297,7 +330,10 @@ mod tests {
     }
 
     fn menu<'a>(menus: &'a [Menu], name: &str) -> &'a Menu {
-        menus.iter().find(|m| m.name.as_ref() == name).expect("the menu exists")
+        menus
+            .iter()
+            .find(|m| m.name.as_ref() == name)
+            .expect("the menu exists")
     }
 
     #[test]

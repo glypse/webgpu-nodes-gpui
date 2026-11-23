@@ -82,7 +82,13 @@ pub fn bubble(rects: &[Rect], points: &[Xy], padding: f32, corner: f32) -> Vec<X
 pub fn boundary_points(input: Rect, output: Rect, padding: f32) -> Vec<Xy> {
     let in_center = input.x + input.width / 2.0;
     let out_center = output.x + output.width / 2.0;
-    let inward = if out_center > in_center { 1.0 } else if out_center < in_center { -1.0 } else { 1.0 };
+    let inward = if out_center > in_center {
+        1.0
+    } else if out_center < in_center {
+        -1.0
+    } else {
+        1.0
+    };
     let segment = |r: Rect, x: f32| [Xy::new(x, r.y), Xy::new(x, r.bottom())];
     let mut points = Vec::new();
     points.extend(segment(input, in_center + inward * padding));
@@ -105,7 +111,12 @@ pub fn paddings(zones: &[&Zone]) -> Vec<(String, f32)> {
     }
     zones
         .iter()
-        .map(|z| (z.id.clone(), ZONE_PADDING + ZONE_NESTING_STEP * *height.get(z.id.as_str()).unwrap_or(&0) as f32))
+        .map(|z| {
+            (
+                z.id.clone(),
+                ZONE_PADDING + ZONE_NESTING_STEP * *height.get(z.id.as_str()).unwrap_or(&0) as f32,
+            )
+        })
         .collect()
 }
 
@@ -132,7 +143,9 @@ pub fn layer(flow: WeakEntity<Flow>, bubbles: Vec<Bubble>) -> Layer {
             let Some(flow) = flow.upgrade() else { return };
             let flow = flow.read(cx);
             for b in &bubbles {
-                let (Some(input), Some(output)) = (flow.node_rect(&b.input), flow.node_rect(&b.output)) else {
+                let (Some(input), Some(output)) =
+                    (flow.node_rect(&b.input), flow.node_rect(&b.output))
+                else {
                     continue;
                 };
                 let rects: Vec<Rect> = b.members.iter().filter_map(|m| flow.node_rect(m)).collect();
@@ -178,7 +191,10 @@ mod tests {
     fn bubble_encloses_its_rects_with_padding() {
         let outline = bubble(&[Rect::new(0.0, 0.0, 100.0, 50.0)], &[], 28.0, 6.0);
         let min_x = outline.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
-        let max_y = outline.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+        let max_y = outline
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max);
         assert!((min_x + 28.0).abs() < 0.5);
         assert!((max_y - 78.0).abs() < 0.5);
     }
@@ -203,7 +219,12 @@ mod tests {
             depth: 0,
             members: Default::default(),
         };
-        let inner = Zone { id: "n".into(), parent: Some("o".into()), depth: 1, ..outer.clone() };
+        let inner = Zone {
+            id: "n".into(),
+            parent: Some("o".into()),
+            depth: 1,
+            ..outer.clone()
+        };
         let padded = paddings(&[&outer, &inner]);
         let pad = |id: &str| padded.iter().find(|(i, _)| i == id).unwrap().1;
         assert!(pad("o") > pad("n"));

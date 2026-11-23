@@ -2,16 +2,16 @@
 //! the times asked for, loop and hold as their playback says, and import
 //! records its metadata.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use ffmpeg_next as ffmpeg;
 use ffmpeg::codec::Id;
 use ffmpeg::format::Pixel;
 use ffmpeg::software::scaling::{Context as Scaler, Flags};
 use ffmpeg::util::rational::Rational;
+use ffmpeg_next as ffmpeg;
 use runtime::{MediaLibrary, MediaSource, MediaStatus, SystemVideoProbe};
 use shader_graph::assets::{
     Asset, AssetKind, ImportFile, VideoEnd, VideoPlayback, asset_hash, describe_asset,
@@ -24,7 +24,12 @@ const FPS: f64 = 4.0;
 const FPS_RATIONAL: i32 = 4;
 /// The colours of the generated video, two frames each: its frame k is `COLOURS[k / 2]`, shown at k / FPS.
 /// BGRA, as the encoder takes them.
-const COLOURS: [[u8; 4]; 4] = [[0, 0, 255, 255], [0, 255, 0, 255], [255, 0, 0, 255], [255, 255, 255, 255]];
+const COLOURS: [[u8; 4]; 4] = [
+    [0, 0, 255, 255],
+    [0, 255, 0, 255],
+    [255, 0, 0, 255],
+    [255, 255, 255, 255],
+];
 const FRAMES: usize = 8;
 const TOLERANCE: i32 = 12;
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -41,7 +46,11 @@ fn generated_png_mov() -> Vec<u8> {
 
 fn encoded_video(codec: Id, pixel: Pixel, extension: &str) -> Vec<u8> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let name = format!("runtime-video-test-{}-{}.{extension}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+    let name = format!(
+        "runtime-video-test-{}-{}.{extension}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
     let path = std::env::temp_dir().join(name);
     write_video(&path, codec, pixel);
     let bytes = std::fs::read(&path).expect("reads the written video");
@@ -54,9 +63,15 @@ fn write_video(path: &std::path::Path, id: Id, pixel: Pixel) {
     let mut output = ffmpeg::format::output(&path).expect("opens the output");
     let codec = ffmpeg::encoder::find(id).expect("FFmpeg has the encoder");
     let encoder_time_base = Rational::new(1, FPS_RATIONAL);
-    let global_header = output.format().flags().contains(ffmpeg::format::Flags::GLOBAL_HEADER);
+    let global_header = output
+        .format()
+        .flags()
+        .contains(ffmpeg::format::Flags::GLOBAL_HEADER);
     let mut stream = output.add_stream(codec).expect("adds a stream");
-    let mut encoder = ffmpeg::codec::context::Context::new_with_codec(codec).encoder().video().expect("a video encoder");
+    let mut encoder = ffmpeg::codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .video()
+        .expect("a video encoder");
     encoder.set_width(WIDTH);
     encoder.set_height(HEIGHT);
     encoder.set_format(pixel);
@@ -70,8 +85,16 @@ fn write_video(path: &std::path::Path, id: Id, pixel: Pixel) {
     output.write_header().expect("writes the header");
     let stream_time_base = output.stream(0).expect("the stream").time_base();
 
-    let mut scaler = Scaler::get(Pixel::BGRA, WIDTH, HEIGHT, pixel, WIDTH, HEIGHT, Flags::BILINEAR)
-        .expect("converts to the encoder's format");
+    let mut scaler = Scaler::get(
+        Pixel::BGRA,
+        WIDTH,
+        HEIGHT,
+        pixel,
+        WIDTH,
+        HEIGHT,
+        Flags::BILINEAR,
+    )
+    .expect("converts to the encoder's format");
     for index in 0..FRAMES {
         let colour = COLOURS[index / 2];
         let mut bgra = ffmpeg::util::frame::Video::new(Pixel::BGRA, WIDTH, HEIGHT);
@@ -85,10 +108,20 @@ fn write_video(path: &std::path::Path, id: Id, pixel: Pixel) {
         scaler.run(&bgra, &mut yuv).expect("converts the frame");
         yuv.set_pts(Some(index as i64));
         encoder.send_frame(&yuv).expect("sends the frame");
-        write_packets(&mut encoder, &mut output, encoder_time_base, stream_time_base);
+        write_packets(
+            &mut encoder,
+            &mut output,
+            encoder_time_base,
+            stream_time_base,
+        );
     }
     encoder.send_eof().expect("ends the video");
-    write_packets(&mut encoder, &mut output, encoder_time_base, stream_time_base);
+    write_packets(
+        &mut encoder,
+        &mut output,
+        encoder_time_base,
+        stream_time_base,
+    );
     output.write_trailer().expect("writes the trailer");
 }
 
@@ -109,20 +142,30 @@ fn write_packets(
 }
 
 fn source(bytes: &[u8]) -> MediaSource {
-    MediaSource { kind: AssetKind::Video, hash: asset_hash(bytes), bytes: Arc::new(bytes.to_vec()) }
+    MediaSource {
+        kind: AssetKind::Video,
+        hash: asset_hash(bytes),
+        bytes: Arc::new(bytes.to_vec()),
+    }
 }
 
 fn device() -> (wgpu::Device, wgpu::Queue) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-        .expect("a GPU adapter");
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("a device")
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("a GPU adapter");
+    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        .expect("a device")
 }
 
 /// The BGRA pixel at the centre of a video texture.
 fn centre_pixel(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> [u8; 4] {
     let row = WIDTH * 4;
-    assert_eq!(row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT, 0, "the test size keeps rows aligned");
+    assert_eq!(
+        row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT,
+        0,
+        "the test size keeps rows aligned"
+    );
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("centre"),
         size: u64::from(row * HEIGHT),
@@ -134,18 +177,33 @@ fn centre_pixel(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Text
         texture.as_image_copy(),
         wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None },
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: None,
+            },
         },
-        wgpu::Extent3d { width: WIDTH, height: HEIGHT, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
     );
     queue.submit([encoder.finish()]);
     let (sender, receiver) = mpsc::channel();
-    buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
-    });
-    device.poll(wgpu::PollType::wait_indefinitely()).expect("the copy finishes");
+    buffer
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("the copy finishes");
     receiver.recv().expect("the buffer maps").expect("maps");
-    let data = buffer.slice(..).get_mapped_range().expect("the mapped range");
+    let data = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("the mapped range");
     let at = ((HEIGHT / 2) * row + (WIDTH / 2) * 4) as usize;
     let pixel = [data[at], data[at + 1], data[at + 2], data[at + 3]];
     drop(data);
@@ -154,7 +212,10 @@ fn centre_pixel(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Text
 }
 
 fn close(pixel: [u8; 4], colour: [u8; 4]) -> bool {
-    pixel.iter().zip(colour).all(|(a, b)| (i32::from(*a) - i32::from(b)).abs() <= TOLERANCE)
+    pixel
+        .iter()
+        .zip(colour)
+        .all(|(a, b)| (i32::from(*a) - i32::from(b)).abs() <= TOLERANCE)
 }
 
 /// The library and the device it draws on, with a wake-up for each decoded frame.
@@ -173,7 +234,12 @@ impl Harness {
         library.set_waker(move || {
             let _ = wake.send(());
         });
-        Self { library, woken, device, queue }
+        Self {
+            library,
+            woken,
+            device,
+            queue,
+        }
     }
 
     /// Polls the library until its clip shows `colour` at project time `time`, waiting for decoded frames.
@@ -182,11 +248,15 @@ impl Harness {
         loop {
             self.library.poll();
             let shown = self.library.video_texture("clip", view, playback, time);
-            if shown.is_some_and(|texture| close(centre_pixel(&self.device, &self.queue, &texture), colour)) {
+            if shown.is_some_and(|texture| {
+                close(centre_pixel(&self.device, &self.queue, &texture), colour)
+            }) {
                 return;
             }
             let left = deadline.saturating_duration_since(Instant::now());
-            self.woken.recv_timeout(left).unwrap_or_else(|_| panic!("the frame at {time}s never showed {colour:?}"));
+            self.woken
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("the frame at {time}s never showed {colour:?}"));
         }
     }
 }
@@ -195,17 +265,35 @@ impl Harness {
 fn a_video_shows_the_frame_for_each_time_and_loops() {
     let bytes = generated_video();
     let mut harness = Harness::new();
-    harness.library.sync(&std::collections::BTreeMap::from([("clip".to_owned(), source(&bytes))]));
+    harness.library.sync(&std::collections::BTreeMap::from([(
+        "clip".to_owned(),
+        source(&bytes),
+    )]));
     let deadline = Instant::now() + TIMEOUT;
     while harness.library.status("clip") == MediaStatus::Loading {
         harness.library.poll();
-        harness.woken.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("the video opens");
+        harness
+            .woken
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("the video opens");
     }
-    assert_eq!(harness.library.status("clip"), MediaStatus::Ready(Size::new(WIDTH, HEIGHT)));
+    assert_eq!(
+        harness.library.status("clip"),
+        MediaStatus::Ready(Size::new(WIDTH, HEIGHT))
+    );
 
-    let playback = VideoPlayback { start: 0.0, speed: 1.0, end: VideoEnd::Loop };
+    let playback = VideoPlayback {
+        start: 0.0,
+        speed: 1.0,
+        end: VideoEnd::Loop,
+    };
     // Forward, frame by frame, then back to the start (a seek), then past the end (looping back to the start).
-    for (time, colour) in [(0.1, COLOURS[0]), (0.6, COLOURS[1]), (1.1, COLOURS[2]), (1.6, COLOURS[3])] {
+    for (time, colour) in [
+        (0.1, COLOURS[0]),
+        (0.6, COLOURS[1]),
+        (1.1, COLOURS[2]),
+        (1.6, COLOURS[3]),
+    ] {
         harness.shows(&playback, "view", time, colour);
     }
     harness.shows(&playback, "view", 0.1, COLOURS[0]);
@@ -217,8 +305,15 @@ fn a_video_shows_the_frame_for_each_time_and_loops() {
 fn a_png_video_in_a_mov_shows_its_frames() {
     let bytes = generated_png_mov();
     let mut harness = Harness::new();
-    harness.library.sync(&std::collections::BTreeMap::from([("clip".to_owned(), source(&bytes))]));
-    let playback = VideoPlayback { start: 0.0, speed: 1.0, end: VideoEnd::Loop };
+    harness.library.sync(&std::collections::BTreeMap::from([(
+        "clip".to_owned(),
+        source(&bytes),
+    )]));
+    let playback = VideoPlayback {
+        start: 0.0,
+        speed: 1.0,
+        end: VideoEnd::Loop,
+    };
     for (time, colour) in [(0.1, COLOURS[0]), (1.1, COLOURS[2]), (1.6, COLOURS[3])] {
         harness.shows(&playback, "view", time, colour);
     }
@@ -228,17 +323,40 @@ fn a_png_video_in_a_mov_shows_its_frames() {
 fn a_video_is_transparent_before_its_start_and_after_its_end_when_it_says_so() {
     let bytes = generated_video();
     let mut harness = Harness::new();
-    harness.library.sync(&std::collections::BTreeMap::from([("clip".to_owned(), source(&bytes))]));
-    let playback = VideoPlayback { start: 1.0, speed: 1.0, end: VideoEnd::Transparent };
+    harness.library.sync(&std::collections::BTreeMap::from([(
+        "clip".to_owned(),
+        source(&bytes),
+    )]));
+    let playback = VideoPlayback {
+        start: 1.0,
+        speed: 1.0,
+        end: VideoEnd::Transparent,
+    };
     harness.shows(&playback, "view", 1.1, COLOURS[0]);
-    assert!(harness.library.video_texture("clip", "view", &playback, 0.5).is_none(), "before its start");
-    assert!(harness.library.video_texture("clip", "view", &playback, 3.5).is_none(), "past its end");
+    assert!(
+        harness
+            .library
+            .video_texture("clip", "view", &playback, 0.5)
+            .is_none(),
+        "before its start"
+    );
+    assert!(
+        harness
+            .library
+            .video_texture("clip", "view", &playback, 3.5)
+            .is_none(),
+        "past its end"
+    );
 }
 
 #[test]
 fn importing_a_video_records_its_size_length_and_frame_rate() {
     let bytes = generated_video();
-    let file = ImportFile { name: "Clip.mp4", mime: "video/mp4", bytes: &bytes };
+    let file = ImportFile {
+        name: "Clip.mp4",
+        mime: "video/mp4",
+        bytes: &bytes,
+    };
     let Ok(Asset::Video(video)) = describe_asset("v1", file, &SystemVideoProbe) else {
         panic!("a video is described");
     };
@@ -246,6 +364,10 @@ fn importing_a_video_records_its_size_length_and_frame_rate() {
     assert_eq!(video.file.file, "assets/videos/v1.mp4");
     assert_eq!((video.file.width, video.file.height), (WIDTH, HEIGHT));
     assert_eq!(video.file.hash, asset_hash(&bytes));
-    assert!((video.duration - FRAMES as f64 / FPS).abs() < 0.1, "{}", video.duration);
+    assert!(
+        (video.duration - FRAMES as f64 / FPS).abs() < 0.1,
+        "{}",
+        video.duration
+    );
     assert!((video.frame_rate - FPS).abs() < 0.5, "{}", video.frame_rate);
 }

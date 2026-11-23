@@ -6,26 +6,28 @@ use std::sync::Arc;
 
 use super::history::History;
 use super::{
-    Connection, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode,
-    GraphProject, GroupWidget, LAYOUT_FRAME, NODE_GROUP, Point, REROUTE, ROOT_ID, estimate_frame_header,
-    frame_note, new_id,
+    Connection, GROUP_OUTPUT, GraphDocument, GraphEdge, GraphNode, GraphProject, GroupWidget,
+    LAYOUT_FRAME, NODE_GROUP, Point, REROUTE, ROOT_ID, estimate_frame_header, frame_note, new_id,
 };
+use crate::codegen::{CodegenError, Program, ShaderOptions, generate_program};
 use crate::color::color_mode_conversion;
+use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, group_constants, hidden_inputs_of};
 use crate::layout::{
     InputRow, LayoutError, LayoutInput, LayoutOptions, NodeGeometry, NodeRows, RerouteBranches,
     compute_layout, estimate_node_geometry, reroute_branches,
 };
-use crate::codegen::{CodegenError, Program, ShaderOptions, generate_program};
-use crate::enums::{EnumDocument, MATCH, MATCH_SELECTOR, group_constants, hidden_inputs_of};
 use crate::library::is_library_ref;
-use crate::nodes::{COLOR_RAMP, color_ramp_hidden_inputs, default_data_for_type, registered, resolve_descriptor};
+use crate::nodes::{
+    COLOR_RAMP, color_ramp_hidden_inputs, default_data_for_type, registered, resolve_descriptor,
+};
 use crate::types::{
-    InputValue, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget, ResolvedNodeTypes,
-    TypeBindings, TypeResolver, WgslType, input_family_key, is_connection_compatible,
+    InputValue, NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeWidget,
+    ResolvedNodeTypes, TypeBindings, TypeResolver, WgslType, input_family_key,
+    is_connection_compatible,
 };
 use crate::zones::{
     NEW_ITEM_HANDLE, ZoneAnalysis, analyze_zones, inferred_item_family, is_zone_input,
-    is_zone_node_type, zone_options, would_create_cycle,
+    is_zone_node_type, would_create_cycle, zone_options,
 };
 
 /// What the editor offers for a node's type picker.
@@ -195,14 +197,20 @@ impl GraphModel {
     }
 
     fn restore(&mut self, snapshot: &str) -> bool {
-        let Ok(mut project) = serde_json::from_str::<GraphProject>(snapshot) else { return false };
+        let Ok(mut project) = serde_json::from_str::<GraphProject>(snapshot) else {
+            return false;
+        };
         crate::library::register(&mut project);
         project.reindex();
         self.project = project;
         self.resolver.clear();
         self.path = self.valid_path(&self.path);
-        let alive: HashSet<&str> =
-            self.project.definitions.values().flat_map(|d| d.nodes.iter().map(|n| n.id.as_str())).collect();
+        let alive: HashSet<&str> = self
+            .project
+            .definitions
+            .values()
+            .flat_map(|d| d.nodes.iter().map(|n| n.id.as_str()))
+            .collect();
         self.selected.retain(|id| alive.contains(id.as_str()));
         true
     }
@@ -284,7 +292,9 @@ impl GraphModel {
     }
 
     pub fn document_at(&self, path: &[String]) -> &GraphDocument {
-        self.project.document(&self.definition_ref_at(path)).unwrap_or_else(|| self.project.root())
+        self.project
+            .document(&self.definition_ref_at(path))
+            .unwrap_or_else(|| self.project.root())
     }
 
     pub fn active_document(&self) -> &GraphDocument {
@@ -299,7 +309,9 @@ impl GraphModel {
     pub fn is_locked_at(&self, path: &[String]) -> bool {
         let mut doc = self.project.root();
         for id in path {
-            let Some(node) = doc.node(id) else { return false };
+            let Some(node) = doc.node(id) else {
+                return false;
+            };
             if node.group.as_ref().is_some_and(|g| g.locked) {
                 return true;
             }
@@ -336,7 +348,10 @@ impl GraphModel {
     }
 
     fn group_label(&self, node: &GraphNode) -> String {
-        node.data.label.clone().unwrap_or_else(|| resolve_descriptor(node, &self.project).label.clone())
+        node.data
+            .label
+            .clone()
+            .unwrap_or_else(|| resolve_descriptor(node, &self.project).label.clone())
     }
 
     pub fn node(&self, id: &str) -> Option<&GraphNode> {
@@ -358,8 +373,12 @@ impl GraphModel {
             return bindings;
         }
         for id in path {
-            let Some(node) = self.project.document(&key).and_then(|d| d.node(id)) else { break };
-            let Some(next) = node.definition_ref() else { break };
+            let Some(node) = self.project.document(&key).and_then(|d| d.node(id)) else {
+                break;
+            };
+            let Some(next) = node.definition_ref() else {
+                break;
+            };
             let resolved = self.resolver.resolve(&self.project, node, &bindings);
             bindings = resolved.bindings.clone().unwrap_or_default();
             key = next.to_owned();
@@ -371,7 +390,11 @@ impl GraphModel {
     }
 
     /// A node's resolved types as seen from `path` (the active one by default).
-    pub fn types_of(&self, node_id: &str, path: Option<&[String]>) -> Option<Arc<ResolvedNodeTypes>> {
+    pub fn types_of(
+        &self,
+        node_id: &str,
+        path: Option<&[String]>,
+    ) -> Option<Arc<ResolvedNodeTypes>> {
         let node = self.node(node_id)?;
         let doc_ref = self.project.definition_ref_of(node_id)?;
         let bindings = self.view_bindings(doc_ref, path.unwrap_or(&self.path));
@@ -379,30 +402,42 @@ impl GraphModel {
     }
 
     pub fn resolve_input_type(&self, node_id: &str, input: &str) -> WgslType {
-        self.types_of(node_id, None).and_then(|t| t.input_type(input)).unwrap_or(WgslType::F32)
+        self.types_of(node_id, None)
+            .and_then(|t| t.input_type(input))
+            .unwrap_or(WgslType::F32)
     }
 
     pub fn resolve_node_output_type(&self, node_id: &str) -> WgslType {
-        self.types_of(node_id, None).map_or(WgslType::F32, |t| t.output_type)
+        self.types_of(node_id, None)
+            .map_or(WgslType::F32, |t| t.output_type)
     }
 
     pub fn resolve_output_handle_type(&self, node_id: &str, handle: &str) -> WgslType {
-        self.types_of(node_id, None).map_or(WgslType::F32, |t| t.output_handle_type(handle))
+        self.types_of(node_id, None)
+            .map_or(WgslType::F32, |t| t.output_handle_type(handle))
     }
 
     pub fn resolve_node_inputs(&self, node_id: &str) -> Vec<NodeInputDef> {
-        self.types_of(node_id, None).map(|t| t.resolved_inputs.clone()).unwrap_or_default()
+        self.types_of(node_id, None)
+            .map(|t| t.resolved_inputs.clone())
+            .unwrap_or_default()
     }
 
     pub fn resolve_node_outputs(&self, node_id: &str) -> Vec<NodeOutputDef> {
-        self.types_of(node_id, None).map(|t| t.resolved_outputs.clone()).unwrap_or_default()
+        self.types_of(node_id, None)
+            .map(|t| t.resolved_outputs.clone())
+            .unwrap_or_default()
     }
 
     /// The type an input would get from its links alone, ignoring the type the
     /// user forced on the node.
     pub fn resolve_inferred_input_type(&self, node_id: &str, input: &str) -> WgslType {
-        let Some(node) = self.node(node_id) else { return WgslType::F32 };
-        let Some(doc_ref) = self.project.definition_ref_of(node_id) else { return WgslType::F32 };
+        let Some(node) = self.node(node_id) else {
+            return WgslType::F32;
+        };
+        let Some(doc_ref) = self.project.definition_ref_of(node_id) else {
+            return WgslType::F32;
+        };
         let bindings = self.view_bindings(doc_ref, &self.path);
         let mut data = node.data.clone();
         data.types.clear();
@@ -415,7 +450,9 @@ impl GraphModel {
     /// The links of `doc_ref` to sockets their nodes don't have as seen from
     /// the active path: kept, but ignored and not drawn.
     pub fn unavailable_links(&self, doc_ref: &str) -> HashSet<String> {
-        let Some(doc) = self.project.document(doc_ref) else { return HashSet::new() };
+        let Some(doc) = self.project.document(doc_ref) else {
+            return HashSet::new();
+        };
         crate::types::unavailable_edges(&doc.edges, |id| self.types_of(id, None))
     }
 
@@ -446,7 +483,9 @@ impl GraphModel {
             inferable: pickable.inferable,
             forced: node.data.types.get(&pickable.key).copied(),
             inferred: if pickable.inferable {
-                primary.map_or(WgslType::F32, |p| self.resolve_inferred_input_type(node_id, &p.id))
+                primary.map_or(WgslType::F32, |p| {
+                    self.resolve_inferred_input_type(node_id, &p.id)
+                })
             } else {
                 self.resolve_node_output_type(node_id)
             },
@@ -458,8 +497,12 @@ impl GraphModel {
         if self.type_choice(node_id).is_none() {
             return;
         }
-        let Some(node) = self.node(node_id) else { return };
-        let Some(pickable) = self.resolve_descriptor(node).pickable_types() else { return };
+        let Some(node) = self.node(node_id) else {
+            return;
+        };
+        let Some(pickable) = self.resolve_descriptor(node).pickable_types() else {
+            return;
+        };
         self.update_node_data(node_id, |data| match ty {
             Some(t) => {
                 data.types.insert(pickable.key.clone(), t);
@@ -472,12 +515,18 @@ impl GraphModel {
 
     /// The inputs of a group node hidden by its enums' values and its types, or a Color Ramp's unused ones.
     pub fn hidden_inputs(&self, node_id: &str) -> HashSet<String> {
-        let Some(node) = self.node(node_id) else { return HashSet::new() };
+        let Some(node) = self.node(node_id) else {
+            return HashSet::new();
+        };
         if node.is(COLOR_RAMP) {
             let linked = self
                 .project
                 .document_of(node_id)
-                .map(|doc| doc.edges_into(node_id).map(|e| e.target_handle.clone()).collect())
+                .map(|doc| {
+                    doc.edges_into(node_id)
+                        .map(|e| e.target_handle.clone())
+                        .collect()
+                })
                 .unwrap_or_default();
             return color_ramp_hidden_inputs(&node.data, &linked);
         }
@@ -488,17 +537,33 @@ impl GraphModel {
             .types_of(node_id, None)
             .and_then(|t| t.bindings.clone())
             .unwrap_or_default();
-        let Some(doc) = self.project.document_of(node_id) else { return HashSet::new() };
-        let values = group_constants(&EnumDocument::of(doc), node, &self.project, &bindings, &BTreeMap::new());
-        hidden_inputs_of(&def.inputs, &values, &bindings).into_iter().collect()
+        let Some(doc) = self.project.document_of(node_id) else {
+            return HashSet::new();
+        };
+        let values = group_constants(
+            &EnumDocument::of(doc),
+            node,
+            &self.project,
+            &bindings,
+            &BTreeMap::new(),
+        );
+        hidden_inputs_of(&def.inputs, &values, &bindings)
+            .into_iter()
+            .collect()
     }
 
     // ── Node data ────────────────────────────────────────────────────────────
 
     /// Change a node's data (in whichever document holds it).
     pub fn update_node_data(&mut self, node_id: &str, f: impl FnOnce(&mut NodeData)) {
-        let Some(key) = self.project.definition_ref_of(node_id).map(str::to_owned) else { return };
-        let Some(node) = self.project.definitions.get_mut(&key).and_then(|d| d.node_mut(node_id))
+        let Some(key) = self.project.definition_ref_of(node_id).map(str::to_owned) else {
+            return;
+        };
+        let Some(node) = self
+            .project
+            .definitions
+            .get_mut(&key)
+            .and_then(|d| d.node_mut(node_id))
         else {
             return;
         };
@@ -526,16 +591,30 @@ impl GraphModel {
 
     /// The components a colour widget's mode change sets so the colour stays
     /// the same.
-    fn converted_colors(&self, node_id: &str, input: &str, value: Option<&InputValue>) -> Vec<(String, f64)> {
-        let Some(node) = self.node(node_id) else { return Vec::new() };
+    fn converted_colors(
+        &self,
+        node_id: &str,
+        input: &str,
+        value: Option<&InputValue>,
+    ) -> Vec<(String, f64)> {
+        let Some(node) = self.node(node_id) else {
+            return Vec::new();
+        };
         let Some(def) = node.definition_ref().and_then(|r| self.project.document(r)) else {
             return Vec::new();
         };
-        let Some(widget @ GroupWidget::Color { mode, .. }) = &def.widget else { return Vec::new() };
+        let Some(widget @ GroupWidget::Color { mode, .. }) = &def.widget else {
+            return Vec::new();
+        };
         if mode != input {
             return Vec::new();
         }
-        let Some(variants) = def.inputs.iter().find(|h| h.id == *mode).and_then(|h| h.variants.as_deref()) else {
+        let Some(variants) = def
+            .inputs
+            .iter()
+            .find(|h| h.id == *mode)
+            .and_then(|h| h.variants.as_deref())
+        else {
             return Vec::new();
         };
         let mut after = node.data.values.clone();
@@ -546,10 +625,21 @@ impl GraphModel {
         let linked: HashSet<String> = self
             .project
             .document_of(node_id)
-            .map(|doc| doc.edges_into(node_id).map(|e| e.target_handle.clone()).collect())
+            .map(|doc| {
+                doc.edges_into(node_id)
+                    .map(|e| e.target_handle.clone())
+                    .collect()
+            })
             .unwrap_or_default();
-        color_mode_conversion(widget, variants, &def.defaults, &node.data.values, &after, &linked)
-            .unwrap_or_default()
+        color_mode_conversion(
+            widget,
+            variants,
+            &def.defaults,
+            &node.data.values,
+            &after,
+            &linked,
+        )
+        .unwrap_or_default()
     }
 
     /// Pick an option of one of the node's settings.
@@ -560,11 +650,14 @@ impl GraphModel {
     }
 
     pub fn default_node_label(&self, node_id: &str) -> String {
-        self.node(node_id).map_or_else(String::new, |n| resolve_descriptor(n, &self.project).label.clone())
+        self.node(node_id).map_or_else(String::new, |n| {
+            resolve_descriptor(n, &self.project).label.clone()
+        })
     }
 
     pub fn node_label(&self, node_id: &str) -> String {
-        self.node(node_id).map_or_else(String::new, |n| self.group_label(n))
+        self.node(node_id)
+            .map_or_else(String::new, |n| self.group_label(n))
     }
 
     pub fn set_node_label(&mut self, node_id: &str, label: Option<String>) {
@@ -595,7 +688,9 @@ impl GraphModel {
             .filter_map(|id| self.node(id))
             .all(|n| n.data.hide_unlinked == Some(true));
         for id in node_ids {
-            self.update_node_data(id, |data| data.hide_unlinked = (!all_hidden).then_some(true));
+            self.update_node_data(id, |data| {
+                data.hide_unlinked = (!all_hidden).then_some(true)
+            });
         }
     }
 
@@ -653,7 +748,9 @@ impl GraphModel {
             return false;
         }
         let key = self.active_definition_ref();
-        let Some(doc) = self.project.document(&key) else { return false };
+        let Some(doc) = self.project.document(&key) else {
+            return false;
+        };
         let wanted: HashSet<String> = node_ids
             .iter()
             .filter(|id| doc.node(id).is_some_and(GraphNode::deletable))
@@ -665,7 +762,9 @@ impl GraphModel {
             .edges
             .iter()
             .filter(|e| {
-                !edge_set.contains(&e.id) && !removed.contains(&e.source) && !removed.contains(&e.target)
+                !edge_set.contains(&e.id)
+                    && !removed.contains(&e.source)
+                    && !removed.contains(&e.target)
             })
             .cloned()
             .collect();
@@ -713,7 +812,8 @@ impl GraphModel {
             .iter()
             .filter(|e| removed.contains(&e.source) && !removed.contains(&e.target))
             .filter_map(|edge| {
-                let upstream = self.upstream_through(&removed, &edge.source, &edge.source_handle)?;
+                let upstream =
+                    self.upstream_through(&removed, &edge.source, &edge.source_handle)?;
                 Some(Connection::new(
                     upstream.source,
                     upstream.source_handle,
@@ -750,7 +850,10 @@ impl GraphModel {
                 .resolve_node_inputs(&node)
                 .iter()
                 .filter(|i| !hidden.contains(&i.id))
-                .flat_map(|input| doc.edges_into(&node).filter(move |e| e.target_handle == input.id))
+                .flat_map(|input| {
+                    doc.edges_into(&node)
+                        .filter(move |e| e.target_handle == input.id)
+                })
                 .collect();
             let fed = incoming
                 .iter()
@@ -770,8 +873,12 @@ impl GraphModel {
     pub fn copy_nodes(&self, node_ids: &[String]) -> Option<NodeClipboard> {
         let doc = self.active_document();
         let ids = self.with_zone_partners(&self.with_frame_contents(node_ids));
-        let nodes: Vec<GraphNode> =
-            doc.nodes.iter().filter(|n| ids.contains(&n.id) && n.deletable()).cloned().collect();
+        let nodes: Vec<GraphNode> = doc
+            .nodes
+            .iter()
+            .filter(|n| ids.contains(&n.id) && n.deletable())
+            .cloned()
+            .collect();
         if nodes.is_empty() {
             return None;
         }
@@ -782,7 +889,11 @@ impl GraphModel {
             .filter(|e| kept.contains(e.source.as_str()) && kept.contains(e.target.as_str()))
             .cloned()
             .collect();
-        Some(NodeClipboard { from: self.active_definition_ref(), nodes, edges })
+        Some(NodeClipboard {
+            from: self.active_definition_ref(),
+            nodes,
+            edges,
+        })
     }
 
     /// Paste a clipboard into the active document, its top-left at `position`
@@ -790,7 +901,11 @@ impl GraphModel {
     /// gone, or that would contain itself, are skipped, and so are boundary
     /// nodes of another group: they show their own group's inputs and outputs.
     /// Returns the new nodes' ids.
-    pub fn paste_nodes(&mut self, clipboard: &NodeClipboard, position: Option<Point>) -> Vec<String> {
+    pub fn paste_nodes(
+        &mut self,
+        clipboard: &NodeClipboard,
+        position: Option<Point>,
+    ) -> Vec<String> {
         if self.is_locked() {
             return Vec::new();
         }
@@ -798,22 +913,41 @@ impl GraphModel {
         let pasted: Vec<GraphNode> = clipboard
             .nodes
             .iter()
-            .filter(|n| (home || n.side().is_none()) && n.definition_ref().is_none_or(|r| {
-                self.project.document(r).is_some() && !self.would_create_group_cycle(r)
-            }))
+            .filter(|n| {
+                (home || n.side().is_none())
+                    && n.definition_ref().is_none_or(|r| {
+                        self.project.document(r).is_some() && !self.would_create_group_cycle(r)
+                    })
+            })
             .cloned()
             .collect();
         if pasted.is_empty() {
             return Vec::new();
         }
-        let clipboard = &NodeClipboard { from: clipboard.from.clone(), nodes: pasted, edges: clipboard.edges.clone() };
-        let min_x = clipboard.nodes.iter().map(|n| n.position.x).fold(f32::INFINITY, f32::min);
-        let min_y = clipboard.nodes.iter().map(|n| n.position.y).fold(f32::INFINITY, f32::min);
-        let offset = position.map_or(Point::new(40.0, 40.0), |p| Point::new(p.x - min_x, p.y - min_y));
+        let clipboard = &NodeClipboard {
+            from: clipboard.from.clone(),
+            nodes: pasted,
+            edges: clipboard.edges.clone(),
+        };
+        let min_x = clipboard
+            .nodes
+            .iter()
+            .map(|n| n.position.x)
+            .fold(f32::INFINITY, f32::min);
+        let min_y = clipboard
+            .nodes
+            .iter()
+            .map(|n| n.position.y)
+            .fold(f32::INFINITY, f32::min);
+        let offset = position.map_or(Point::new(40.0, 40.0), |p| {
+            Point::new(p.x - min_x, p.y - min_y)
+        });
         let (nodes, edges, _) = clone_subgraph(&clipboard.nodes, &clipboard.edges, offset);
         let ids: Vec<String> = nodes.iter().map(|n| n.id.clone()).collect();
         let key = self.active_definition_ref();
-        let Some(doc) = self.doc_mut(&key) else { return Vec::new() };
+        let Some(doc) = self.doc_mut(&key) else {
+            return Vec::new();
+        };
         doc.nodes.extend(nodes);
         doc.edges.extend(edges);
         self.selected = ids.clone();
@@ -830,7 +964,13 @@ impl GraphModel {
 
     // ── Connections ──────────────────────────────────────────────────────────
 
-    pub(crate) fn link_fits(&self, source: &GraphNode, source_handle: &str, target: &GraphNode, target_handle: &str) -> bool {
+    pub(crate) fn link_fits(
+        &self,
+        source: &GraphNode,
+        source_handle: &str,
+        target: &GraphNode,
+        target_handle: &str,
+    ) -> bool {
         let source_type = self.resolve_output_handle_type(&source.id, source_handle);
         let descriptor = self.resolve_descriptor(target);
 
@@ -842,20 +982,32 @@ impl GraphModel {
                 .find(|i| i.id == target_handle)
                 .is_some_and(|i| is_connection_compatible(source_type, i.default_type()));
         }
-        let Some(input) = descriptor.input(target_handle) else { return false };
+        let Some(input) = descriptor.input(target_handle) else {
+            return false;
+        };
 
         // An inferred zone item takes the type of any initial value, and its
         // next value converts to that type.
         if input.family.as_deref() == Some(&inferred_item_family(target_handle)) {
             return is_zone_input(&target.node_type)
-                || is_connection_compatible(source_type, self.resolve_input_type(&target.id, target_handle));
+                || is_connection_compatible(
+                    source_type,
+                    self.resolve_input_type(&target.id, target_handle),
+                );
         }
         // If the target has a node-wide override, validate against that type.
-        if let Some(forced) = target.data.types.get(&input_family_key(input, &descriptor.inputs)) {
+        if let Some(forced) = target
+            .data
+            .types
+            .get(&input_family_key(input, &descriptor.inputs))
+        {
             return is_connection_compatible(source_type, *forced);
         }
         // Valid if the source can be converted to any type within the family.
-        input.types.iter().any(|t| is_connection_compatible(source_type, *t))
+        input
+            .types
+            .iter()
+            .any(|t| is_connection_compatible(source_type, *t))
     }
 
     /// Whether `connection` may be made in the active document. Rejects
@@ -884,7 +1036,9 @@ impl GraphModel {
         // A Match node's cases come from its enum: nothing else can pick one.
         if target.is(MATCH)
             && c.target_handle == MATCH_SELECTOR
-            && EnumDocument::of(doc).enum_of_output(&c.source, &c.source_handle).is_none()
+            && EnumDocument::of(doc)
+                .enum_of_output(&c.source, &c.source_handle)
+                .is_none()
         {
             return false;
         }
@@ -894,7 +1048,9 @@ impl GraphModel {
     /// Whether adding the link leaves every existing one as valid as it was.
     fn respects_zones(&self, doc: &GraphDocument, target: &GraphNode, c: &Connection) -> bool {
         let descriptor = self.resolve_descriptor(target);
-        let variadic = descriptor.input(&c.target_handle).is_some_and(|i| i.variadic);
+        let variadic = descriptor
+            .input(&c.target_handle)
+            .is_some_and(|i| i.variadic);
         let candidate = GraphEdge {
             id: "__candidate__".to_owned(),
             source: c.source.clone(),
@@ -929,8 +1085,12 @@ impl GraphModel {
             return self.connect_new_zone_item(&c);
         }
         let key = self.active_definition_ref();
-        let Some(doc) = self.project.document(&key) else { return false };
-        let Some(target) = doc.node(&c.target) else { return false };
+        let Some(doc) = self.project.document(&key) else {
+            return false;
+        };
+        let Some(target) = doc.node(&c.target) else {
+            return false;
+        };
         let variadic = self
             .resolve_descriptor(target)
             .input(&c.target_handle)
@@ -961,7 +1121,10 @@ impl GraphModel {
     /// Generate the program drawing the project's root document, reading
     /// unlinked input values of the root from uniforms.
     pub fn generate(&self) -> Result<Program, CodegenError> {
-        self.generate_with(&ShaderOptions { uniform_scopes: vec![ROOT_ID.to_owned()], ..Default::default() })
+        self.generate_with(&ShaderOptions {
+            uniform_scopes: vec![ROOT_ID.to_owned()],
+            ..Default::default()
+        })
     }
 
     /// The program to run: like `generate`, with the frame values computed on
@@ -991,13 +1154,18 @@ impl GraphModel {
         if self.project.document(definition_ref).is_none() || is_library_ref(definition_ref) {
             return Ok(false);
         }
-        let only: Option<HashSet<&str>> = node_ids.map(|ids| ids.iter().map(String::as_str).collect());
+        let only: Option<HashSet<&str>> =
+            node_ids.map(|ids| ids.iter().map(String::as_str).collect());
         let branched = self.split_branches(definition_ref, only.as_ref());
-        let Some(doc) = self.project.document(definition_ref) else { return Ok(false) };
+        let Some(doc) = self.project.document(definition_ref) else {
+            return Ok(false);
+        };
         let nodes: Vec<GraphNode> = doc
             .nodes
             .iter()
-            .filter(|n| only.as_ref().is_none_or(|o| o.contains(n.id.as_str())) || branched.contains(&n.id))
+            .filter(|n| {
+                only.as_ref().is_none_or(|o| o.contains(n.id.as_str())) || branched.contains(&n.id)
+            })
             .cloned()
             .collect();
         let zones = self.zone_analysis(doc);
@@ -1031,8 +1199,13 @@ impl GraphModel {
 
     /// Lay out every document of the project (the standard library excluded).
     pub fn layout_project(&mut self, options: &LayoutOptions<'_>) -> Result<bool, LayoutError> {
-        let refs: Vec<String> =
-            self.project.definitions.keys().filter(|r| !is_library_ref(r)).cloned().collect();
+        let refs: Vec<String> = self
+            .project
+            .definitions
+            .keys()
+            .filter(|r| !is_library_ref(r))
+            .cloned()
+            .collect();
         let mut moved = false;
         for key in refs {
             moved |= self.layout_document(&key, None, options)?;
@@ -1042,18 +1215,30 @@ impl GraphModel {
 
     /// Split each output linked to several inputs at a reroute, among `only`
     /// (all nodes if absent). Returns the reroutes added.
-    fn split_branches(&mut self, definition_ref: &str, only: Option<&HashSet<&str>>) -> HashSet<String> {
-        let Some(doc) = self.project.document(definition_ref) else { return HashSet::new() };
+    fn split_branches(
+        &mut self,
+        definition_ref: &str,
+        only: Option<&HashSet<&str>>,
+    ) -> HashSet<String> {
+        let Some(doc) = self.project.document(definition_ref) else {
+            return HashSet::new();
+        };
         let skipped = self.zone_analysis(doc).invalid_edges;
         let among = |id: &str| only.is_none_or(|o| o.contains(id));
-        let RerouteBranches { reroutes, links, moved } =
-            reroute_branches(&doc.nodes, &doc.edges, among, new_id, &skipped);
+        let RerouteBranches {
+            reroutes,
+            links,
+            moved,
+        } = reroute_branches(&doc.nodes, &doc.edges, among, new_id, &skipped);
         if reroutes.is_empty() {
             return HashSet::new();
         }
         let added: HashSet<String> = reroutes.iter().map(|n| n.id.clone()).collect();
-        let moved: HashMap<String, GraphEdge> = moved.into_iter().map(|e| (e.id.clone(), e)).collect();
-        let Some(doc) = self.doc_mut(definition_ref) else { return HashSet::new() };
+        let moved: HashMap<String, GraphEdge> =
+            moved.into_iter().map(|e| (e.id.clone(), e)).collect();
+        let Some(doc) = self.doc_mut(definition_ref) else {
+            return HashSet::new();
+        };
         for edge in &mut doc.edges {
             if let Some(replacement) = moved.get(&edge.id) {
                 *edge = replacement.clone();
@@ -1066,8 +1251,14 @@ impl GraphModel {
     }
 
     /// Move nodes of a document to `positions`, where they differ. Returns whether any moved.
-    fn apply_positions(&mut self, definition_ref: &str, positions: &HashMap<String, Point>) -> bool {
-        let Some(doc) = self.doc_mut(definition_ref) else { return false };
+    fn apply_positions(
+        &mut self,
+        definition_ref: &str,
+        positions: &HashMap<String, Point>,
+    ) -> bool {
+        let Some(doc) = self.doc_mut(definition_ref) else {
+            return false;
+        };
         let mut moved = false;
         for node in &mut doc.nodes {
             if let Some(at) = positions.get(&node.id).filter(|at| **at != node.position) {
@@ -1085,7 +1276,11 @@ impl GraphModel {
     fn estimated_geometry(&self, doc: &GraphDocument, node: &GraphNode) -> NodeGeometry {
         if node.is(LAYOUT_FRAME) {
             let header = estimate_frame_header(&self.node_label(&node.id), frame_note(&node.data));
-            return NodeGeometry { width: header.width, height: header.height, ..Default::default() };
+            return NodeGeometry {
+                width: header.width,
+                height: header.height,
+                ..Default::default()
+            };
         }
         if node.is(REROUTE) {
             return NodeGeometry {
@@ -1101,15 +1296,25 @@ impl GraphModel {
     /// What a node shows, top to bottom, for estimating its geometry.
     fn layout_rows(&self, doc: &GraphDocument, node: &GraphNode) -> NodeRows {
         let descriptor = self.resolve_descriptor(node);
-        let linked: HashSet<&str> = doc.edges_into(&node.id).map(|e| e.target_handle.as_str()).collect();
-        let linked_out: HashSet<&str> = doc.edges_from(&node.id).map(|e| e.source_handle.as_str()).collect();
+        let linked: HashSet<&str> = doc
+            .edges_into(&node.id)
+            .map(|e| e.target_handle.as_str())
+            .collect();
+        let linked_out: HashSet<&str> = doc
+            .edges_from(&node.id)
+            .map(|e| e.source_handle.as_str())
+            .collect();
         let hidden = self.hidden_inputs(&node.id);
         let shown = |id: &str, linked_to: &HashSet<&str>| {
             node.data.hide_unlinked != Some(true) || linked_to.contains(id)
         };
         let header = descriptor.settings.len()
             + usize::from(self.type_choice(&node.id).is_some())
-            + self.variable_choices(&node.id).iter().filter(|c| c.variable.types.len() > 1).count();
+            + self
+                .variable_choices(&node.id)
+                .iter()
+                .filter(|c| c.variable.types.len() > 1)
+                .count();
         NodeRows {
             header,
             outputs: self
@@ -1166,7 +1371,11 @@ pub fn clone_subgraph(
                 data,
                 position: Point::new(n.position.x + offset.x, n.position.y + offset.y),
                 group: n.group.clone(),
-                frame: n.frame.as_ref().filter(|f| id_map.contains_key(*f)).map(|f| remap(f)),
+                frame: n
+                    .frame
+                    .as_ref()
+                    .filter(|f| id_map.contains_key(*f))
+                    .map(|f| remap(f)),
             }
         })
         .collect();

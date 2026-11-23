@@ -44,7 +44,12 @@ impl ModelHandle {
 
     /// The same model seen from another area, which starts at the root with nothing selected.
     pub fn another_view(&self) -> Self {
-        Self { shared: self.shared.clone(), view: Rc::default(), areas: self.areas.clone(), revision: self.revision.clone() }
+        Self {
+            shared: self.shared.clone(),
+            view: Rc::default(),
+            areas: self.areas.clone(),
+            revision: self.revision.clone(),
+        }
     }
 
     pub fn revision(&self) -> u64 {
@@ -64,7 +69,9 @@ impl ModelHandle {
     /// Points the model at this area's group and selection. Nested borrows
     /// find it already done.
     fn apply(&self) {
-        let Ok(mut model) = self.shared.try_borrow_mut() else { return };
+        let Ok(mut model) = self.shared.try_borrow_mut() else {
+            return;
+        };
         let view = self.view.borrow();
         if model.path() != view.path.as_slice() {
             let path = model.valid_path(&view.path);
@@ -91,7 +98,10 @@ impl ModelHandle {
     pub fn borrow_mut(&self) -> ModelMut<'_> {
         self.apply();
         self.bump();
-        ModelMut { model: self.shared.borrow_mut(), view: &self.view }
+        ModelMut {
+            model: self.shared.borrow_mut(),
+            view: &self.view,
+        }
     }
 
     pub fn set_path_to_root(&self) {

@@ -93,7 +93,10 @@ impl Shared {
     fn next_wanted(&self) -> Option<Vec<f64>> {
         let mut state = self.lock();
         while state.wanted.is_empty() && !state.closed {
-            state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
+            state = self
+                .changed
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         if state.closed {
             return None;
@@ -109,7 +112,10 @@ impl Shared {
     }
 
     fn covered(&self, time: f64) -> bool {
-        self.lock().frames.iter().any(|frame| covers(&frame.decoded, time))
+        self.lock()
+            .frames
+            .iter()
+            .any(|frame| covers(&frame.decoded, time))
     }
 
     fn push(&self, decoded: DecodedFrame, waker: Option<&Waker>) {
@@ -141,19 +147,24 @@ impl VideoStream {
     /// Starts decoding `bytes`, a video file's contents. `waker` is called when a frame arrives or the video fails.
     pub fn open(bytes: Arc<Vec<u8>>, waker: Option<Waker>) -> Self {
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { capacity: RECENT_FRAMES, ..State::default() }),
+            state: Mutex::new(State {
+                capacity: RECENT_FRAMES,
+                ..State::default()
+            }),
             changed: Condvar::new(),
         });
         let thread_shared = shared.clone();
-        let spawned = std::thread::Builder::new().name("video-decode".to_owned()).spawn(move || {
-            if let Err(message) = decode(&bytes, &thread_shared, waker.as_ref()) {
-                log::error!("[media] can't decode a video: {message}");
-                thread_shared.lock().failure = Some(message);
-                if let Some(waker) = &waker {
-                    waker();
+        let spawned = std::thread::Builder::new()
+            .name("video-decode".to_owned())
+            .spawn(move || {
+                if let Err(message) = decode(&bytes, &thread_shared, waker.as_ref()) {
+                    log::error!("[media] can't decode a video: {message}");
+                    thread_shared.lock().failure = Some(message);
+                    if let Some(waker) = &waker {
+                        waker();
+                    }
                 }
-            }
-        });
+            });
         if let Err(error) = spawned {
             shared.fail(format!("the decoding thread couldn't start: {error}"));
         }
@@ -173,12 +184,23 @@ impl VideoStream {
     /// Asks the decoder for `time` when no frame covers it yet, for `view`.
     pub fn frame_at(&self, view: &str, time: f64) -> Option<Arc<Frame>> {
         let mut state = self.shared.lock();
-        if !state.frames.iter().any(|frame| covers(&frame.decoded, time)) {
+        if !state
+            .frames
+            .iter()
+            .any(|frame| covers(&frame.decoded, time))
+        {
             state.wanted.insert(view.to_owned(), time);
             self.shared.changed.notify_all();
         }
-        let covering = state.frames.iter().find(|frame| covers(&frame.decoded, time));
-        let before = state.frames.iter().rev().find(|frame| frame.decoded.time <= time);
+        let covering = state
+            .frames
+            .iter()
+            .find(|frame| covers(&frame.decoded, time));
+        let before = state
+            .frames
+            .iter()
+            .rev()
+            .find(|frame| frame.decoded.time <= time);
         covering.or(before).or(state.frames.front()).cloned()
     }
 }
@@ -208,7 +230,8 @@ fn decode(bytes: &[u8], shared: &Shared, waker: Option<&Waker>) -> Result<(), St
     let mut position = Position::default();
     while let Some(times) = shared.next_wanted() {
         for time in times {
-            read_to(decoder.as_mut(), &mut position, shared, waker, time).map_err(|error| error.to_string())?;
+            read_to(decoder.as_mut(), &mut position, shared, waker, time)
+                .map_err(|error| error.to_string())?;
         }
     }
     Ok(())
@@ -237,7 +260,9 @@ fn read_to(
         if shared.closed() {
             return Ok(());
         }
-        let Some(frame) = decoder.next_frame()? else { return Ok(()) };
+        let Some(frame) = decoder.next_frame()? else {
+            return Ok(());
+        };
         position.last_time = Some(frame.time);
         let reached = frame.time + frame.duration > time;
         shared.push(frame, waker);
@@ -252,7 +277,9 @@ struct TempVideo(Option<TempPath>);
 
 impl TempVideo {
     fn write(bytes: &[u8]) -> Result<Self, MediaError> {
-        let copy = |error: std::io::Error| MediaError::Video(format!("it couldn't be copied to a file: {error}"));
+        let copy = |error: std::io::Error| {
+            MediaError::Video(format!("it couldn't be copied to a file: {error}"))
+        };
         let mut file = NamedTempFile::new().map_err(copy)?;
         file.write_all(bytes).map_err(copy)?;
         file.flush().map_err(copy)?;

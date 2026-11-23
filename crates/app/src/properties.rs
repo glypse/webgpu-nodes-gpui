@@ -6,9 +6,10 @@ use std::path::PathBuf;
 
 use export::{Codec, Container, Depth, DnxhrProfile, ProResProfile, Scene};
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, ElementId, Entity, FocusHandle,
+    Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
@@ -114,7 +115,11 @@ fn gcd(a: u32, b: u32) -> u32 {
 fn aspect(width: u32, height: u32) -> String {
     let divisor = gcd(width, height).max(1);
     let (w, h) = (width / divisor, height / divisor);
-    if w <= 32 && h <= 32 { format!("{w}:{h}") } else { format!("{:.2}", f64::from(width) / f64::from(height.max(1))) }
+    if w <= 32 && h <= 32 {
+        format!("{w}:{h}")
+    } else {
+        format!("{:.2}", f64::from(width) / f64::from(height.max(1)))
+    }
 }
 
 impl PropertiesPanel {
@@ -137,12 +142,30 @@ impl PropertiesPanel {
         let width = cx.new(|cx| side(settings.canvas.width, "Width", cx));
         let height = cx.new(|cx| side(settings.canvas.height, "Height", cx));
         let fps = cx.new(|cx| {
-            NumberField::new(settings.timing.fps, cx).label("FPS").step(1.0).min(1.0).max(MAX_FPS)
+            NumberField::new(settings.timing.fps, cx)
+                .label("FPS")
+                .step(1.0)
+                .min(1.0)
+                .max(MAX_FPS)
         });
-        let start = cx.new(|cx| NumberField::new(output.start, cx).label("Start").min(0.0).max(MAX_SECONDS));
-        let duration = cx.new(|cx| NumberField::new(output.duration, cx).label("Duration").min(0.0).max(MAX_SECONDS));
+        let start = cx.new(|cx| {
+            NumberField::new(output.start, cx)
+                .label("Start")
+                .min(0.0)
+                .max(MAX_SECONDS)
+        });
+        let duration = cx.new(|cx| {
+            NumberField::new(output.duration, cx)
+                .label("Duration")
+                .min(0.0)
+                .max(MAX_SECONDS)
+        });
         let export_fps = cx.new(|cx| {
-            NumberField::new(output.fps, cx).label("FPS").step(1.0).min(1.0).max(MAX_FPS)
+            NumberField::new(output.fps, cx)
+                .label("FPS")
+                .step(1.0)
+                .min(1.0)
+                .max(MAX_FPS)
         });
         let job = cx.new(|_| ExportJob::default());
         let subscriptions = vec![
@@ -154,13 +177,19 @@ impl PropertiesPanel {
                 });
             }),
             cx.subscribe(&width, |this, _, NumberEvent::Change(v), cx| {
-                guard::guard("canvas width", || this.edit_project(cx, |s| s.canvas.width = *v as u32));
+                guard::guard("canvas width", || {
+                    this.edit_project(cx, |s| s.canvas.width = *v as u32)
+                });
             }),
             cx.subscribe(&height, |this, _, NumberEvent::Change(v), cx| {
-                guard::guard("canvas height", || this.edit_project(cx, |s| s.canvas.height = *v as u32));
+                guard::guard("canvas height", || {
+                    this.edit_project(cx, |s| s.canvas.height = *v as u32)
+                });
             }),
             cx.subscribe(&fps, |this, _, NumberEvent::Change(v), cx| {
-                guard::guard("frame rate", || this.edit_project(cx, |s| s.timing.fps = *v));
+                guard::guard("frame rate", || {
+                    this.edit_project(cx, |s| s.timing.fps = *v)
+                });
             }),
             cx.subscribe(&start, |this, _, NumberEvent::Change(v), cx| {
                 guard::guard("export start", || {
@@ -216,7 +245,11 @@ impl PropertiesPanel {
     /// Replaces the output settings, as a project that was opened has them.
     pub fn set_output(&mut self, output: OutputSettings, cx: &mut Context<Self>) {
         self.output = output;
-        for (field, value) in [(&self.start, output.start), (&self.duration, output.duration), (&self.export_fps, output.fps)] {
+        for (field, value) in [
+            (&self.start, output.start),
+            (&self.duration, output.duration),
+            (&self.export_fps, output.fps),
+        ] {
             field.update(cx, |f, cx| f.set_value(value, cx));
         }
         cx.notify();
@@ -225,11 +258,16 @@ impl PropertiesPanel {
     fn edit_project(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut ProjectSettings)) {
         let mut settings = self.editor.read(cx).settings();
         f(&mut settings);
-        self.editor.update(cx, |e, cx| e.update_settings(settings, cx));
+        self.editor
+            .update(cx, |e, cx| e.update_settings(settings, cx));
         cx.notify();
     }
 
-    fn canvas_page(&mut self, settings: &ProjectSettings, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn canvas_page(
+        &mut self,
+        settings: &ProjectSettings,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let canvas = settings.canvas;
         let follow = canvas.follow_preview;
         self.shown = self.playback.read(cx).render_size();
@@ -309,13 +347,28 @@ impl PropertiesPanel {
                     )
                 })
                 .collect();
-            field("Presets", None, div().grid().grid_cols(2).gap_2().children(cards), cx)
+            field(
+                "Presets",
+                None,
+                div().grid().grid_cols(2).gap_2().children(cards),
+                cx,
+            )
         };
-        let fixed = div().flex().flex_col().gap_6().when(follow, |d| d.opacity(0.5)).child(resolution).child(presets);
+        let fixed = div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .when(follow, |d| d.opacity(0.5))
+            .child(resolution)
+            .child(presets);
         // Greyed out and inert while the canvas follows the preview.
         vec![
             size,
-            if follow { fixed.occlude().into_any_element() } else { fixed.into_any_element() },
+            if follow {
+                fixed.occlude().into_any_element()
+            } else {
+                fixed.into_any_element()
+            },
         ]
     }
 
@@ -376,9 +429,17 @@ impl PropertiesPanel {
         vec![playback, rate]
     }
 
-    fn colour_page(&mut self, settings: &ProjectSettings, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn colour_page(
+        &mut self,
+        settings: &ProjectSettings,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let options = [
-            (ColorSpace::Srgb, "sRGB", "The standard gamut, shown alike on every display."),
+            (
+                ColorSpace::Srgb,
+                "sRGB",
+                "The standard gamut, shown alike on every display.",
+            ),
             (
                 ColorSpace::DisplayP3,
                 "Display P3",
@@ -417,18 +478,25 @@ impl PropertiesPanel {
         let weak = cx.entity().downgrade();
         let running = self.job.read(cx).is_running();
         let options: Vec<T> = items.iter().map(|(value, _, _)| *value).collect();
-        let buttons = items.iter().enumerate().map(|(index, (value, label, enabled))| {
-            Button::new((id, index))
-                .label(*label)
-                .selected(selected(*value))
-                .disabled(running || !enabled)
-        });
-        ButtonGroup::new(id).children(buttons).on_click(move |indices: &Vec<usize>, _, cx| {
-            guard::guard("choice", || {
-                let Some(value) = indices.first().and_then(|&i| options.get(i).copied()) else { return };
-                weak.update(cx, |panel, cx| choose(panel, value, cx)).ok();
+        let buttons = items
+            .iter()
+            .enumerate()
+            .map(|(index, (value, label, enabled))| {
+                Button::new((id, index))
+                    .label(*label)
+                    .selected(selected(*value))
+                    .disabled(running || !enabled)
             });
-        })
+        ButtonGroup::new(id)
+            .children(buttons)
+            .on_click(move |indices: &Vec<usize>, _, cx| {
+                guard::guard("choice", || {
+                    let Some(value) = indices.first().and_then(|&i| options.get(i).copied()) else {
+                        return;
+                    };
+                    weak.update(cx, |panel, cx| choose(panel, value, cx)).ok();
+                });
+            })
     }
 
     fn output_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -489,7 +557,13 @@ impl PropertiesPanel {
             Codec::Png,
             Codec::QuickTimeAnimation,
         ]
-        .map(|codec| (codec, codec.label(), codec.supports_container(output.container)));
+        .map(|codec| {
+            (
+                codec,
+                codec.label(),
+                codec.supports_container(output.container),
+            )
+        });
         let codec_group = self.choice_group(
             "export-codec",
             &codecs,
@@ -583,7 +657,9 @@ impl PropertiesPanel {
             .label("Export video…")
             .primary()
             .disabled(running)
-            .on_click(cx.safe_listener(|this, _: &ClickEvent, window, cx| this.start_export(window, cx)));
+            .on_click(
+                cx.safe_listener(|this, _: &ClickEvent, window, cx| this.start_export(window, cx)),
+            );
 
         [
             description.into_any_element(),
@@ -604,8 +680,15 @@ impl PropertiesPanel {
                     .child(div().flex_1().child(self.duration.clone())),
                 cx,
             ),
-            field("Frame rate", None, div().w(px(160.0)).child(self.export_fps.clone()), cx),
-            AnyView::from(self.job.clone()).cached(StyleRefinement::default()).into_any_element(),
+            field(
+                "Frame rate",
+                None,
+                div().w(px(160.0)).child(self.export_fps.clone()),
+                cx,
+            ),
+            AnyView::from(self.job.clone())
+                .cached(StyleRefinement::default())
+                .into_any_element(),
             div()
                 .text_xs()
                 .text_color(muted)
@@ -658,10 +741,19 @@ impl PropertiesPanel {
 
     fn begin(&mut self, program: Program, path: PathBuf, cx: &mut Context<Self>) {
         let size = self.playback.read(cx).render_size();
-        let media = self.playback.update(cx, |playback, _| playback.export_media(&program.plan));
-        let scene = Scene { program, media, size };
+        let media = self
+            .playback
+            .update(cx, |playback, _| playback.export_media(&program.plan));
+        let scene = Scene {
+            program,
+            media,
+            size,
+        };
         let settings = self.output.to_settings();
-        match self.job.update(cx, |job, cx| job.start(scene, settings, path, cx)) {
+        match self
+            .job
+            .update(cx, |job, cx| job.start(scene, settings, path, cx))
+        {
             Ok(()) => self.set_editable(false, cx),
             Err(error) => self.failed(&error, cx),
         }
@@ -713,7 +805,10 @@ impl PropertiesPanel {
                 let section = info.section;
                 let current = self.section == section;
                 div()
-                    .id(SharedString::from(format!("properties-section-{}", info.label)))
+                    .id(SharedString::from(format!(
+                        "properties-section-{}",
+                        info.label
+                    )))
                     .px_2()
                     .py(px(6.0))
                     .rounded(theme.radius.md)
@@ -743,7 +838,9 @@ pub(crate) fn segmented(
     on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
 ) -> ButtonGroup {
     let buttons = labels.into_iter().enumerate().map(|(index, label)| {
-        Button::new((id, index)).label(label).selected(index == selected)
+        Button::new((id, index))
+            .label(label)
+            .selected(index == selected)
     });
     segmented_buttons(id, buttons, on_change)
 }
@@ -755,7 +852,10 @@ pub(crate) fn segmented_with_icons(
     on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
 ) -> ButtonGroup {
     let buttons = items.into_iter().enumerate().map(|(index, (icon, label))| {
-        Button::new((id, index)).icon(icon).label(label).selected(index == selected)
+        Button::new((id, index))
+            .icon(icon)
+            .label(label)
+            .selected(index == selected)
     });
     segmented_buttons(id, buttons, on_change)
 }
@@ -765,17 +865,24 @@ fn segmented_buttons(
     buttons: impl IntoIterator<Item = Button>,
     on_change: impl Fn(usize, &mut Window, &mut App) + 'static,
 ) -> ButtonGroup {
-    ButtonGroup::new(id).children(buttons).on_click(move |indices: &Vec<usize>, window, cx| {
-        guard::guard("segmented control", || {
-            if let Some(&index) = indices.first() {
-                on_change(index, window, cx);
-            }
-        });
-    })
+    ButtonGroup::new(id)
+        .children(buttons)
+        .on_click(move |indices: &Vec<usize>, window, cx| {
+            guard::guard("segmented control", || {
+                if let Some(&index) = indices.first() {
+                    on_change(index, window, cx);
+                }
+            });
+        })
 }
 
 /// A labelled control with an optional note under its label.
-pub(crate) fn field(label: &str, description: Option<String>, child: impl IntoElement, cx: &App) -> AnyElement {
+pub(crate) fn field(
+    label: &str,
+    description: Option<String>,
+    child: impl IntoElement,
+    cx: &App,
+) -> AnyElement {
     let c = &cx.theme().colors;
     let text = cx.theme().text;
     div()
@@ -787,8 +894,18 @@ pub(crate) fn field(label: &str, description: Option<String>, child: impl IntoEl
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
-                .child(div().text_size(text.sm).font_weight(FontWeight::MEDIUM).child(label.to_owned()))
-                .children(description.map(|d| div().text_size(text.xs).text_color(c.muted_foreground).child(d))),
+                .child(
+                    div()
+                        .text_size(text.sm)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(label.to_owned()),
+                )
+                .children(description.map(|d| {
+                    div()
+                        .text_size(text.xs)
+                        .text_color(c.muted_foreground)
+                        .child(d)
+                })),
         )
         .child(child)
         .into_any_element()
@@ -819,8 +936,18 @@ pub(crate) fn card<V: 'static>(
         .cursor_pointer()
         .hover(|s| s.bg(c.muted))
         .on_click(cx.safe_listener(move |this, _: &ClickEvent, _, cx| on_click(this, cx)))
-        .child(div().text_size(theme.text.sm).font_weight(FontWeight::MEDIUM).child(title.to_owned()))
-        .child(div().text_size(theme.text.xs).text_color(c.muted_foreground).child(detail.to_owned()))
+        .child(
+            div()
+                .text_size(theme.text.sm)
+                .font_weight(FontWeight::MEDIUM)
+                .child(title.to_owned()),
+        )
+        .child(
+            div()
+                .text_size(theme.text.xs)
+                .text_color(c.muted_foreground)
+                .child(detail.to_owned()),
+        )
         .into_any_element()
 }
 
@@ -887,7 +1014,12 @@ impl Render for PropertiesPanel {
                                         .font_weight(FontWeight::MEDIUM)
                                         .child(label),
                                 )
-                                .child(div().text_size(theme.text.xs).text_color(c.muted_foreground).child(description)),
+                                .child(
+                                    div()
+                                        .text_size(theme.text.xs)
+                                        .text_color(c.muted_foreground)
+                                        .child(description),
+                                ),
                         )
                         .child(
                             div()
@@ -917,7 +1049,10 @@ mod tests {
     use super::*;
     use crate::preferences;
 
-    fn panel(cx: &mut TestAppContext, output: OutputSettings) -> (Entity<PropertiesPanel>, VisualTestContext) {
+    fn panel(
+        cx: &mut TestAppContext,
+        output: OutputSettings,
+    ) -> (Entity<PropertiesPanel>, VisualTestContext) {
         cx.update(theme::init);
         cx.update(preferences::init);
         let (panel, cx) = cx.add_window_view(move |window, cx| {
@@ -960,7 +1095,10 @@ mod tests {
             })
         });
         let edited = project(&panel, &mut cx);
-        assert_eq!((edited.timing.fps, edited.canvas.width, edited.color_space), (30.0, 640, ColorSpace::DisplayP3));
+        assert_eq!(
+            (edited.timing.fps, edited.canvas.width, edited.color_space),
+            (30.0, 640, ColorSpace::DisplayP3)
+        );
         assert_eq!(announced.borrow().len(), 1, "the change is announced once");
     }
 
@@ -982,14 +1120,27 @@ mod tests {
     #[gpui::test]
     fn the_output_fields_edit_the_output(cx: &mut TestAppContext) {
         let (panel, mut cx) = panel(cx, OutputSettings::new(60.0));
-        assert_eq!(panel.read_with(&cx, |p, _| p.output()), OutputSettings::new(60.0), "a new output starts at the project's frame rate");
-        let (start, duration, fps) = panel.read_with(&cx, |p, _| (p.start.clone(), p.duration.clone(), p.export_fps.clone()));
+        assert_eq!(
+            panel.read_with(&cx, |p, _| p.output()),
+            OutputSettings::new(60.0),
+            "a new output starts at the project's frame rate"
+        );
+        let (start, duration, fps) = panel.read_with(&cx, |p, _| {
+            (p.start.clone(), p.duration.clone(), p.export_fps.clone())
+        });
         user_edits(&start, 2.5, &mut cx);
         user_edits(&duration, 1.0, &mut cx);
         user_edits(&fps, 24.0, &mut cx);
         let output = panel.read_with(&cx, |p, _| p.output());
-        assert_eq!((output.start, output.duration, output.fps), (2.5, 1.0, 24.0));
-        assert_eq!(project(&panel, &mut cx).timing.fps, 60.0, "the export's frame rate leaves the project's alone");
+        assert_eq!(
+            (output.start, output.duration, output.fps),
+            (2.5, 1.0, 24.0)
+        );
+        assert_eq!(
+            project(&panel, &mut cx).timing.fps,
+            60.0,
+            "the export's frame rate leaves the project's alone"
+        );
     }
 
     #[gpui::test]
@@ -1000,12 +1151,18 @@ mod tests {
             p.output.alpha = true;
             cx.notify();
         });
-        assert!(panel.read_with(&cx, |p, _| p.output().to_settings().alpha), "4444 keeps alpha");
+        assert!(
+            panel.read_with(&cx, |p, _| p.output().to_settings().alpha),
+            "4444 keeps alpha"
+        );
         panel.update(&mut cx, |p, cx| {
             p.output.choose_codec(Codec::ProRes(ProResProfile::Hq));
             cx.notify();
         });
-        assert!(!panel.read_with(&cx, |p, _| p.output().to_settings().alpha), "422 has no alpha channel");
+        assert!(
+            !panel.read_with(&cx, |p, _| p.output().to_settings().alpha),
+            "422 has no alpha channel"
+        );
     }
 
     #[gpui::test]
@@ -1022,7 +1179,11 @@ mod tests {
         panel.update(&mut cx, |p, cx| p.set_output(stored, cx));
         assert_eq!(panel.read_with(&cx, |p, _| p.output()), stored);
         let shown = panel.read_with(&cx, |p, cx| {
-            (p.start.read(cx).value(), p.duration.read(cx).value(), p.export_fps.read(cx).value())
+            (
+                p.start.read(cx).value(),
+                p.duration.read(cx).value(),
+                p.export_fps.read(cx).value(),
+            )
         });
         assert_eq!(shown, (2.0, 1.5, 24.0));
     }
@@ -1030,7 +1191,12 @@ mod tests {
     #[gpui::test]
     fn every_section_renders(cx: &mut TestAppContext) {
         let (panel, mut cx) = panel(cx, OutputSettings::new(60.0));
-        for section in [Section::Canvas, Section::Time, Section::Colour, Section::Output] {
+        for section in [
+            Section::Canvas,
+            Section::Time,
+            Section::Colour,
+            Section::Output,
+        ] {
             panel.update(&mut cx, |p, cx| p.show(section, cx));
             cx.run_until_parked();
             cx.update(|window, _| window.refresh());

@@ -1,6 +1,6 @@
 use gpui::{
-    Bounds, Hsla, ParentElement as _, Pixels, Point, Styled as _, Window,
-    canvas, hsla, point, px, relative,
+    Bounds, Hsla, ParentElement as _, Pixels, Point, Styled as _, Window, canvas, hsla, point, px,
+    relative,
 };
 use gpui_flow::{Handle, HandleType, NodeProps, Position};
 use shader_graph::types::{ScalarKind, WgslType};
@@ -57,7 +57,10 @@ pub fn paint_socket(
         _ if texture => {
             let radius = if inset == 0.0 { 3.0 } else { 2.0 };
             window.paint_quad(gpui::quad(
-                Bounds::new(at(inset, inset), gpui::size(px(w - 2.0 * inset), px(h - 2.0 * inset))),
+                Bounds::new(
+                    at(inset, inset),
+                    gpui::size(px(w - 2.0 * inset), px(h - 2.0 * inset)),
+                ),
                 px(radius),
                 color,
                 px(0.0),
@@ -66,9 +69,16 @@ pub fn paint_socket(
             ));
         }
         ScalarKind::F32 | ScalarKind::I32 => {
-            let radius = if kind == ScalarKind::F32 { (w / 2.0 - inset).max(0.0) } else { (1.5 * unit - inset * 0.5).max(0.0) };
+            let radius = if kind == ScalarKind::F32 {
+                (w / 2.0 - inset).max(0.0)
+            } else {
+                (1.5 * unit - inset * 0.5).max(0.0)
+            };
             window.paint_quad(gpui::quad(
-                Bounds::new(at(inset, inset), gpui::size(px(w - 2.0 * inset), px(h - 2.0 * inset))),
+                Bounds::new(
+                    at(inset, inset),
+                    gpui::size(px(w - 2.0 * inset), px(h - 2.0 * inset)),
+                ),
                 px(radius),
                 color,
                 px(0.0),
@@ -80,7 +90,12 @@ pub fn paint_socket(
             let i = inset * 1.5;
             polygon(
                 window,
-                &[at(w / 2.0, i), at(w - i, h / 2.0), at(w / 2.0, h - i), at(i, h / 2.0)],
+                &[
+                    at(w / 2.0, i),
+                    at(w - i, h / 2.0),
+                    at(w / 2.0, h - i),
+                    at(i, h / 2.0),
+                ],
                 color,
             );
         }
@@ -109,7 +124,10 @@ pub fn socket(props: &NodeProps, spec: &SocketSpec, theme: &Theme) -> Handle {
     let fill = socket_color(spec.ty, theme);
     let outline = theme.colors.card;
     let hover = theme.colors.foreground;
-    let state = props.handle_state(spec.kind, spec.id.as_ref().map(|s| s.clone().into()).as_ref());
+    let state = props.handle_state(
+        spec.kind,
+        spec.id.as_ref().map(|s| s.clone().into()).as_ref(),
+    );
     let active = state.connecting_to && state.valid;
     let kind = spec.ty.kind();
     let texture = spec.ty.is_texture();
@@ -130,10 +148,12 @@ pub fn socket(props: &NodeProps, spec: &SocketSpec, theme: &Theme) -> Handle {
     handle.child(
         canvas(
             |_, _, _| {},
-            move |bounds, _, window, _| { guard::guard("socket canvas", || {
-                let color = if active { hover } else { fill };
-                paint_socket(window, bounds, kind, texture, color, outline, z);
-            }); },
+            move |bounds, _, window, _| {
+                guard::guard("socket canvas", || {
+                    let color = if active { hover } else { fill };
+                    paint_socket(window, bounds, kind, texture, color, outline, z);
+                });
+            },
         )
         .absolute()
         .size_full(),

@@ -7,8 +7,11 @@ fn f32_results_round_as_the_gpu_does() {
     let mut g = TestGraph::new();
     let (a, b, sum) = (g.add("declare"), g.add("declare"), g.add("add"));
     g.set(&a, "x", 0.1).set(&b, "x", 0.2);
-    g.link((&a, "value"), (&sum, "operands")).link((&b, "value"), (&sum, "operands"));
-    let [value] = g.eval(&sum, "result")[..] else { panic!("one component") };
+    g.link((&a, "value"), (&sum, "operands"))
+        .link((&b, "value"), (&sum, "operands"));
+    let [value] = g.eval(&sum, "result")[..] else {
+        panic!("one component")
+    };
     assert_eq!(value, f64::from(0.1f32 + 0.2f32));
     assert_ne!(value, 0.1 + 0.2);
 }
@@ -20,7 +23,8 @@ fn integers_wrap_as_wgsls_do() {
     g.force_type(&sum, WgslType::I32);
     for _ in 0..3 {
         let a = g.add("declare");
-        g.force_type(&a, WgslType::I32).set(&a, "x", f64::from(1u32 << 30));
+        g.force_type(&a, WgslType::I32)
+            .set(&a, "x", f64::from(1u32 << 30));
         g.link((&a, "value"), (&sum, "operands"));
     }
     assert_eq!(g.eval(&sum, "result"), [-f64::from(1u32 << 30)]);
@@ -28,8 +32,20 @@ fn integers_wrap_as_wgsls_do() {
 
 #[test]
 fn only_nodes_with_a_meaning_on_the_cpu_have_one() {
-    let has = |ty: &str| registered_nodes().iter().any(|d| d.type_id == ty && d.cpu.is_some());
-    for ty in ["add", "sin", "declare", "switch", "color-ramp", "curve", "reroute"] {
+    let has = |ty: &str| {
+        registered_nodes()
+            .iter()
+            .any(|d| d.type_id == ty && d.cpu.is_some())
+    };
+    for ty in [
+        "add",
+        "sin",
+        "declare",
+        "switch",
+        "color-ramp",
+        "curve",
+        "reroute",
+    ] {
         assert!(has(ty), "{ty} computes on the CPU");
     }
     for ty in ["uv", "sample-texture", "custom-wgsl", "image"] {
@@ -110,11 +126,23 @@ fn integer_op(ty: &str, wgsl_type: WgslType, a: f64, b: f64) -> f64 {
 #[test]
 fn integer_arithmetic_wraps_both_ways() {
     let max = f64::from(i32::MAX);
-    assert_eq!(integer_op("add", WgslType::I32, max, 1.0), f64::from(i32::MIN));
-    assert_eq!(integer_op("sub", WgslType::I32, f64::from(i32::MIN), 1.0), max);
+    assert_eq!(
+        integer_op("add", WgslType::I32, max, 1.0),
+        f64::from(i32::MIN)
+    );
+    assert_eq!(
+        integer_op("sub", WgslType::I32, f64::from(i32::MIN), 1.0),
+        max
+    );
     assert_eq!(integer_op("mul", WgslType::I32, max, 2.0), -2.0);
-    assert_eq!(integer_op("add", WgslType::U32, f64::from(u32::MAX), 1.0), 0.0);
-    assert_eq!(integer_op("sub", WgslType::U32, 0.0, 1.0), f64::from(u32::MAX));
+    assert_eq!(
+        integer_op("add", WgslType::U32, f64::from(u32::MAX), 1.0),
+        0.0
+    );
+    assert_eq!(
+        integer_op("sub", WgslType::U32, 0.0, 1.0),
+        f64::from(u32::MAX)
+    );
 }
 
 #[test]

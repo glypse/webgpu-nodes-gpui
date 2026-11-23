@@ -38,8 +38,11 @@ impl GraphModel {
         let key = self.active_definition_ref();
         let doc = self.project.document(&key)?;
         let analysis = self.frame_analysis(doc);
-        let wanted: HashSet<String> =
-            node_ids.iter().filter(|id| doc.has_node(id)).cloned().collect();
+        let wanted: HashSet<String> = node_ids
+            .iter()
+            .filter(|id| doc.has_node(id))
+            .cloned()
+            .collect();
         let moved: HashSet<String> = analysis.outermost(&wanted).into_iter().collect();
         let members: Vec<&GraphNode> = doc.nodes.iter().filter(|n| moved.contains(&n.id)).collect();
         if members.is_empty() {
@@ -47,8 +50,14 @@ impl GraphModel {
         }
         let parent = analysis.common_frame(moved.iter().map(String::as_str));
         let position = Point::new(
-            members.iter().map(|n| n.position.x).fold(f32::INFINITY, f32::min),
-            members.iter().map(|n| n.position.y).fold(f32::INFINITY, f32::min),
+            members
+                .iter()
+                .map(|n| n.position.x)
+                .fold(f32::INFINITY, f32::min),
+            members
+                .iter()
+                .map(|n| n.position.y)
+                .fold(f32::INFINITY, f32::min),
         );
         let mut frame = GraphNode::new(LAYOUT_FRAME, position);
         frame.data = default_data_for_type(LAYOUT_FRAME);
@@ -107,16 +116,23 @@ impl GraphModel {
             return false;
         }
         let key = self.active_definition_ref();
-        let Some(doc) = self.project.document(&key) else { return false };
+        let Some(doc) = self.project.document(&key) else {
+            return false;
+        };
         if frame_id.is_some_and(|f| !doc.node(f).is_some_and(|n| n.is(LAYOUT_FRAME))) {
             return false;
         }
         let analysis = self.frame_analysis(doc);
         let around: Vec<String> = frame_id.map_or_else(Vec::new, |f| {
-            std::iter::once(f.to_owned()).chain(analysis.frames_around(f)).collect()
+            std::iter::once(f.to_owned())
+                .chain(analysis.frames_around(f))
+                .collect()
         });
-        let wanted: HashSet<String> =
-            node_ids.iter().filter(|id| doc.has_node(id)).cloned().collect();
+        let wanted: HashSet<String> = node_ids
+            .iter()
+            .filter(|id| doc.has_node(id))
+            .cloned()
+            .collect();
         let moved: HashSet<String> = analysis
             .outermost(&wanted)
             .into_iter()
@@ -127,7 +143,9 @@ impl GraphModel {
         if moved.is_empty() {
             return false;
         }
-        let Some(doc) = self.doc_mut(&key) else { return false };
+        let Some(doc) = self.doc_mut(&key) else {
+            return false;
+        };
         for node in doc.nodes.iter_mut().filter(|n| moved.contains(&n.id)) {
             node.frame = frame_id.map(str::to_owned);
         }
@@ -141,7 +159,9 @@ impl GraphModel {
             return false;
         }
         let key = self.active_definition_ref();
-        let Some(doc) = self.project.document(&key) else { return false };
+        let Some(doc) = self.project.document(&key) else {
+            return false;
+        };
         let analysis = self.frame_analysis(doc);
         let wanted: HashSet<String> = node_ids.iter().cloned().collect();
         let moved: Vec<(String, Option<String>)> = analysis
@@ -155,7 +175,9 @@ impl GraphModel {
         if moved.is_empty() {
             return false;
         }
-        let Some(doc) = self.doc_mut(&key) else { return false };
+        let Some(doc) = self.doc_mut(&key) else {
+            return false;
+        };
         for (id, frame) in moved {
             if let Some(node) = doc.node_mut(&id) {
                 node.frame = frame;

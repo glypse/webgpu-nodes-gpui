@@ -299,6 +299,7 @@ fn rejects_an_asset_that_isnt_what_an_import_makes() {
         "kind": "image", "id": "a1", "name": "Photo", "file": "project.json",
         "mime": "image/png", "bytes": 1, "hash": "0".repeat(64), "width": 1, "height": 1,
     });
-    let project = json!({ "definitions": { ROOT_ID: { "nodes": [], "edges": [] } }, "assets": [asset] });
+    let project =
+        json!({ "definitions": { ROOT_ID: { "nodes": [], "edges": [] } }, "assets": [asset] });
     assert!(schema_error(&project.to_string()).contains("isn't a valid asset"));
 }

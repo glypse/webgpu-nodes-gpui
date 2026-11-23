@@ -1,23 +1,23 @@
-use guard::SafeListener as _;
 use gpui::prelude::FluentBuilder as _;
+use guard::SafeListener as _;
 use std::cell::{Cell, Ref};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use handle::{ModelHandle, ModelMut};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EventEmitter, ExternalPaths, FocusHandle,
-    Focusable, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Pixels,
-    Point, Render, SharedString, Styled as _, Subscription, Window, div,
-    px,
+    AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EventEmitter, ExternalPaths,
+    FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent,
+    ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Subscription, Window,
+    div, px,
 };
 use gpui_flow::{
-    Connection as FlowConnection, ControlsOptions, Edge, EdgeStyle, FitViewOptions, Flow, FlowEvent, Id,
-    Layers,
-    Node, Viewport, Xy,
+    Connection as FlowConnection, ControlsOptions, Edge, EdgeStyle, FitViewOptions, Flow,
+    FlowEvent, Id, Layers, Node, Viewport, Xy,
 };
+use handle::{ModelHandle, ModelMut};
+use shader_graph::UniformValue;
 use shader_graph::catalog::{
     self, AddMenuEntry, Pending, add_entry, add_entry_connected, add_menu_entries_with,
     connectable_entries,
@@ -29,20 +29,19 @@ use shader_graph::graph::{
 };
 use shader_graph::layout::{LayoutError, LayoutOptions, NodeGeometry};
 use shader_graph::types::{HandleType, InputValue, WgslType};
-use shader_graph::UniformValue;
 use theme::popup::{Action, Cascade, Row};
 use theme::{ActiveTheme as _, popup};
 
 use crate::assets::{self, AssetDrag};
 use crate::graph::add_menu::{AddMenu, AddMenuEvent};
 use crate::graph::fields::Edit;
-use crate::graph::type_picker::{self, TypePicker};
 use crate::graph::frames::{self, Drag, FrameLook, SharedDrag, Snapshot, SnapshotItem, ZoneBox};
 use crate::graph::node::{node_width, render_node, view_of};
 use crate::graph::popovers::{self, ColorPopup, SocketsPopup};
-use crate::graph::widgets::{self, Widgets};
 use crate::graph::sheet;
 use crate::graph::socket::socket_color;
+use crate::graph::type_picker::{self, TypePicker};
+use crate::graph::widgets::{self, Widgets};
 use crate::graph::zones::{self, Bubble};
 use crate::layout::GraphView;
 use crate::playback::Playback;
@@ -138,11 +137,7 @@ pub struct ListItem {
 }
 
 impl ListItem {
-    pub fn new(
-        label: impl Into<SharedString>,
-        checked: Option<bool>,
-        on_select: OnSelect,
-    ) -> Self {
+    pub fn new(label: impl Into<SharedString>, checked: Option<bool>, on_select: OnSelect) -> Self {
         Self {
             label: label.into(),
             checked,
@@ -243,7 +238,9 @@ const REROUTE_SIZE: f32 = 18.0;
 
 /// Whether two sets of asset files hold the same files: the same ids, each the same bytes.
 fn same_files(a: &AssetFiles, b: &AssetFiles) -> bool {
-    a.len() == b.len() && b.iter().all(|(id, bytes)| a.get(id).is_some_and(|known| Arc::ptr_eq(known, bytes)))
+    a.len() == b.len()
+        && b.iter()
+            .all(|(id, bytes)| a.get(id).is_some_and(|known| Arc::ptr_eq(known, bytes)))
 }
 
 /// Steps of a widget edit closer than this belong to one gesture.
@@ -262,7 +259,12 @@ impl Focusable for Editor {
 fn demo_project() -> GraphProject {
     let mut model = GraphModel::default();
     let uv = model.add_node("uv", GraphPoint::new(0.0, 0.0));
-    let output = model.root().nodes.iter().find(|n| n.is(FRAG_OUTPUT)).map(|n| n.id.clone());
+    let output = model
+        .root()
+        .nodes
+        .iter()
+        .find(|n| n.is(FRAG_OUTPUT))
+        .map(|n| n.id.clone());
     if let (Some(uv), Some(output)) = (uv, output) {
         model.try_connect(Connection::new(uv, "uv", output, "color"));
     }
@@ -270,11 +272,19 @@ fn demo_project() -> GraphProject {
 }
 
 fn flow_viewport(v: shader_graph::graph::Viewport) -> Viewport {
-    Viewport { x: v.x, y: v.y, zoom: v.zoom }
+    Viewport {
+        x: v.x,
+        y: v.y,
+        zoom: v.zoom,
+    }
 }
 
 fn graph_viewport(v: Viewport) -> shader_graph::graph::Viewport {
-    shader_graph::graph::Viewport { x: v.x, y: v.y, zoom: v.zoom }
+    shader_graph::graph::Viewport {
+        x: v.x,
+        y: v.y,
+        zoom: v.zoom,
+    }
 }
 
 fn flow_point(p: GraphPoint) -> Xy {
@@ -287,7 +297,12 @@ fn graph_point(p: Xy) -> GraphPoint {
 
 impl Editor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build(ModelHandle::new(GraphModel::new(demo_project())), true, window, cx)
+        Self::build(
+            ModelHandle::new(GraphModel::new(demo_project())),
+            true,
+            window,
+            cx,
+        )
     }
 
     /// What another area needs to edit the project this one edits.
@@ -312,7 +327,12 @@ impl Editor {
         editor
     }
 
-    fn build(model: ModelHandle, primary: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn build(
+        model: ModelHandle,
+        primary: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let validator = model.clone();
         let flow = cx.new(|cx| {
             let mut flow = Flow::new(cx);
@@ -389,8 +409,14 @@ impl Editor {
 
     /// Replaces the whole project, or starts over from the demo graph. A saved
     /// view puts the editor in the group it was left in, at the camera it had.
-    pub fn load_project(&mut self, project: Option<GraphProject>, view: Option<&GraphView>, cx: &mut Context<Self>) {
-        self.model_mut().set_project(project.unwrap_or_else(demo_project));
+    pub fn load_project(
+        &mut self,
+        project: Option<GraphProject>,
+        view: Option<&GraphView>,
+        cx: &mut Context<Self>,
+    ) {
+        self.model_mut()
+            .set_project(project.unwrap_or_else(demo_project));
         self.viewports = self
             .model
             .borrow()
@@ -417,11 +443,19 @@ impl Editor {
         for area in self.model.areas() {
             if area.entity_id() != me {
                 let viewports = self.viewports.clone();
-                area.update(cx, |other, cx| guard::guard("load project", || other.adopt_project(viewports, cx))).ok();
+                area.update(cx, |other, cx| {
+                    guard::guard("load project", || other.adopt_project(viewports, cx))
+                })
+                .ok();
             }
         }
-        let saved = self.viewports.get(&self.model.borrow().active_definition_ref()).copied();
-        self.flow.update(cx, |flow, _| flow.options.fit_view_on_init = saved.is_none());
+        let saved = self
+            .viewports
+            .get(&self.model.borrow().active_definition_ref())
+            .copied();
+        self.flow.update(cx, |flow, _| {
+            flow.options.fit_view_on_init = saved.is_none()
+        });
         self.restore_camera(saved, cx);
     }
 
@@ -435,7 +469,11 @@ impl Editor {
 
     /// Fits the nodes at exactly `zoom`, for `--zoom`.
     pub fn fit_at_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
-        let options = FitViewOptions { min_zoom: Some(zoom), max_zoom: Some(zoom), ..Default::default() };
+        let options = FitViewOptions {
+            min_zoom: Some(zoom),
+            max_zoom: Some(zoom),
+            ..Default::default()
+        };
         self.flow.update(cx, |flow, cx| flow.fit_view(options, cx));
     }
 
@@ -462,14 +500,22 @@ impl Editor {
         self.color_popup = None;
         *self.frame_drag.borrow_mut() = None;
         self.sync_view(cx);
-        self.restore_camera(self.viewports.get(&self.model.borrow().active_definition_ref()).copied(), cx);
+        self.restore_camera(
+            self.viewports
+                .get(&self.model.borrow().active_definition_ref())
+                .copied(),
+            cx,
+        );
     }
 
     /// The project as it is now, with each group's camera as it was left.
     pub fn project(&self, cx: &App) -> GraphProject {
         let mut project = self.model.borrow().project().clone();
         let mut cameras = self.viewports.clone();
-        cameras.insert(self.model.borrow().active_definition_ref(), self.flow.read(cx).viewport());
+        cameras.insert(
+            self.model.borrow().active_definition_ref(),
+            self.flow.read(cx).viewport(),
+        );
         for (key, viewport) in cameras {
             if let Some(doc) = project.definitions.get_mut(&key) {
                 doc.viewport = Some(graph_viewport(viewport));
@@ -526,7 +572,10 @@ impl Editor {
         let me = cx.entity_id();
         for area in self.model.areas() {
             if area.entity_id() != me {
-                area.update(cx, |other, cx| guard::guard("sync area", || other.sync_view(cx))).ok();
+                area.update(cx, |other, cx| {
+                    guard::guard("sync area", || other.sync_view(cx))
+                })
+                .ok();
             }
         }
     }
@@ -559,7 +608,8 @@ impl Editor {
         let selected = model.selected_node_ids();
         let locked = model.is_locked();
         let gamut = widgets::gamut_of(model.settings().color_space);
-        self.widgets.retain(&doc.nodes.iter().map(|n| n.id.clone()).collect());
+        self.widgets
+            .retain(&doc.nodes.iter().map(|n| n.id.clone()).collect());
         let mut nodes: Vec<Node> = Vec::new();
         for n in &doc.nodes {
             let mut view = view_of(&model, n);
@@ -568,7 +618,9 @@ impl Editor {
             let ed = editor.clone();
             let mut node = Node::new(n.id.clone(), flow_point(n.position))
                 .width(node_width(&n.node_type))
-                .render(move |props, window, cx| guard::render("node card", || render_node(&view, props, &ed, window, cx)));
+                .render(move |props, window, cx| {
+                    guard::render("node card", || render_node(&view, props, &ed, window, cx))
+                });
             node.width = None;
             node.selected = selected.contains(&n.id);
             node.deletable = Some(n.deletable());
@@ -580,10 +632,17 @@ impl Editor {
         let analysis = model.pass_analysis();
         let path = model.path().to_vec();
         let reveals = |id: &str| selected.iter().any(|s| s == id);
-        let hides_links = |id: &str| doc.node(id).is_some_and(|n| hides_links_reroute(n) && n.data.label.is_some());
-        let mut tagged: HashMap<(&str, &str), Vec<&shader_graph::graph::GraphEdge>> = HashMap::new();
+        let hides_links = |id: &str| {
+            doc.node(id)
+                .is_some_and(|n| hides_links_reroute(n) && n.data.label.is_some())
+        };
+        let mut tagged: HashMap<(&str, &str), Vec<&shader_graph::graph::GraphEdge>> =
+            HashMap::new();
         for o in doc.edges.iter().filter(|o| hides_links(&o.source)) {
-            tagged.entry((o.target.as_str(), o.target_handle.as_str())).or_default().push(o);
+            tagged
+                .entry((o.target.as_str(), o.target_handle.as_str()))
+                .or_default()
+                .push(o);
         }
         let edges: Vec<Edge> = doc
             .edges
@@ -591,7 +650,10 @@ impl Editor {
             .map(|e| {
                 let source_ty = model.resolve_output_handle_type(&e.source, &e.source_handle);
                 let target_ty = model.resolve_input_type(&e.target, &e.target_handle);
-                let (source, target) = (socket_color(source_ty, &theme), socket_color(target_ty, &theme));
+                let (source, target) = (
+                    socket_color(source_ty, &theme),
+                    socket_color(target_ty, &theme),
+                );
                 let mut edge = Edge::new(
                     e.id.clone(),
                     e.source.clone(),
@@ -602,16 +664,25 @@ impl Editor {
                 edge.hidden = unavailable.contains(&e.id);
                 let link = analysis.link(&path, e);
                 let invalid = zones.invalid_edges.contains(&e.id)
-                    || matches!(link, Some(shader_graph::passes::TextureLink::Invalid { .. }));
+                    || matches!(
+                        link,
+                        Some(shader_graph::passes::TextureLink::Invalid { .. })
+                    );
                 let texture = source_ty.is_texture()
                     || matches!(link, Some(shader_graph::passes::TextureLink::Render { .. }));
                 if hides_links(&e.source) {
-                    let siblings = tagged.get(&(e.target.as_str(), e.target_handle.as_str())).map_or(&[][..], Vec::as_slice);
+                    let siblings = tagged
+                        .get(&(e.target.as_str(), e.target_handle.as_str()))
+                        .map_or(&[][..], Vec::as_slice);
                     let index = siblings.iter().position(|o| o.id == e.id).unwrap_or(0);
                     edge.tag = Some(gpui_flow::EdgeTag {
                         text: model.node_label(&e.source),
                         source_color: source,
-                        target_color: if invalid { theme.colors.destructive } else { target },
+                        target_color: if invalid {
+                            theme.colors.destructive
+                        } else {
+                            target
+                        },
                         offset: (index as f32 - (siblings.len() as f32 - 1.0) / 2.0) * TAG_STEP,
                         revealed: reveals(&e.source) || reveals(&e.target),
                     });
@@ -622,9 +693,14 @@ impl Editor {
                     edge.arrow = Some(source);
                 }
                 edge.style = Some(if invalid {
-                    EdgeStyle::solid(theme.colors.destructive).width(1.5).dash(6.0, 4.0).opacity(0.8, 1.0)
+                    EdgeStyle::solid(theme.colors.destructive)
+                        .width(1.5)
+                        .dash(6.0, 4.0)
+                        .opacity(0.8, 1.0)
                 } else {
-                    EdgeStyle::gradient(source, target).width(if texture { 2.5 } else { 1.0 }).opacity(0.6, 1.0)
+                    EdgeStyle::gradient(source, target)
+                        .width(if texture { 2.5 } else { 1.0 })
+                        .opacity(0.6, 1.0)
                 });
                 match link {
                     Some(shader_graph::passes::TextureLink::Sample) if !invalid => {
@@ -645,7 +721,15 @@ impl Editor {
         ordered.sort_by_key(|z| z.depth);
         let padded: Vec<(&shader_graph::zones::Zone, f32)> = ordered
             .iter()
-            .map(|z| (*z, paddings.iter().find(|(id, _)| *id == z.id).map_or(28.0, |p| p.1)))
+            .map(|z| {
+                (
+                    *z,
+                    paddings
+                        .iter()
+                        .find(|(id, _)| *id == z.id)
+                        .map_or(28.0, |p| p.1),
+                )
+            })
             .collect();
         let bubbles: Vec<Bubble> = padded
             .iter()
@@ -724,7 +808,12 @@ impl Editor {
             self.placed.clear();
             return;
         }
-        let loose = self.frame_drag.borrow().as_ref().map(|d| d.loose.clone()).unwrap_or_default();
+        let loose = self
+            .frame_drag
+            .borrow()
+            .as_ref()
+            .map(|d| d.loose.clone())
+            .unwrap_or_default();
         let flow = self.flow.read(cx);
         let (boxes, _) = frames::boxes(&self.frame_snapshot, flow, &loose);
         let mut nodes = flow.nodes().to_vec();
@@ -754,7 +843,9 @@ impl Editor {
         }
         self.frame_settle = Some(cx.spawn(async move |this, cx| {
             for ms in [40, 150, 500] {
-                cx.background_executor().timer(Duration::from_millis(ms)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(ms))
+                    .await;
                 this.update(cx, |editor, cx| {
                     guard::guard("place frames", || editor.place_frames(cx));
                 })
@@ -778,8 +869,11 @@ impl Editor {
         }
         let dragged: Vec<String> = dragged.iter().map(ToString::to_string).collect();
         let positions = self.flow_positions(cx);
-        *self.frame_drag.borrow_mut() =
-            Some(Drag::start(&self.frame_snapshot.analysis, &positions, &dragged));
+        *self.frame_drag.borrow_mut() = Some(Drag::start(
+            &self.frame_snapshot.analysis,
+            &positions,
+            &dragged,
+        ));
     }
 
     /// Frames drag what they hold along, and show which frame a drop would join.
@@ -788,9 +882,10 @@ impl Editor {
             let drag = self.frame_drag.borrow();
             let Some(drag) = drag.as_ref() else { return };
             let flow = self.flow.read(cx);
-            let (Some(from), Some(now)) =
-                (drag.from.get(anchor.as_ref()), flow.nodes().iter().find(|n| n.id == *anchor))
-            else {
+            let (Some(from), Some(now)) = (
+                drag.from.get(anchor.as_ref()),
+                flow.nodes().iter().find(|n| n.id == *anchor),
+            ) else {
                 return;
             };
             (
@@ -813,10 +908,13 @@ impl Editor {
             let flow = self.flow.read(cx);
             let (boxes, analysis) = frames::boxes(&self.frame_snapshot, flow, &loose);
             let rects = frames::node_rects(flow);
-            boxes.get(anchor.as_ref()).or_else(|| rects.get(anchor.as_ref())).and_then(|rect| {
-                let c = rect.center();
-                frames::frame_at(&boxes, &analysis, c, &moving)
-            })
+            boxes
+                .get(anchor.as_ref())
+                .or_else(|| rects.get(anchor.as_ref()))
+                .and_then(|rect| {
+                    let c = rect.center();
+                    frames::frame_at(&boxes, &analysis, c, &moving)
+                })
         };
         if let Some(drag) = self.frame_drag.borrow_mut().as_mut() {
             drag.drop_frame = target;
@@ -839,15 +937,23 @@ impl Editor {
             (Some(from), Some(now)) => GraphPoint::new(now.x - from.x, now.y - from.y),
             _ => GraphPoint::default(),
         };
-        let mut positions: BTreeMap<String, GraphPoint> =
-            dragged.iter().filter_map(|id| Some((id.clone(), *now.get(id)?))).collect();
+        let mut positions: BTreeMap<String, GraphPoint> = dragged
+            .iter()
+            .filter_map(|id| Some((id.clone(), *now.get(id)?)))
+            .collect();
         for (id, p) in &drag.inside {
             positions.insert(id.clone(), GraphPoint::new(p.x + delta.x, p.y + delta.y));
         }
         let targets = {
             let flow = self.flow.read(cx);
             let (boxes, _) = frames::boxes(&self.frame_snapshot, flow, &drag.loose);
-            frames::drop_targets(&analysis, &boxes, &frames::node_rects(flow), &dragged, &drag.moving)
+            frames::drop_targets(
+                &analysis,
+                &boxes,
+                &frames::node_rects(flow),
+                &dragged,
+                &drag.moving,
+            )
         };
         self.model_mut().drop_nodes(&positions, &targets);
         self.sync(cx);
@@ -864,7 +970,10 @@ impl Editor {
         }
         let result = {
             let _span = tracing::info_span!("generate program").entered();
-            self.model.borrow().generate_hoisted().map_err(|e| e.to_string())
+            self.model
+                .borrow()
+                .generate_hoisted()
+                .map_err(|e| e.to_string())
         };
         match result {
             Ok(program) => {
@@ -914,19 +1023,38 @@ impl Editor {
 
     // --- Edits the node cards make ---
 
-    pub(crate) fn set_node_asset(&mut self, node: &str, asset: Option<&str>, cx: &mut Context<Self>) {
+    pub(crate) fn set_node_asset(
+        &mut self,
+        node: &str,
+        asset: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.set_node_asset(node, asset));
     }
 
     /// The picker's Import entry: asks for a file and has the Image or Video node read it.
-    pub(crate) fn import_for_node(&mut self, node: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(playback) = self.playback.clone() else { return };
+    pub(crate) fn import_for_node(
+        &mut self,
+        node: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(playback) = self.playback.clone() else {
+            return;
+        };
         assets::pick_and_import_for_node(&cx.entity(), &playback, node, window, cx);
     }
 
-    pub(crate) fn set_video_playback(&mut self, node: &str, change: PlaybackChange, edit: Edit, cx: &mut Context<Self>) {
+    pub(crate) fn set_video_playback(
+        &mut self,
+        node: &str,
+        change: PlaybackChange,
+        edit: Edit,
+        cx: &mut Context<Self>,
+    ) {
         let first = !self.gesture;
-        self.model_mut().set_video_playback_step(node, change, first);
+        self.model_mut()
+            .set_video_playback_step(node, change, first);
         self.gesture = edit == Edit::Preview;
         self.sync(cx);
         self.regenerate(cx);
@@ -934,7 +1062,12 @@ impl Editor {
 
     /// Assets dragged from the Assets area are dropped at `at` (window coordinates): onto
     /// the Image or Video node under the pointer, or as nodes of their own where they land.
-    pub(crate) fn drop_assets(&mut self, asset_ids: &[String], at: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(crate) fn drop_assets(
+        &mut self,
+        asset_ids: &[String],
+        at: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
         if self.model.borrow().is_locked() {
             return;
         }
@@ -948,14 +1081,23 @@ impl Editor {
                 .iter()
                 .find(|n| {
                     flow.node_rect(&Id::from(n.id.clone())).is_some_and(|r| {
-                        at.x >= r.x && at.x <= r.x + r.width && at.y >= r.y && at.y <= r.y + r.height
+                        at.x >= r.x
+                            && at.x <= r.x + r.width
+                            && at.y >= r.y
+                            && at.y <= r.y + r.height
                     })
                 })
                 .map(|n| n.id.clone());
             (at, onto)
         };
         let mut changed = Vec::new();
-        self.edit(cx, |m| changed = m.drop_assets(asset_ids, GraphPoint::new(flow_at.x, flow_at.y), onto.as_deref()));
+        self.edit(cx, |m| {
+            changed = m.drop_assets(
+                asset_ids,
+                GraphPoint::new(flow_at.x, flow_at.y),
+                onto.as_deref(),
+            )
+        });
         if !changed.is_empty() {
             self.select(changed, cx);
         }
@@ -974,7 +1116,9 @@ impl Editor {
     ) {
         let stored = {
             let model = self.model.borrow();
-            model.node(node).and_then(|n| n.data.values.get(input).copied())
+            model
+                .node(node)
+                .and_then(|n| n.data.values.get(input).copied())
         };
         let next = InputValue::with_component(stored.as_ref(), ty, index, value);
         let first = !self.gesture;
@@ -984,7 +1128,10 @@ impl Editor {
             // A step of a scrub replaces the history step the gesture began with.
             model.edit_gesture(first, |project| {
                 if let Some(key) = project.definition_ref_of(&node).map(str::to_owned)
-                    && let Some(n) = project.definitions.get_mut(&key).and_then(|d| d.node_mut(&node))
+                    && let Some(n) = project
+                        .definitions
+                        .get_mut(&key)
+                        .and_then(|d| d.node_mut(&node))
                 {
                     n.data.values.insert(input, next);
                 }
@@ -996,14 +1143,27 @@ impl Editor {
     }
 
     pub(crate) fn set_enum(&mut self, node: &str, input: &str, value: i64, cx: &mut Context<Self>) {
-        self.edit(cx, |m| m.set_input_value(node, input, Some(InputValue::from(value as f64))));
+        self.edit(cx, |m| {
+            m.set_input_value(node, input, Some(InputValue::from(value as f64)))
+        });
     }
 
-    pub(crate) fn set_setting(&mut self, node: &str, key: &str, value: &str, cx: &mut Context<Self>) {
+    pub(crate) fn set_setting(
+        &mut self,
+        node: &str,
+        key: &str,
+        value: &str,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.set_setting(node, key, value));
     }
 
-    pub(crate) fn set_node_type(&mut self, node: &str, ty: Option<WgslType>, cx: &mut Context<Self>) {
+    pub(crate) fn set_node_type(
+        &mut self,
+        node: &str,
+        ty: Option<WgslType>,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.set_node_type(node, ty));
     }
 
@@ -1038,26 +1198,58 @@ impl Editor {
     }
 
     pub(crate) fn open_sheet(&mut self, node: &str, cx: &mut Context<Self>) {
-        self.sheet = if self.sheet.as_deref() == Some(node) { None } else { Some(node.to_owned()) };
+        self.sheet = if self.sheet.as_deref() == Some(node) {
+            None
+        } else {
+            Some(node.to_owned())
+        };
         cx.notify();
     }
 
-    pub(crate) fn open_list(&mut self, at: Point<Pixels>, items: Vec<ListItem>, cx: &mut Context<Self>) {
+    pub(crate) fn open_list(
+        &mut self,
+        at: Point<Pixels>,
+        items: Vec<ListItem>,
+        cx: &mut Context<Self>,
+    ) {
         self.open_list_at(at, items, Vec::new(), cx);
     }
 
     /// Opens a list with the submenus along `path` (see `Cascade::new`) already showing.
-    pub(crate) fn open_list_at(&mut self, at: Point<Pixels>, items: Vec<ListItem>, path: Vec<usize>, cx: &mut Context<Self>) {
+    pub(crate) fn open_list_at(
+        &mut self,
+        at: Point<Pixels>,
+        items: Vec<ListItem>,
+        path: Vec<usize>,
+        cx: &mut Context<Self>,
+    ) {
         self.popup_serial += 1;
-        self.popup = Some(Popup { at, items, path, serial: self.popup_serial, menu: None });
+        self.popup = Some(Popup {
+            at,
+            items,
+            path,
+            serial: self.popup_serial,
+            menu: None,
+        });
         cx.notify();
     }
 
     /// The types a new socket or item can have, picked from the type menu.
-    pub(crate) fn open_type_list(&mut self, at: Point<Pixels>, node: String, boundary: bool, cx: &mut Context<Self>) {
+    pub(crate) fn open_type_list(
+        &mut self,
+        at: Point<Pixels>,
+        node: String,
+        boundary: bool,
+        cx: &mut Context<Self>,
+    ) {
         let (kind, extra) = {
             let model = self.model.borrow();
-            (model.node(&node).and_then(|n| shader_graph::zones::zone_kind_of(&n.node_type)), !boundary)
+            (
+                model
+                    .node(&node)
+                    .and_then(|n| shader_graph::zones::zone_kind_of(&n.node_type)),
+                !boundary,
+            )
         };
         // A simulation keeps textures too; a repeat zone's items are values.
         let types: Vec<WgslType> = if kind == Some(shader_graph::zones::ZoneKind::Repeat) {
@@ -1089,7 +1281,12 @@ impl Editor {
         );
     }
 
-    pub(crate) fn open_type_picker(&mut self, at: Point<Pixels>, picker: TypePicker, cx: &mut Context<Self>) {
+    pub(crate) fn open_type_picker(
+        &mut self,
+        at: Point<Pixels>,
+        picker: TypePicker,
+        cx: &mut Context<Self>,
+    ) {
         let items = type_picker::items(&cx.entity().downgrade(), Rc::new(picker));
         self.open_list(at, items, cx);
     }
@@ -1134,9 +1331,16 @@ impl Editor {
         let active = self.model.borrow().active_definition_ref();
         let drawn = self.drawn_geometry(cx);
         let measure = |doc: &str, node: &GraphNode| {
-            if doc == active { drawn.get(&node.id).cloned() } else { None }
+            if doc == active {
+                drawn.get(&node.id).cloned()
+            } else {
+                None
+            }
         };
-        let options = LayoutOptions { measure: Some(&measure), ..Default::default() };
+        let options = LayoutOptions {
+            measure: Some(&measure),
+            ..Default::default()
+        };
         let result = self.model_mut().batched(|m| run(m, &options));
         let moved = match result {
             Ok(moved) => moved,
@@ -1147,7 +1351,8 @@ impl Editor {
         };
         self.after_edit(cx);
         if fit && moved {
-            self.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx));
+            self.flow
+                .update(cx, |f, cx| f.fit_view(Default::default(), cx));
         }
     }
 
@@ -1167,7 +1372,15 @@ impl Editor {
                         gpui_flow::HandleType::Source => outputs.push(entry),
                     }
                 }
-                Some((n.id.to_string(), NodeGeometry { width: rect.width, height: rect.height, inputs, outputs }))
+                Some((
+                    n.id.to_string(),
+                    NodeGeometry {
+                        width: rect.width,
+                        height: rect.height,
+                        inputs,
+                        outputs,
+                    },
+                ))
             })
             .collect()
     }
@@ -1225,7 +1438,13 @@ impl Editor {
         self.edit(cx, |m| m.toggle_unlinked_sockets(&ids));
     }
 
-    pub(crate) fn set_variable_type(&mut self, node: &str, variable: &str, ty: Option<WgslType>, cx: &mut Context<Self>) {
+    pub(crate) fn set_variable_type(
+        &mut self,
+        node: &str,
+        variable: &str,
+        ty: Option<WgslType>,
+        cx: &mut Context<Self>,
+    ) {
         self.edit(cx, |m| m.set_variable_type(node, variable, ty));
     }
 
@@ -1244,15 +1463,18 @@ impl Editor {
     fn on_flow_event(&mut self, event: FlowEvent, cx: &mut Context<Self>) {
         match event {
             FlowEvent::NodesChange(changes) => {
-                let nodes = gpui_flow::apply_node_changes(&changes, self.flow.read(cx).nodes().to_vec());
+                let nodes =
+                    gpui_flow::apply_node_changes(&changes, self.flow.read(cx).nodes().to_vec());
                 self.flow.update(cx, |f, cx| f.set_nodes(nodes, cx));
             }
             FlowEvent::EdgesChange(changes) => {
-                let edges = gpui_flow::apply_edge_changes(&changes, self.flow.read(cx).edges().to_vec());
+                let edges =
+                    gpui_flow::apply_edge_changes(&changes, self.flow.read(cx).edges().to_vec());
                 self.flow.update(cx, |f, cx| f.set_edges(edges, cx));
             }
             FlowEvent::SelectionChange { nodes, .. } => {
-                self.model_mut().set_selected_node_ids(nodes.iter().map(|n| n.to_string()).collect());
+                self.model_mut()
+                    .set_selected_node_ids(nodes.iter().map(|n| n.to_string()).collect());
                 cx.notify();
             }
             FlowEvent::GrabCancel { .. } => {
@@ -1277,7 +1499,10 @@ impl Editor {
                 self.after_edit(cx);
             }
             FlowEvent::ConnectEnd(state) => {
-                if state.to_node.is_none() && state.reconnecting.is_none() && !self.over_node(state.to, cx) {
+                if state.to_node.is_none()
+                    && state.reconnecting.is_none()
+                    && !self.over_node(state.to, cx)
+                {
                     let pending = Pending {
                         node: state.from_node.to_string(),
                         handle: handle_text(state.from_handle),
@@ -1301,7 +1526,15 @@ impl Editor {
                         // Reroutes are placed by their top left corner.
                         let cuts: Vec<(String, GraphPoint)> = crossings
                             .iter()
-                            .map(|(id, at)| (id.to_string(), GraphPoint::new(at.x - REROUTE_SIZE / 2.0, at.y - REROUTE_SIZE / 2.0)))
+                            .map(|(id, at)| {
+                                (
+                                    id.to_string(),
+                                    GraphPoint::new(
+                                        at.x - REROUTE_SIZE / 2.0,
+                                        at.y - REROUTE_SIZE / 2.0,
+                                    ),
+                                )
+                            })
                             .collect();
                         self.edit(cx, |m| {
                             m.reroute_edges(&cuts);
@@ -1310,7 +1543,11 @@ impl Editor {
                 }
             }
             FlowEvent::NodeDoubleClick { id } => {
-                let is_group = self.model.borrow().node(&id).is_some_and(|n| n.definition_ref().is_some());
+                let is_group = self
+                    .model
+                    .borrow()
+                    .node(&id)
+                    .is_some_and(|n| n.definition_ref().is_some());
                 if is_group {
                     self.enter_group(&id, cx);
                 }
@@ -1320,7 +1557,9 @@ impl Editor {
                     self.preview_node(id.as_ref(), cx);
                 }
             }
-            FlowEvent::PaneContextMenu { window, flow } => self.open_context_menu(window, flow, None, cx),
+            FlowEvent::PaneContextMenu { window, flow } => {
+                self.open_context_menu(window, flow, None, cx)
+            }
             FlowEvent::NodeContextMenu { id, window, flow } => {
                 self.open_context_menu(window, flow, Some(id.to_string()), cx)
             }
@@ -1334,9 +1573,11 @@ impl Editor {
                         None,
                         Rc::new(move |_, cx| {
                             let id = id.clone();
-                            crate::graph::update_editor(&weak, cx, |e, cx| e.edit(cx, |m| {
-                                m.delete_edges(&[id]);
-                            }));
+                            crate::graph::update_editor(&weak, cx, |e, cx| {
+                                e.edit(cx, |m| {
+                                    m.delete_edges(&[id]);
+                                })
+                            });
                         }),
                     )],
                     cx,
@@ -1377,7 +1618,11 @@ impl Editor {
                     } else {
                         model.resolve_input_type(&p.node, &p.handle)
                     };
-                    let hint = if p.from_output { format!("Nodes taking a {}…", ty.id()) } else { format!("Nodes producing a {}…", ty.id()) };
+                    let hint = if p.from_output {
+                        format!("Nodes taking a {}…", ty.id())
+                    } else {
+                        format!("Nodes producing a {}…", ty.id())
+                    };
                     (connectable_entries(&model, &all, p), hint)
                 }
                 None => (all, "Search nodes…".to_owned()),
@@ -1385,34 +1630,44 @@ impl Editor {
         };
         let model = self.model.clone();
         let accepts_pending = pending.clone();
-        let accepts: Box<dyn Fn(&AddMenuEntry) -> bool> = Box::new(move |entry| match &accepts_pending {
-            Some(p) => catalog::entry_handle_for(&model.borrow(), entry, p).is_some(),
-            None => true,
-        });
+        let accepts: Box<dyn Fn(&AddMenuEntry) -> bool> =
+            Box::new(move |entry| match &accepts_pending {
+                Some(p) => catalog::entry_handle_for(&model.borrow(), entry, p).is_some(),
+                None => true,
+            });
         let menu = cx.new(|cx| AddMenu::new(entries, at, placeholder, accepts, cx));
-        cx.subscribe(&menu, move |this, _, event: &AddMenuEvent, cx| match event {
-            AddMenuEvent::Picked(entry) => {
-                this.add_menu = None;
-                this.add_picked((**entry).clone(), position, pending.clone(), cx);
-            }
-            AddMenuEvent::DeleteGroup(key) => {
-                if let Some(reference) = key.strip_prefix("group:") {
-                    let reference = reference.to_owned();
-                    this.edit(cx, |m| m.delete_definition(&reference));
+        cx.subscribe(
+            &menu,
+            move |this, _, event: &AddMenuEvent, cx| match event {
+                AddMenuEvent::Picked(entry) => {
                     this.add_menu = None;
+                    this.add_picked((**entry).clone(), position, pending.clone(), cx);
                 }
-            }
-            AddMenuEvent::Dismissed => {
-                this.add_menu = None;
-                cx.notify();
-            }
-        })
+                AddMenuEvent::DeleteGroup(key) => {
+                    if let Some(reference) = key.strip_prefix("group:") {
+                        let reference = reference.to_owned();
+                        this.edit(cx, |m| m.delete_definition(&reference));
+                        this.add_menu = None;
+                    }
+                }
+                AddMenuEvent::Dismissed => {
+                    this.add_menu = None;
+                    cx.notify();
+                }
+            },
+        )
         .detach();
         self.add_menu = Some(menu);
         cx.notify();
     }
 
-    fn add_picked(&mut self, entry: AddMenuEntry, position: Xy, pending: Option<Pending>, cx: &mut Context<Self>) {
+    fn add_picked(
+        &mut self,
+        entry: AddMenuEntry,
+        position: Xy,
+        pending: Option<Pending>,
+        cx: &mut Context<Self>,
+    ) {
         let created = {
             let mut model = self.model_mut();
             let at = graph_point(position);
@@ -1424,7 +1679,8 @@ impl Editor {
         if let Some(id) = created {
             self.model_mut().set_selected_node_ids(vec![id.clone()]);
             self.after_edit(cx);
-            self.flow.update(cx, |f, cx| f.set_selection(&[id.into()], &[], cx));
+            self.flow
+                .update(cx, |f, cx| f.set_selection(&[id.into()], &[], cx));
         }
     }
 
@@ -1438,7 +1694,13 @@ impl Editor {
     }
 
     /// The context menu: on a node, or on the canvas, with what applies to the selection.
-    fn open_context_menu(&mut self, at: Point<Pixels>, flow: Xy, on_node: Option<String>, cx: &mut Context<Self>) {
+    fn open_context_menu(
+        &mut self,
+        at: Point<Pixels>,
+        flow: Xy,
+        on_node: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let weak = cx.entity().downgrade();
         let selected = self.selected();
         let (locked, reroutes, all_hidden, all_links_hidden, in_frame, ungroupable, single) = {
@@ -1452,7 +1714,10 @@ impl Editor {
                 model.is_locked(),
                 reroutes,
                 !nodes.is_empty() && nodes.iter().all(|n| n.data.hide_unlinked == Some(true)),
-                nodes.iter().filter(|n| n.is(REROUTE)).all(|n| hides_links_reroute(n)),
+                nodes
+                    .iter()
+                    .filter(|n| n.is(REROUTE))
+                    .all(|n| hides_links_reroute(n)),
                 selected.iter().any(|id| frames.frame_of.contains_key(id)),
                 nodes.iter().any(|n| n.definition_ref().is_some()),
                 (nodes.len() == 1).then(|| nodes[0].id.clone()),
@@ -1475,29 +1740,57 @@ impl Editor {
             items.push(item);
         };
         if on_node.is_none() {
-            push("Add…", Some("⇧A"), locked, Rc::new(move |e, cx| e.open_add_menu(at, Some(flow), None, cx)));
+            push(
+                "Add…",
+                Some("⇧A"),
+                locked,
+                Rc::new(move |e, cx| e.open_add_menu(at, Some(flow), None, cx)),
+            );
         }
         if let Some(id) = single.clone() {
-            push("Settings", Some("N"), false, Rc::new(move |e, cx| e.open_sheet(&id, cx)));
+            push(
+                "Settings",
+                Some("N"),
+                false,
+                Rc::new(move |e, cx| e.open_sheet(&id, cx)),
+            );
         }
         if !selected.is_empty() {
             push("Cut", Some("⌘X"), locked, Rc::new(|e, cx| e.cut(cx)));
             push("Copy", Some("⌘C"), false, Rc::new(|e, cx| e.copy(cx)));
         }
-        push("Paste", Some("⌘V"), locked || !can_paste, Rc::new(move |e, cx| e.paste(Some(flow), cx)));
+        push(
+            "Paste",
+            Some("⌘V"),
+            locked || !can_paste,
+            Rc::new(move |e, cx| e.paste(Some(flow), cx)),
+        );
         if !selected.is_empty() {
             push("Move", Some("G"), locked, Rc::new(|e, cx| e.grab(cx)));
-            push("Duplicate", Some("⇧D"), locked, Rc::new(|e, cx| e.duplicate(cx)));
+            push(
+                "Duplicate",
+                Some("⇧D"),
+                locked,
+                Rc::new(|e, cx| e.duplicate(cx)),
+            );
             if reroutes > 0 {
                 push(
-                    if all_links_hidden { "Show links" } else { "Hide links" },
+                    if all_links_hidden {
+                        "Show links"
+                    } else {
+                        "Hide links"
+                    },
                     None,
                     locked,
                     Rc::new(|e, cx| e.toggle_hidden_links(cx)),
                 );
             }
             push(
-                if all_hidden { "Show all sockets" } else { "Hide unlinked sockets" },
+                if all_hidden {
+                    "Show all sockets"
+                } else {
+                    "Hide unlinked sockets"
+                },
                 Some("⌃H"),
                 locked,
                 Rc::new(|e, cx| {
@@ -1508,39 +1801,104 @@ impl Editor {
         }
         let mut separated = Vec::new();
         if !selected.is_empty() {
-            separated.push(ListItem::new("Delete", None, run(Rc::new(|e, cx| e.delete_selection(cx)))).detail("⌫").disabled(locked).destructive().separated());
-            separated.push(ListItem::new("Dissolve", None, run(Rc::new(|e, cx| e.dissolve_selection(cx)))).detail("⌘⌫").disabled(locked));
-            separated.push(ListItem::new("Frame selected", None, run(Rc::new(|e, cx| e.frame_selection(cx)))).detail("⌘J").disabled(locked).separated());
+            separated.push(
+                ListItem::new("Delete", None, run(Rc::new(|e, cx| e.delete_selection(cx))))
+                    .detail("⌫")
+                    .disabled(locked)
+                    .destructive()
+                    .separated(),
+            );
+            separated.push(
+                ListItem::new(
+                    "Dissolve",
+                    None,
+                    run(Rc::new(|e, cx| e.dissolve_selection(cx))),
+                )
+                .detail("⌘⌫")
+                .disabled(locked),
+            );
+            separated.push(
+                ListItem::new(
+                    "Frame selected",
+                    None,
+                    run(Rc::new(|e, cx| e.frame_selection(cx))),
+                )
+                .detail("⌘J")
+                .disabled(locked)
+                .separated(),
+            );
             if in_frame {
-                separated.push(ListItem::new("Remove from frame", None, run(Rc::new(|e, cx| e.remove_from_frame(cx)))).detail("⌥P").disabled(locked));
+                separated.push(
+                    ListItem::new(
+                        "Remove from frame",
+                        None,
+                        run(Rc::new(|e, cx| e.remove_from_frame(cx))),
+                    )
+                    .detail("⌥P")
+                    .disabled(locked),
+                );
             }
             if selected.len() > 1 {
-                separated.push(ListItem::new("Group selected", None, run(Rc::new(|e, cx| e.group_selection(cx)))).detail("⌘G").disabled(locked));
+                separated.push(
+                    ListItem::new(
+                        "Group selected",
+                        None,
+                        run(Rc::new(|e, cx| e.group_selection(cx))),
+                    )
+                    .detail("⌘G")
+                    .disabled(locked),
+                );
             }
             if ungroupable {
-                separated.push(ListItem::new("Ungroup", None, run(Rc::new(|e, cx| e.ungroup_selection(cx)))).detail("⌘⌥G").disabled(locked));
+                separated.push(
+                    ListItem::new(
+                        "Ungroup",
+                        None,
+                        run(Rc::new(|e, cx| e.ungroup_selection(cx))),
+                    )
+                    .detail("⌘⌥G")
+                    .disabled(locked),
+                );
             }
         }
         items.extend(separated);
         if on_node.is_none() {
             let w = weak.clone();
             items.push(
-                ListItem::new("Fit view", None, Rc::new(move |_, cx| {
-                    crate::graph::update_editor(&w, cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx)));
-                }))
+                ListItem::new(
+                    "Fit view",
+                    None,
+                    Rc::new(move |_, cx| {
+                        crate::graph::update_editor(&w, cx, |e, cx| {
+                            e.flow
+                                .update(cx, |f, cx| f.fit_view(Default::default(), cx))
+                        });
+                    }),
+                )
                 .separated(),
             );
             if !self.model.borrow().path().is_empty() {
                 let w = weak.clone();
-                items.push(ListItem::new("Exit group", None, Rc::new(move |_, cx| {
-                    crate::graph::update_editor(&w, cx, |e, cx| e.exit_group(cx));
-                })).detail("⇥"));
+                items.push(
+                    ListItem::new(
+                        "Exit group",
+                        None,
+                        Rc::new(move |_, cx| {
+                            crate::graph::update_editor(&w, cx, |e, cx| e.exit_group(cx));
+                        }),
+                    )
+                    .detail("⇥"),
+                );
             }
         }
         if let Some(node) = on_node {
-            let preview = ListItem::new("Preview", None, run(Rc::new(move |e, cx| e.preview_node(&node, cx))))
-                .detail("⇧⌘Click")
-                .disabled(locked);
+            let preview = ListItem::new(
+                "Preview",
+                None,
+                run(Rc::new(move |e, cx| e.preview_node(&node, cx))),
+            )
+            .detail("⇧⌘Click")
+            .disabled(locked);
             items.insert(0, preview);
             if let Some(next) = items.get_mut(1) {
                 next.separated = true;
@@ -1554,7 +1912,9 @@ impl Editor {
     /// The definition of the first selected group node, if any.
     pub(crate) fn selected_group_ref(&self) -> Option<String> {
         let model = self.model.borrow();
-        self.selected().iter().find_map(|id| model.node(id)?.definition_ref().map(str::to_owned))
+        self.selected()
+            .iter()
+            .find_map(|id| model.node(id)?.definition_ref().map(str::to_owned))
     }
 
     fn selected(&self) -> Vec<String> {
@@ -1564,7 +1924,8 @@ impl Editor {
     fn select(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
         self.model_mut().set_selected_node_ids(ids.clone());
         let flow_ids: Vec<Id> = ids.into_iter().map(Id::from).collect();
-        self.flow.update(cx, |f, cx| f.set_selection(&flow_ids, &[], cx));
+        self.flow
+            .update(cx, |f, cx| f.set_selection(&flow_ids, &[], cx));
     }
 
     /// Previews a node and selects it. Previewing it again
@@ -1579,7 +1940,13 @@ impl Editor {
 
     fn delete_selection(&mut self, cx: &mut Context<Self>) {
         let nodes = self.selected();
-        let edges = self.flow.read(cx).selected_edges().into_iter().map(|e| e.to_string()).collect::<Vec<_>>();
+        let edges = self
+            .flow
+            .read(cx)
+            .selected_edges()
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>();
         self.edit(cx, |m| {
             m.delete_nodes(&nodes, &edges);
         });
@@ -1598,7 +1965,9 @@ impl Editor {
             let model = self.model.borrow();
             ids.iter()
                 .find(|id| {
-                    model.node(id).is_some_and(|n| hides_links_reroute(n) && n.data.label.is_none())
+                    model
+                        .node(id)
+                        .is_some_and(|n| hides_links_reroute(n) && n.data.label.is_none())
                 })
                 .cloned()
         };
@@ -1617,14 +1986,22 @@ impl Editor {
     }
 
     fn copy(&mut self, cx: &mut Context<Self>) {
-        self.clipboard = self.model.borrow().copy_nodes(&self.selected()).or_else(|| self.clipboard.take());
+        self.clipboard = self
+            .model
+            .borrow()
+            .copy_nodes(&self.selected())
+            .or_else(|| self.clipboard.take());
         cx.notify();
     }
 
     fn paste(&mut self, at: Option<Xy>, cx: &mut Context<Self>) {
-        let Some(clipboard) = self.clipboard.clone() else { return };
+        let Some(clipboard) = self.clipboard.clone() else {
+            return;
+        };
         let at = at.or_else(|| self.flow.read(cx).pointer_flow());
-        let ids = self.model_mut().paste_nodes(&clipboard, at.map(graph_point));
+        let ids = self
+            .model_mut()
+            .paste_nodes(&clipboard, at.map(graph_point));
         self.after_edit(cx);
         self.select(ids, cx);
     }
@@ -1686,10 +2063,12 @@ impl Editor {
 
     /// Enters the first selected group, returning whether there was one.
     fn enter_selected_group(&mut self, cx: &mut Context<Self>) -> bool {
-        let group = self
-            .selected()
-            .into_iter()
-            .find(|id| self.model.borrow().node(id).is_some_and(|n| n.definition_ref().is_some()));
+        let group = self.selected().into_iter().find(|id| {
+            self.model
+                .borrow()
+                .node(id)
+                .is_some_and(|n| n.definition_ref().is_some())
+        });
         match group {
             Some(id) => {
                 self.enter_group(&id, cx);
@@ -1711,7 +2090,11 @@ impl Editor {
 
     /// Opens the sheet of the selected node, or of the group entered, or closes the sheet when neither exists.
     fn toggle_node_sheet(&mut self, cx: &mut Context<Self>) {
-        let target = self.selected().first().cloned().or_else(|| self.model.borrow().path().last().cloned());
+        let target = self
+            .selected()
+            .first()
+            .cloned()
+            .or_else(|| self.model.borrow().path().last().cloned());
         match target {
             Some(id) => self.open_sheet(&id, cx),
             None => {
@@ -1788,9 +2171,17 @@ impl Editor {
     /// The group path as crumbs, the root first, each with its depth, and whether the group is locked.
     pub(crate) fn breadcrumbs(&self) -> (Vec<Crumb>, bool) {
         let model = self.model.borrow();
-        let mut crumbs = vec![Crumb { depth: 0, label: "Root".to_owned(), locked_group: None }];
+        let mut crumbs = vec![Crumb {
+            depth: 0,
+            label: "Root".to_owned(),
+            locked_group: None,
+        }];
         for (i, (id, label, locked)) in model.path_labels(model.path()).into_iter().enumerate() {
-            crumbs.push(Crumb { depth: i + 1, label, locked_group: locked.then_some(id) });
+            crumbs.push(Crumb {
+                depth: i + 1,
+                label,
+                locked_group: locked.then_some(id),
+            });
         }
         (crumbs, model.is_locked())
     }
@@ -1804,12 +2195,16 @@ impl Editor {
             let cascade = cx.new(|cx| Cascade::new(rows, px(200.0), path, cx));
             let focus = cascade.read(cx).focus_handle(cx);
             window.defer(cx, move |window, cx| window.focus(&focus, cx));
-            let dismissed = cx.subscribe_in(&cascade, window, move |e: &mut Editor, _, _: &DismissEvent, _, cx| {
-                if e.popup.as_ref().is_some_and(|p| p.serial == serial) {
-                    e.popup = None;
-                    cx.notify();
-                }
-            });
+            let dismissed = cx.subscribe_in(
+                &cascade,
+                window,
+                move |e: &mut Editor, _, _: &DismissEvent, _, cx| {
+                    if e.popup.as_ref().is_some_and(|p| p.serial == serial) {
+                        e.popup = None;
+                        cx.notify();
+                    }
+                },
+            );
             if let Some(popup) = self.popup.as_mut() {
                 popup.menu = Some((cascade, dismissed));
             }
@@ -1909,7 +2304,9 @@ impl Editor {
         let locked = model.is_locked();
         let selected = model.selected_node_ids();
         let has_selection = !selected.is_empty();
-        let selected_group = selected.iter().any(|id| model.node(id).is_some_and(|n| n.definition_ref().is_some()));
+        let selected_group = selected
+            .iter()
+            .any(|id| model.node(id).is_some_and(|n| n.definition_ref().is_some()));
         let can_exit = !model.path().is_empty();
         let idle = self.add_menu.is_none();
         Enabled {
@@ -1941,91 +2338,116 @@ impl Editor {
 }
 
 impl Render for Editor {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { guard::render("graph editor", || {
-        let theme = cx.theme().clone();
-        let c = &theme.colors;
-        let canvas = canvas_theme(theme.appearance);
-        self.flow.update(cx, |flow, cx| {
-            if flow.options.theme.background != canvas.background {
-                flow.options.theme = canvas;
-                cx.notify();
-            }
-        });
-        let sheet = self.render_sheet(window, cx);
-        let on = self.enabled();
-        div()
-            .flex()
-            .size_full()
-            .bg(c.background)
-            .text_color(c.foreground)
-            .on_key_down(cx.safe_listener(|this, e, w, cx| this.key_down(e, w, cx)))
-            .key_context("GraphEditor")
-            .when(on.undo, |d| d.on_action(cx.safe_listener(|this, _: &Undo, _, cx| this.undo(cx))))
-            .when(on.redo, |d| d.on_action(cx.safe_listener(|this, _: &Redo, _, cx| this.redo(cx))))
-            .when(on.group, |d| {
-                d.on_action(cx.safe_listener(|this, _: &GroupSelected, _, cx| this.group_selection(cx)))
-            })
-            .when(on.ungroup, |d| {
-                d.on_action(cx.safe_listener(|this, _: &UngroupSelected, _, cx| this.ungroup_selection(cx)))
-            })
-            .when(on.preview, |d| {
-                d.on_action(cx.safe_listener(|this, _: &PreviewSelectedNode, _, cx| this.preview_selected(cx)))
-            })
-            .when(on.prune, |d| {
-                d.on_action(cx.safe_listener(|this, _: &PruneUnusedGroups, window, cx| {
-                    this.prune_unused_groups(window, cx);
-                }))
-            })
-            .when(on.layout_selected, |d| {
-                d.on_action(cx.safe_listener(|this, _: &LayoutSelected, _, cx| this.layout_selected(cx)))
-            })
-            .when(on.layout_document, |d| {
-                d.on_action(cx.safe_listener(|this, _: &LayoutDocument, _, cx| this.layout_document(cx)))
-            })
-            .on_action(cx.safe_listener(|this, _: &LayoutGraph, _, cx| this.layout_graph(cx)))
-            .when(on.export_group, |d| {
-                d.on_action(cx.safe_listener(|_, _: &ExportSelectedGroup, _, cx| cx.emit(EditorEvent::ExportGroup)))
-            })
-            .when(on.enter, |d| {
-                d.on_action(cx.safe_listener(|this, _: &EnterNodeGroup, _, cx| {
-                    this.enter_selected_group(cx);
-                }))
-            })
-            .when(on.exit, |d| {
-                d.on_action(cx.safe_listener(|this, _: &ExitNodeGroup, _, cx| this.close_sheet_or_exit_group(cx)))
-            })
-            .when(on.sheet, |d| {
-                d.on_action(cx.safe_listener(|this, _: &ToggleNodeSheet, _, cx| this.toggle_node_sheet(cx)))
-            })
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .child(
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        guard::render("graph editor", || {
+            let theme = cx.theme().clone();
+            let c = &theme.colors;
+            let canvas = canvas_theme(theme.appearance);
+            self.flow.update(cx, |flow, cx| {
+                if flow.options.theme.background != canvas.background {
+                    flow.options.theme = canvas;
+                    cx.notify();
+                }
+            });
+            let sheet = self.render_sheet(window, cx);
+            let on = self.enabled();
+            div()
+                .flex()
+                .size_full()
+                .bg(c.background)
+                .text_color(c.foreground)
+                .on_key_down(cx.safe_listener(|this, e, w, cx| this.key_down(e, w, cx)))
+                .key_context("GraphEditor")
+                .when(on.undo, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &Undo, _, cx| this.undo(cx)))
+                })
+                .when(on.redo, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &Redo, _, cx| this.redo(cx)))
+                })
+                .when(on.group, |d| {
+                    d.on_action(
+                        cx.safe_listener(|this, _: &GroupSelected, _, cx| this.group_selection(cx)),
+                    )
+                })
+                .when(on.ungroup, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &UngroupSelected, _, cx| {
+                        this.ungroup_selection(cx)
+                    }))
+                })
+                .when(on.preview, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &PreviewSelectedNode, _, cx| {
+                        this.preview_selected(cx)
+                    }))
+                })
+                .when(on.prune, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &PruneUnusedGroups, window, cx| {
+                        this.prune_unused_groups(window, cx);
+                    }))
+                })
+                .when(on.layout_selected, |d| {
+                    d.on_action(
+                        cx.safe_listener(|this, _: &LayoutSelected, _, cx| {
+                            this.layout_selected(cx)
+                        }),
+                    )
+                })
+                .when(on.layout_document, |d| {
+                    d.on_action(
+                        cx.safe_listener(|this, _: &LayoutDocument, _, cx| {
+                            this.layout_document(cx)
+                        }),
+                    )
+                })
+                .on_action(cx.safe_listener(|this, _: &LayoutGraph, _, cx| this.layout_graph(cx)))
+                .when(on.export_group, |d| {
+                    d.on_action(cx.safe_listener(|_, _: &ExportSelectedGroup, _, cx| {
+                        cx.emit(EditorEvent::ExportGroup)
+                    }))
+                })
+                .when(on.enter, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &EnterNodeGroup, _, cx| {
+                        this.enter_selected_group(cx);
+                    }))
+                })
+                .when(on.exit, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &ExitNodeGroup, _, cx| {
+                        this.close_sheet_or_exit_group(cx)
+                    }))
+                })
+                .when(on.sheet, |d| {
+                    d.on_action(cx.safe_listener(|this, _: &ToggleNodeSheet, _, cx| {
+                        this.toggle_node_sheet(cx)
+                    }))
+                })
+                .child(
+                    div().flex().flex_col().flex_1().min_w_0().h_full().child(
                         div()
                             .flex_1()
                             .relative()
                             .on_drop(cx.safe_listener(|this, dragged: &AssetDrag, window, cx| {
-                                this.drop_assets(std::slice::from_ref(&dragged.id), window.mouse_position(), cx);
+                                this.drop_assets(
+                                    std::slice::from_ref(&dragged.id),
+                                    window.mouse_position(),
+                                    cx,
+                                );
                             }))
                             .on_drop(cx.safe_listener(|this, paths: &ExternalPaths, window, cx| {
                                 if let Some(playback) = this.playback.clone() {
                                     let at = window.mouse_position();
-                                    assets::drop_files_on_graph(this, &playback, &paths.0, at, window, cx);
+                                    assets::drop_files_on_graph(
+                                        this, &playback, &paths.0, at, window, cx,
+                                    );
                                 }
                             }))
                             .child(self.flow.clone()),
                     ),
-            )
-            .children(sheet)
-            .children(self.add_menu.clone())
-            .children(self.render_popup(window, cx))
-            .children(popovers::render_color(self, cx))
-            .children(popovers::render_sockets(self, window, cx))
-    })
+                )
+                .children(sheet)
+                .children(self.add_menu.clone())
+                .children(self.render_popup(window, cx))
+                .children(popovers::render_color(self, cx))
+                .children(popovers::render_sockets(self, window, cx))
+        })
     }
 }
 
@@ -2044,7 +2466,6 @@ impl Editor {
         cx.notify();
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -2066,16 +2487,30 @@ mod tests {
         let (frame, member, loose) = editor.update(cx, |e, cx| {
             let (member, loose, frame) = {
                 let mut model = e.model_mut();
-                let member = model.add_node("sin", GraphPoint::new(100.0, 100.0)).expect("adds");
-                let loose = model.add_node("sin", GraphPoint::new(2000.0, 2000.0)).expect("adds");
-                let frame = model.frame_nodes(std::slice::from_ref(&member)).expect("frames");
+                let member = model
+                    .add_node("sin", GraphPoint::new(100.0, 100.0))
+                    .expect("adds");
+                let loose = model
+                    .add_node("sin", GraphPoint::new(2000.0, 2000.0))
+                    .expect("adds");
+                let frame = model
+                    .frame_nodes(std::slice::from_ref(&member))
+                    .expect("frames");
                 (member, loose, frame)
             };
             e.after_edit(cx);
             (frame, member, loose)
         });
         cx.run_until_parked();
-        (Scene { editor, frame, member, loose }, cx)
+        (
+            Scene {
+                editor,
+                frame,
+                member,
+                loose,
+            },
+            cx,
+        )
     }
 
     /// Moves a node in the flow as the pointer would, then drops it.
@@ -2093,15 +2528,28 @@ mod tests {
         });
     }
 
-    fn node(scene: &Scene, cx: &gpui::VisualTestContext, id: &str) -> shader_graph::graph::GraphNode {
-        scene.editor.read_with(cx, |e, _| e.model().node(id).cloned().expect("node"))
+    fn node(
+        scene: &Scene,
+        cx: &gpui::VisualTestContext,
+        id: &str,
+    ) -> shader_graph::graph::GraphNode {
+        scene
+            .editor
+            .read_with(cx, |e, _| e.model().node(id).cloned().expect("node"))
     }
 
     #[gpui::test]
     fn dragging_a_frame_takes_what_it_holds_along(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
-        let header = scene.editor.read_with(cx, |e, cx| e.flow_positions(cx)[&scene.frame]);
-        drag(&scene, cx, &scene.frame, Xy::new(header.x + 50.0, header.y + 30.0));
+        let header = scene
+            .editor
+            .read_with(cx, |e, cx| e.flow_positions(cx)[&scene.frame]);
+        drag(
+            &scene,
+            cx,
+            &scene.frame,
+            Xy::new(header.x + 50.0, header.y + 30.0),
+        );
         let member = node(&scene, cx, &scene.member);
         assert_eq!((member.position.x, member.position.y), (150.0, 130.0));
         assert_eq!(member.frame.as_deref(), Some(scene.frame.as_str()));
@@ -2111,7 +2559,10 @@ mod tests {
     fn dropping_a_node_on_a_frame_joins_it_and_dragging_it_out_leaves(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
         drag(&scene, cx, &scene.loose, Xy::new(110.0, 110.0));
-        assert_eq!(node(&scene, cx, &scene.loose).frame.as_deref(), Some(scene.frame.as_str()));
+        assert_eq!(
+            node(&scene, cx, &scene.loose).frame.as_deref(),
+            Some(scene.frame.as_str())
+        );
         drag(&scene, cx, &scene.loose, Xy::new(3000.0, 3000.0));
         assert_eq!(node(&scene, cx, &scene.loose).frame, None);
     }
@@ -2119,7 +2570,9 @@ mod tests {
     #[gpui::test]
     fn a_drag_is_one_undo_step(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
-        let header = scene.editor.read_with(cx, |e, cx| e.flow_positions(cx)[&scene.frame]);
+        let header = scene
+            .editor
+            .read_with(cx, |e, cx| e.flow_positions(cx)[&scene.frame]);
         drag(&scene, cx, &scene.frame, Xy::new(header.x + 50.0, header.y));
         scene.editor.update(cx, |e, cx| e.undo(cx));
         let member = node(&scene, cx, &scene.member);
@@ -2132,7 +2585,12 @@ mod tests {
         let (scene, cx) = scene(cx);
         let positions = |cx: &mut gpui::VisualTestContext| {
             scene.editor.read_with(cx, |e, _| {
-                e.model().active_document().nodes.iter().map(|n| (n.id.clone(), n.position)).collect::<Vec<_>>()
+                e.model()
+                    .active_document()
+                    .nodes
+                    .iter()
+                    .map(|n| (n.id.clone(), n.position))
+                    .collect::<Vec<_>>()
             })
         };
         let before = positions(cx);
@@ -2151,23 +2609,47 @@ mod tests {
     fn node_cards_scale_linearly_with_zoom(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
         cx.simulate_scale_factor_change(2.0);
-        let selector: &'static str = Box::leak(format!("node-card {}", scene.member).into_boxed_str());
+        let selector: &'static str =
+            Box::leak(format!("node-card {}", scene.member).into_boxed_str());
         let mut heights = Vec::new();
         for step in 10..=40 {
             let zoom = step as f32 / 20.0;
             scene.editor.update(cx, |e, cx| {
-                e.flow.update(cx, |f, cx| f.set_viewport(Viewport { x: 0.0, y: 0.0, zoom }, None, cx));
+                e.flow.update(cx, |f, cx| {
+                    f.set_viewport(
+                        Viewport {
+                            x: 0.0,
+                            y: 0.0,
+                            zoom,
+                        },
+                        None,
+                        cx,
+                    )
+                });
             });
             render_frame(cx);
             let bounds = cx.debug_bounds(selector).expect("the card is drawn");
             heights.push((zoom, f32::from(bounds.size.height)));
         }
-        let unit = heights.iter().find(|(z, _)| *z == 1.0).expect("zoom 1 is sampled").1;
+        let unit = heights
+            .iter()
+            .find(|(z, _)| *z == 1.0)
+            .expect("zoom 1 is sampled")
+            .1;
         for pair in heights.windows(2) {
-            assert!(pair[1].1 >= pair[0].1, "card shrank from zoom {} to {}", pair[0].0, pair[1].0);
+            assert!(
+                pair[1].1 >= pair[0].1,
+                "card shrank from zoom {} to {}",
+                pair[0].0,
+                pair[1].0
+            );
         }
         for (zoom, height) in &heights {
-            assert!((height - zoom * unit).abs() <= 2.0, "zoom {zoom}: card is {height}, expected about {}", zoom * unit);
+            assert!(
+                (height - zoom * unit).abs() <= 2.0,
+                "zoom {zoom}: card is {height}, expected about {}",
+                zoom * unit
+            );
         }
     }
 
@@ -2187,7 +2669,10 @@ mod tests {
                 .active_document()
                 .nodes
                 .iter()
-                .find(|n| n.definition_ref().is_some_and(|r| r.starts_with("std-remap")))
+                .find(|n| {
+                    n.definition_ref()
+                        .is_some_and(|r| r.starts_with("std-remap"))
+                })
                 .map(|n| n.id.to_string())
                 .expect("the scene has a Remap node")
         });
@@ -2198,7 +2683,17 @@ mod tests {
                 .map(|step| {
                     let zoom = 1.0 + step as f32 * 0.0004;
                     editor.update(cx, |e, cx| {
-                        e.flow.update(cx, |f, cx| f.set_viewport(Viewport { x: 0.0, y: 0.0, zoom }, None, cx));
+                        e.flow.update(cx, |f, cx| {
+                            f.set_viewport(
+                                Viewport {
+                                    x: 0.0,
+                                    y: 0.0,
+                                    zoom,
+                                },
+                                None,
+                                cx,
+                            )
+                        });
                     });
                     render_frame(cx);
                     let bounds = cx.debug_bounds(selector).expect("the card is drawn");
@@ -2208,12 +2703,21 @@ mod tests {
             let n = heights.len() as f32;
             let mean_zoom = heights.iter().map(|h| h.0).sum::<f32>() / n;
             let mean_height = heights.iter().map(|h| h.1).sum::<f32>() / n;
-            let slope = heights.iter().map(|h| (h.0 - mean_zoom) * (h.1 - mean_height)).sum::<f32>()
-                / heights.iter().map(|h| (h.0 - mean_zoom).powi(2)).sum::<f32>();
+            let slope = heights
+                .iter()
+                .map(|h| (h.0 - mean_zoom) * (h.1 - mean_height))
+                .sum::<f32>()
+                / heights
+                    .iter()
+                    .map(|h| (h.0 - mean_zoom).powi(2))
+                    .sum::<f32>();
             for (zoom, height) in &heights {
                 let line = mean_height + slope * (zoom - mean_zoom);
                 let off = (height - line).abs() * scale;
-                assert!(off <= 1.05, "scale {scale}, zoom {zoom}: card is {off} device pixels off a straight line");
+                assert!(
+                    off <= 1.05,
+                    "scale {scale}, zoom {zoom}: card is {off} device pixels off a straight line"
+                );
             }
         }
     }
@@ -2229,12 +2733,24 @@ mod tests {
         let (scene, cx) = scene(cx);
         let (group, zone_input, reroute) = scene.editor.update(cx, |e, cx| {
             let mut model = e.model_mut();
-            let member = model.add_node("sin", GraphPoint::new(300.0, 300.0)).expect("adds");
+            let member = model
+                .add_node("sin", GraphPoint::new(300.0, 300.0))
+                .expect("adds");
             let group = model.group_selection(&[member]).expect("groups");
-            let reference = model.node(&group).and_then(|n| n.definition_ref().map(str::to_owned)).expect("ref");
+            let reference = model
+                .node(&group)
+                .and_then(|n| n.definition_ref().map(str::to_owned))
+                .expect("ref");
             model.add_type_variable(&reference, &[WgslType::F32, WgslType::Vec2f]);
-            let zone = model.create_zone(shader_graph::zones::ZoneKind::Repeat, GraphPoint::new(0.0, 500.0)).expect("zone");
-            let reroute = model.add_node("reroute", GraphPoint::new(0.0, 900.0)).expect("adds");
+            let zone = model
+                .create_zone(
+                    shader_graph::zones::ZoneKind::Repeat,
+                    GraphPoint::new(0.0, 500.0),
+                )
+                .expect("zone");
+            let reroute = model
+                .add_node("reroute", GraphPoint::new(0.0, 900.0))
+                .expect("adds");
             drop(model);
             e.after_edit(cx);
             (group, zone, reroute)
@@ -2253,15 +2769,51 @@ mod tests {
         let (scene, cx) = scene(cx);
         let group = scene.editor.update(cx, |e, cx| {
             let mut model = e.model_mut();
-            let member = model.add_node("sin", GraphPoint::new(300.0, 300.0)).expect("adds");
+            let member = model
+                .add_node("sin", GraphPoint::new(300.0, 300.0))
+                .expect("adds");
             let group = model.group_selection(&[member]).expect("groups");
-            let reference = model.node(&group).and_then(|n| n.definition_ref().map(str::to_owned)).expect("ref");
-            let enum_variants = vec![shader_graph::types::EnumVariant::new(0, "A"), shader_graph::types::EnumVariant::new(1, "B")];
-            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::U32), Some(enum_variants), None);
-            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::Bool), Some(shader_graph::types::toggle_variants()), None);
-            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::Vec3f), None, None);
-            model.add_handle(&reference, shader_graph::graph::GroupSide::Input, HandleType::Fixed(WgslType::I32), None, None);
-            let ids: Vec<String> = model.project().document(&reference).map(|d| d.inputs.iter().map(|h| h.id.clone()).collect()).unwrap_or_default();
+            let reference = model
+                .node(&group)
+                .and_then(|n| n.definition_ref().map(str::to_owned))
+                .expect("ref");
+            let enum_variants = vec![
+                shader_graph::types::EnumVariant::new(0, "A"),
+                shader_graph::types::EnumVariant::new(1, "B"),
+            ];
+            model.add_handle(
+                &reference,
+                shader_graph::graph::GroupSide::Input,
+                HandleType::Fixed(WgslType::U32),
+                Some(enum_variants),
+                None,
+            );
+            model.add_handle(
+                &reference,
+                shader_graph::graph::GroupSide::Input,
+                HandleType::Fixed(WgslType::Bool),
+                Some(shader_graph::types::toggle_variants()),
+                None,
+            );
+            model.add_handle(
+                &reference,
+                shader_graph::graph::GroupSide::Input,
+                HandleType::Fixed(WgslType::Vec3f),
+                None,
+                None,
+            );
+            model.add_handle(
+                &reference,
+                shader_graph::graph::GroupSide::Input,
+                HandleType::Fixed(WgslType::I32),
+                None,
+                None,
+            );
+            let ids: Vec<String> = model
+                .project()
+                .document(&reference)
+                .map(|d| d.inputs.iter().map(|h| h.id.clone()).collect())
+                .unwrap_or_default();
             drop(model);
             e.sheet_fields_expand(ids);
             e.after_edit(cx);
@@ -2270,7 +2822,10 @@ mod tests {
             group
         });
         render_frame(cx);
-        assert_eq!(scene.editor.read_with(cx, |e, _| e.sheet.clone()), Some(group));
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| e.sheet.clone()),
+            Some(group)
+        );
     }
 
     #[gpui::test]
@@ -2281,25 +2836,44 @@ mod tests {
             cx.new(|cx| Editor::another_area(share, window, cx))
         });
         let group = scene.editor.update(cx, |e, cx| {
-            let id = e.model_mut().group_selection(std::slice::from_ref(&scene.member)).expect("groups");
+            let id = e
+                .model_mut()
+                .group_selection(std::slice::from_ref(&scene.member))
+                .expect("groups");
             e.after_edit(cx);
             e.enter_group(&id, cx);
             id
         });
         render_frame(cx);
-        assert_eq!(scene.editor.read_with(cx, |e, _| e.model().path().to_vec()), vec![group.clone()]);
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| e.model().path().to_vec()),
+            vec![group.clone()]
+        );
         assert!(second.read_with(cx, |e, _| e.model().path().is_empty()));
         // The second area still sees the root, with the group node in it.
-        assert!(second.read_with(cx, |e, _| e.model().active_document().node(&group).is_some()));
+        assert!(second.read_with(cx, |e, _| {
+            e.model().active_document().node(&group).is_some()
+        }));
 
         second.update(cx, |e, cx| e.select(vec![group.clone()], cx));
-        assert_eq!(second.read_with(cx, |e, _| e.selected()), vec![group.clone()]);
+        assert_eq!(
+            second.read_with(cx, |e, _| e.selected()),
+            vec![group.clone()]
+        );
         assert!(scene.editor.read_with(cx, |e, _| e.selected().is_empty()));
 
         // An edit in one shows in the other.
         second.update(cx, |e, cx| e.delete_selection(cx));
-        assert!(scene.editor.read_with(cx, |e, _| e.model().project().root().node(&group).is_none()));
-        assert!(scene.editor.read_with(cx, |e, _| e.model().path().is_empty()));
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.model().project().root().node(&group).is_none())
+        );
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.model().path().is_empty())
+        );
     }
 
     #[gpui::test]
@@ -2308,7 +2882,15 @@ mod tests {
         let labels = |cx: &mut gpui::VisualTestContext, on_node: Option<String>| {
             scene.editor.update(cx, |e, cx| {
                 e.open_context_menu(point(px(10.0), px(10.0)), Xy::new(0.0, 0.0), on_node, cx);
-                e.popup.as_ref().map(|p| p.items.iter().map(|i| i.label.to_string()).collect::<Vec<_>>()).unwrap_or_default()
+                e.popup
+                    .as_ref()
+                    .map(|p| {
+                        p.items
+                            .iter()
+                            .map(|i| i.label.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
             })
         };
         scene.editor.update(cx, |e, cx| e.select(Vec::new(), cx));
@@ -2316,11 +2898,29 @@ mod tests {
         assert!(canvas.contains(&"Add…".to_owned()) && canvas.contains(&"Paste".to_owned()));
         assert!(!canvas.contains(&"Cut".to_owned()), "{canvas:?}");
         assert!(!canvas.contains(&"Preview".to_owned()), "{canvas:?}");
-        scene.editor.update(cx, |e, cx| e.select(vec![scene.member.clone()], cx));
+        scene
+            .editor
+            .update(cx, |e, cx| e.select(vec![scene.member.clone()], cx));
         let on_member = labels(cx, Some(scene.member.clone()));
-        assert_eq!(on_member.first().map(String::as_str), Some("Preview"), "{on_member:?}");
-        for wanted in ["Cut", "Copy", "Move", "Duplicate", "Delete", "Dissolve", "Frame selected", "Remove from frame"] {
-            assert!(on_member.contains(&wanted.to_owned()), "{wanted} in {on_member:?}");
+        assert_eq!(
+            on_member.first().map(String::as_str),
+            Some("Preview"),
+            "{on_member:?}"
+        );
+        for wanted in [
+            "Cut",
+            "Copy",
+            "Move",
+            "Duplicate",
+            "Delete",
+            "Dissolve",
+            "Frame selected",
+            "Remove from frame",
+        ] {
+            assert!(
+                on_member.contains(&wanted.to_owned()),
+                "{wanted} in {on_member:?}"
+            );
         }
         assert!(!on_member.contains(&"Group selected".to_owned()));
         render_frame(cx);
@@ -2331,7 +2931,10 @@ mod tests {
         let model = editor.model();
         let root = model.root();
         let frag = root.nodes.iter().find(|n| n.is(FRAG_OUTPUT))?.id.clone();
-        root.edges.iter().find(|e| e.target == frag).map(|e| e.source.clone())
+        root.edges
+            .iter()
+            .find(|e| e.target == frag)
+            .map(|e| e.source.clone())
     }
 
     #[gpui::test]
@@ -2341,11 +2944,15 @@ mod tests {
         let member = scene.member.clone();
         let at = scene.editor.read_with(cx, |e, cx| {
             let flow = e.flow.read(cx);
-            let r = flow.node_rect(&Id::from(member.clone())).expect("the node is measured");
+            let r = flow
+                .node_rect(&Id::from(member.clone()))
+                .expect("the node is measured");
             flow.flow_to_screen(Xy::new(r.x + r.width / 2.0, r.y + r.height / 2.0))
         });
         let shader = |cx: &mut gpui::VisualTestContext| {
-            scene.editor.read_with(cx, |e, _| e.shader().clone().map(|p| p.program.code))
+            scene
+                .editor
+                .read_with(cx, |e, _| e.shader().clone().map(|p| p.program.code))
         };
         let before = shader(cx);
         let source = scene.editor.read_with(cx, |e, _| previewed(e));
@@ -2354,12 +2961,26 @@ mod tests {
         assert_eq!(scene.editor.read_with(cx, |e, _| previewed(e)), source);
         assert_eq!(shader(cx), before);
 
-        let preview = gpui::Modifiers { shift: true, platform: true, ..Default::default() };
+        let preview = gpui::Modifiers {
+            shift: true,
+            platform: true,
+            ..Default::default()
+        };
         cx.simulate_click(at, preview);
         render_frame(cx);
-        assert_eq!(scene.editor.read_with(cx, |e, _| previewed(e)), Some(member.clone()));
-        assert_ne!(shader(cx), before, "the emitted program follows the preview");
-        assert_eq!(scene.editor.read_with(cx, |e, _| e.selected()), vec![member]);
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| previewed(e)),
+            Some(member.clone())
+        );
+        assert_ne!(
+            shader(cx),
+            before,
+            "the emitted program follows the preview"
+        );
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| e.selected()),
+            vec![member]
+        );
     }
 
     #[gpui::test]
@@ -2369,15 +2990,36 @@ mod tests {
             e.select(vec![scene.loose.clone()], cx);
             e.cut(cx);
         });
-        assert!(scene.editor.read_with(cx, |e, _| e.model().node(&scene.loose).is_none()));
-        scene.editor.update(cx, |e, cx| e.paste(Some(Xy::new(50.0, 50.0)), cx));
-        let count = scene.editor.read_with(cx, |e, _| e.model().root().nodes.iter().filter(|n| n.is("sin")).count());
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.model().node(&scene.loose).is_none())
+        );
+        scene
+            .editor
+            .update(cx, |e, cx| e.paste(Some(Xy::new(50.0, 50.0)), cx));
+        let count = scene.editor.read_with(cx, |e, _| {
+            e.model()
+                .root()
+                .nodes
+                .iter()
+                .filter(|n| n.is("sin"))
+                .count()
+        });
         assert_eq!(count, 2);
     }
 
-    fn add_node(scene: &Scene, cx: &mut gpui::VisualTestContext, node_type: &str, y: f32) -> String {
+    fn add_node(
+        scene: &Scene,
+        cx: &mut gpui::VisualTestContext,
+        node_type: &str,
+        y: f32,
+    ) -> String {
         let id = scene.editor.update(cx, |e, cx| {
-            let id = e.model_mut().add_node(node_type, GraphPoint::new(400.0, y)).expect("adds");
+            let id = e
+                .model_mut()
+                .add_node(node_type, GraphPoint::new(400.0, y))
+                .expect("adds");
             e.after_edit(cx);
             id
         });
@@ -2388,7 +3030,16 @@ mod tests {
     #[gpui::test]
     fn widgets_draw_on_their_nodes(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
-        for (i, ty) in ["curve", "color-ramp", "render-texture", "index-switch", "custom-wgsl"].into_iter().enumerate() {
+        for (i, ty) in [
+            "curve",
+            "color-ramp",
+            "render-texture",
+            "index-switch",
+            "custom-wgsl",
+        ]
+        .into_iter()
+        .enumerate()
+        {
             add_node(&scene, cx, ty, 300.0 * i as f32);
         }
         render_frame(cx);
@@ -2406,7 +3057,9 @@ mod tests {
             }
         });
         let moved = |cx: &mut gpui::VisualTestContext| {
-            scene.editor.read_with(cx, |e, _| e.model().node(&id).and_then(|n| n.data.curve.clone()))
+            scene.editor.read_with(cx, |e, _| {
+                e.model().node(&id).and_then(|n| n.data.curve.clone())
+            })
         };
         assert_eq!(moved(cx).map(|c| c[1].y), Some(0.6));
         scene.editor.update(cx, |e, cx| e.undo(cx));
@@ -2421,7 +3074,10 @@ mod tests {
         let render = add_node(&scene, cx, "render-texture", 600.0);
         let before = scene.editor.read_with(cx, |e, _| {
             let model = e.model();
-            (shader_graph::nodes::index_switch_cases(&model.node(&switch).expect("node").data), model.render_items_of(&render).len())
+            (
+                shader_graph::nodes::index_switch_cases(&model.node(&switch).expect("node").data),
+                model.render_items_of(&render).len(),
+            )
         });
         scene.editor.update(cx, |e, cx| {
             e.set_cases(&switch, i64::from(before.0) + 1, cx);
@@ -2429,7 +3085,10 @@ mod tests {
         });
         let after = scene.editor.read_with(cx, |e, _| {
             let model = e.model();
-            (shader_graph::nodes::index_switch_cases(&model.node(&switch).expect("node").data), model.render_items_of(&render).len())
+            (
+                shader_graph::nodes::index_switch_cases(&model.node(&switch).expect("node").data),
+                model.render_items_of(&render).len(),
+            )
         });
         assert_eq!((after.0, after.1), (before.0 + 1, before.1 + 1));
         render_frame(cx);
@@ -2438,14 +3097,26 @@ mod tests {
     #[gpui::test]
     fn a_cut_stroke_deletes_the_links_it_crosses(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
-        let edge = scene.editor.read_with(cx, |e, _| e.model().root().edges.first().map(|x| x.id.clone())).expect("the demo has a link");
+        let edge = scene
+            .editor
+            .read_with(cx, |e, _| {
+                e.model().root().edges.first().map(|x| x.id.clone())
+            })
+            .expect("the demo has a link");
         scene.editor.update(cx, |e, cx| {
             e.on_flow_event(
-                FlowEvent::Stroke { kind: gpui_flow::StrokeKind::Cut, crossings: vec![(edge.into(), Xy::new(0.0, 0.0))] },
+                FlowEvent::Stroke {
+                    kind: gpui_flow::StrokeKind::Cut,
+                    crossings: vec![(edge.into(), Xy::new(0.0, 0.0))],
+                },
                 cx,
             )
         });
-        assert!(scene.editor.read_with(cx, |e, _| e.model().root().edges.is_empty()));
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.model().root().edges.is_empty())
+        );
     }
 
     #[gpui::test]
@@ -2453,20 +3124,36 @@ mod tests {
         let (scene, cx) = scene(cx);
         scene.editor.update(cx, |e, cx| {
             e.open_type_list(point(px(10.0), px(10.0)), "none".to_owned(), true, cx);
-            let labels: Vec<String> = e.popup.as_ref().map(|p| p.items.iter().map(|i| i.label.to_string()).collect()).unwrap_or_default();
-            assert_eq!(labels, ["Float", "Integer", "Unsigned integer", "Boolean", "texture"]);
+            let labels: Vec<String> = e
+                .popup
+                .as_ref()
+                .map(|p| p.items.iter().map(|i| i.label.to_string()).collect())
+                .unwrap_or_default();
+            assert_eq!(
+                labels,
+                ["Float", "Integer", "Unsigned integer", "Boolean", "texture"]
+            );
         });
     }
 
     fn png_of_width(width: u32) -> Vec<u8> {
         let image = image::RgbaImage::from_pixel(width, 1, image::Rgba([9, 9, 9, 255]));
         let mut out = std::io::Cursor::new(Vec::new());
-        image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+        image
+            .write_to(&mut out, image::ImageFormat::Png)
+            .expect("encodes");
         out.into_inner()
     }
 
     /// An editor attached to a playback, with one imported image in the project and no files loaded.
-    fn media_scene(cx: &mut TestAppContext) -> (Entity<Editor>, Entity<Playback>, String, &mut gpui::VisualTestContext) {
+    fn media_scene(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<Editor>,
+        Entity<Playback>,
+        String,
+        &mut gpui::VisualTestContext,
+    ) {
         cx.update(theme::init);
         let (editor, vcx) = cx.add_window_view(Editor::new);
         let playback = vcx.new(|_| Playback::new());
@@ -2475,28 +3162,50 @@ mod tests {
         let bytes = png_of_width(2);
         editor.update(vcx, |e, cx| {
             e.edit(cx, |m| {
-                let file = shader_graph::assets::ImportFile { name: "Photo.png", mime: "image/png", bytes: &bytes };
-                asset = m.import_file(file, &runtime::SystemVideoProbe).expect("imports").asset.id().to_owned();
+                let file = shader_graph::assets::ImportFile {
+                    name: "Photo.png",
+                    mime: "image/png",
+                    bytes: &bytes,
+                };
+                asset = m
+                    .import_file(file, &runtime::SystemVideoProbe)
+                    .expect("imports")
+                    .asset
+                    .id()
+                    .to_owned();
             })
         });
         vcx.run_until_parked();
         (editor, playback, asset, vcx)
     }
 
-    fn set_files(playback: &Entity<Playback>, files: AssetFiles, vcx: &mut gpui::VisualTestContext) {
+    fn set_files(
+        playback: &Entity<Playback>,
+        files: AssetFiles,
+        vcx: &mut gpui::VisualTestContext,
+    ) {
         vcx.update(|window, cx| playback.update(cx, |p, cx| p.set_asset_files(files, window, cx)));
         vcx.run_until_parked();
     }
 
-    fn node_asset(editor: &Entity<Editor>, node: &str, vcx: &mut gpui::VisualTestContext) -> Option<String> {
-        editor.read_with(vcx, |e, _| e.model().node(node).and_then(|n| n.data.asset.clone()))
+    fn node_asset(
+        editor: &Entity<Editor>,
+        node: &str,
+        vcx: &mut gpui::VisualTestContext,
+    ) -> Option<String> {
+        editor.read_with(vcx, |e, _| {
+            e.model().node(node).and_then(|n| n.data.asset.clone())
+        })
     }
 
     #[gpui::test]
     fn picking_an_asset_sets_the_node_and_is_one_undo_step(cx: &mut TestAppContext) {
         let (editor, _playback, asset, vcx) = media_scene(cx);
         let node = editor.update(vcx, |e, cx| {
-            let id = e.model_mut().add_node(IMAGE, GraphPoint::new(0.0, 0.0)).expect("adds");
+            let id = e
+                .model_mut()
+                .add_node(IMAGE, GraphPoint::new(0.0, 0.0))
+                .expect("adds");
             e.after_edit(cx);
             id
         });
@@ -2512,12 +3221,17 @@ mod tests {
         let (editor, _playback, asset, vcx) = media_scene(cx);
         let at = gpui::point(px(300.0), px(200.0));
         let expected = editor.read_with(vcx, |e, cx| e.flow.read(cx).screen_to_flow(at));
-        editor.update(vcx, |e, cx| e.drop_assets(std::slice::from_ref(&asset), at, cx));
+        editor.update(vcx, |e, cx| {
+            e.drop_assets(std::slice::from_ref(&asset), at, cx)
+        });
 
         let added = editor.read_with(vcx, |e, _| {
             let model = e.model();
             let doc = model.active_document();
-            doc.nodes.iter().find(|n| n.data.asset.as_deref() == Some(asset.as_str())).map(|n| (n.node_type.clone(), n.position))
+            doc.nodes
+                .iter()
+                .find(|n| n.data.asset.as_deref() == Some(asset.as_str()))
+                .map(|n| (n.node_type.clone(), n.position))
         });
         let (node_type, position) = added.expect("a node reads the dropped asset");
         assert_eq!(node_type, IMAGE);
@@ -2535,7 +3249,10 @@ mod tests {
         let at = point(px(300.0), px(200.0));
         let expected = editor.read_with(vcx, |e, cx| e.flow.read(cx).screen_to_flow(at));
         let paths = gpui::ExternalPaths(std::iter::once(path).collect());
-        vcx.simulate_event(gpui::FileDropEvent::Entered { position: at, paths });
+        vcx.simulate_event(gpui::FileDropEvent::Entered {
+            position: at,
+            paths,
+        });
         vcx.simulate_event(gpui::FileDropEvent::Submit { position: at });
         vcx.run_until_parked();
 
@@ -2545,7 +3262,14 @@ mod tests {
             doc.nodes
                 .iter()
                 .find(|n| n.node_type == IMAGE && n.data.asset.is_some())
-                .map(|n| (model.asset(n.data.asset.as_deref().unwrap_or_default()).map(|a| a.name().to_owned()), n.position))
+                .map(|n| {
+                    (
+                        model
+                            .asset(n.data.asset.as_deref().unwrap_or_default())
+                            .map(|a| a.name().to_owned()),
+                        n.position,
+                    )
+                })
         });
         let (name, position) = added.expect("a node reads the dropped file");
         assert_eq!(name.as_deref(), Some("Dropped"));
@@ -2557,16 +3281,25 @@ mod tests {
     fn a_node_whose_asset_file_is_missing_shows_the_warning(cx: &mut TestAppContext) {
         let (editor, playback, asset, vcx) = media_scene(cx);
         editor.update(vcx, |e, cx| {
-            let id = e.model_mut().add_node(IMAGE, GraphPoint::new(0.0, 0.0)).expect("adds");
+            let id = e
+                .model_mut()
+                .add_node(IMAGE, GraphPoint::new(0.0, 0.0))
+                .expect("adds");
             e.set_node_asset(&id, Some(&asset), cx);
         });
         vcx.run_until_parked();
-        assert!(vcx.debug_bounds("missing-file").is_some(), "no file, so the node warns");
+        assert!(
+            vcx.debug_bounds("missing-file").is_some(),
+            "no file, so the node warns"
+        );
 
         let mut files = AssetFiles::new();
         files.insert(asset.clone(), Arc::new(png_of_width(2)));
         set_files(&playback, files, vcx);
-        assert!(vcx.debug_bounds("missing-file").is_none(), "the file arrived, so the warning is gone");
+        assert!(
+            vcx.debug_bounds("missing-file").is_none(),
+            "the file arrived, so the warning is gone"
+        );
     }
 
     /// Focuses the flow and draws, as the window has them when a menu item is chosen.
@@ -2591,15 +3324,33 @@ mod tests {
         focus_flow(&scene, cx);
         select_nodes(&scene, cx, Vec::new());
         assert!(enabled(cx, &LayoutGraph) && enabled(cx, &LayoutDocument));
-        assert!(!enabled(cx, &LayoutSelected) && !enabled(cx, &GroupSelected) && !enabled(cx, &PreviewSelectedNode));
+        assert!(
+            !enabled(cx, &LayoutSelected)
+                && !enabled(cx, &GroupSelected)
+                && !enabled(cx, &PreviewSelectedNode)
+        );
 
         select_nodes(&scene, cx, vec![scene.member.clone()]);
-        assert!(enabled(cx, &LayoutSelected) && enabled(cx, &GroupSelected) && enabled(cx, &ToggleNodeSheet));
-        assert!(enabled(cx, &PreviewSelectedNode), "one selected node can be previewed");
-        assert!(!enabled(cx, &UngroupSelected) && !enabled(cx, &EnterNodeGroup) && !enabled(cx, &ExitNodeGroup));
+        assert!(
+            enabled(cx, &LayoutSelected)
+                && enabled(cx, &GroupSelected)
+                && enabled(cx, &ToggleNodeSheet)
+        );
+        assert!(
+            enabled(cx, &PreviewSelectedNode),
+            "one selected node can be previewed"
+        );
+        assert!(
+            !enabled(cx, &UngroupSelected)
+                && !enabled(cx, &EnterNodeGroup)
+                && !enabled(cx, &ExitNodeGroup)
+        );
 
         select_nodes(&scene, cx, vec![scene.member.clone(), scene.loose.clone()]);
-        assert!(!enabled(cx, &PreviewSelectedNode), "only a single selected node can be previewed");
+        assert!(
+            !enabled(cx, &PreviewSelectedNode),
+            "only a single selected node can be previewed"
+        );
     }
 
     #[gpui::test]
@@ -2608,29 +3359,46 @@ mod tests {
         focus_flow(&scene, cx);
         cx.dispatch_action(LayoutGraph);
         render_frame(cx);
-        assert!(scene.editor.read_with(cx, |e, _| e.model().can_undo()), "the layout is an edit");
+        assert!(
+            scene.editor.read_with(cx, |e, _| e.model().can_undo()),
+            "the layout is an edit"
+        );
 
         cx.dispatch_action(Undo);
         render_frame(cx);
-        assert!(scene.editor.read_with(cx, |e, _| e.model().can_redo()), "undo leaves the layout to redo");
+        assert!(
+            scene.editor.read_with(cx, |e, _| e.model().can_redo()),
+            "undo leaves the layout to redo"
+        );
     }
 
     #[gpui::test]
-    fn remove_unused_groups_is_enabled_only_with_unused_groups_and_asks_first(cx: &mut TestAppContext) {
+    fn remove_unused_groups_is_enabled_only_with_unused_groups_and_asks_first(
+        cx: &mut TestAppContext,
+    ) {
         let (scene, cx) = scene(cx);
         focus_flow(&scene, cx);
         assert!(!enabled(cx, &PruneUnusedGroups));
 
         let group = scene.editor.update(cx, |e, cx| {
-            let id = e.model_mut().create_group(GraphPoint::new(0.0, 0.0)).expect("creates");
+            let id = e
+                .model_mut()
+                .create_group(GraphPoint::new(0.0, 0.0))
+                .expect("creates");
             e.after_edit(cx);
             id
         });
         render_frame(cx);
-        assert!(!enabled(cx, &PruneUnusedGroups), "a group the project uses isn't unused");
+        assert!(
+            !enabled(cx, &PruneUnusedGroups),
+            "a group the project uses isn't unused"
+        );
 
         scene.editor.update(cx, |e, cx| {
-            assert!(e.model_mut().delete_nodes(std::slice::from_ref(&group), &[]));
+            assert!(
+                e.model_mut()
+                    .delete_nodes(std::slice::from_ref(&group), &[])
+            );
             e.after_edit(cx);
         });
         render_frame(cx);
@@ -2639,7 +3407,9 @@ mod tests {
         cx.dispatch_action(PruneUnusedGroups);
         render_frame(cx);
         assert!(
-            !scene.editor.read_with(cx, |e, _| e.model().prunable_groups().is_empty()),
+            !scene
+                .editor
+                .read_with(cx, |e, _| e.model().prunable_groups().is_empty()),
             "the groups stay until the user confirms the prompt"
         );
     }
@@ -2651,7 +3421,10 @@ mod tests {
         select_nodes(&scene, cx, vec![scene.loose.clone()]);
         cx.dispatch_action(PreviewSelectedNode);
         render_frame(cx);
-        assert_eq!(scene.editor.read_with(cx, |e, _| e.selected()), vec![scene.loose.clone()]);
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| e.selected()),
+            vec![scene.loose.clone()]
+        );
     }
 
     #[gpui::test]
@@ -2668,16 +3441,27 @@ mod tests {
 
         cx.dispatch_action(EnterNodeGroup);
         render_frame(cx);
-        assert_eq!(scene.editor.read_with(cx, |e, _| e.model().path().to_vec()), group);
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| e.model().path().to_vec()),
+            group
+        );
 
         cx.dispatch_action(ExitNodeGroup);
         render_frame(cx);
-        assert!(scene.editor.read_with(cx, |e, _| e.model().path().is_empty()));
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.model().path().is_empty())
+        );
 
         select_nodes(&scene, cx, group.clone());
         cx.dispatch_action(UngroupSelected);
         render_frame(cx);
-        assert!(scene.editor.read_with(cx, |e, _| e.model().node(&group[0]).is_none()));
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.model().node(&group[0]).is_none())
+        );
     }
 
     #[gpui::test]
@@ -2691,7 +3475,11 @@ mod tests {
         cx.dispatch_action(GroupSelected);
         render_frame(cx);
         assert!(enabled(cx, &ExportSelectedGroup));
-        assert!(scene.editor.read_with(cx, |e, _| e.selected_group_ref().is_some()));
+        assert!(
+            scene
+                .editor
+                .read_with(cx, |e, _| e.selected_group_ref().is_some())
+        );
     }
 
     #[gpui::test]
@@ -2702,27 +3490,50 @@ mod tests {
 
         cx.dispatch_action(ToggleNodeSheet);
         render_frame(cx);
-        assert_eq!(scene.editor.read_with(cx, |e, _| e.sheet.clone()), Some(scene.member.clone()));
+        assert_eq!(
+            scene.editor.read_with(cx, |e, _| e.sheet.clone()),
+            Some(scene.member.clone())
+        );
 
         cx.dispatch_action(ExitNodeGroup);
         render_frame(cx);
-        assert!(scene.editor.read_with(cx, |e, _| e.sheet.is_none()), "escape closes the sheet first");
+        assert!(
+            scene.editor.read_with(cx, |e, _| e.sheet.is_none()),
+            "escape closes the sheet first"
+        );
     }
 
     #[gpui::test]
     fn a_long_title_wraps_and_grows_the_card(cx: &mut TestAppContext) {
         let (scene, cx) = scene(cx);
-        let selector: &'static str = Box::leak(format!("node-card {}", scene.member).into_boxed_str());
+        let selector: &'static str =
+            Box::leak(format!("node-card {}", scene.member).into_boxed_str());
         render_frame(cx);
-        let short = f32::from(cx.debug_bounds(selector).expect("the card is drawn").size.height);
+        let short = f32::from(
+            cx.debug_bounds(selector)
+                .expect("the card is drawn")
+                .size
+                .height,
+        );
 
         scene.editor.update(cx, |e, cx| {
-            e.model_mut().set_node_label(&scene.member, Some("A node title long enough to need several lines on one card".to_owned()));
+            e.model_mut().set_node_label(
+                &scene.member,
+                Some("A node title long enough to need several lines on one card".to_owned()),
+            );
             e.after_edit(cx);
         });
         render_frame(cx);
-        let tall = f32::from(cx.debug_bounds(selector).expect("the card is drawn").size.height);
-        assert!(tall > short + 20.0, "a long title should wrap onto more lines: {short} grew to {tall}");
+        let tall = f32::from(
+            cx.debug_bounds(selector)
+                .expect("the card is drawn")
+                .size
+                .height,
+        );
+        assert!(
+            tall > short + 20.0,
+            "a long title should wrap onto more lines: {short} grew to {tall}"
+        );
     }
 
     /// Library groups are locked when added from the library, whatever the
@@ -2737,7 +3548,10 @@ mod tests {
             .reference
             .clone();
         let id = scene.editor.update(cx, |e, cx| {
-            let id = e.model_mut().add_group_instance(&reference, GraphPoint::new(300.0, 300.0)).expect("adds");
+            let id = e
+                .model_mut()
+                .add_group_instance(&reference, GraphPoint::new(300.0, 300.0))
+                .expect("adds");
             e.after_edit(cx);
             id
         });
@@ -2761,11 +3575,20 @@ mod tests {
         fit(&editor, cx);
         let (uv, group) = editor.read_with(cx, |e, _| {
             let doc = e.model().active_document().clone();
-            let uv = doc.nodes.iter().find(|n| n.node_type == "uv").expect("the scene has UV").id.clone();
+            let uv = doc
+                .nodes
+                .iter()
+                .find(|n| n.node_type == "uv")
+                .expect("the scene has UV")
+                .id
+                .clone();
             let group = doc
                 .nodes
                 .iter()
-                .find(|n| n.definition_ref().is_some_and(|r| r.starts_with("std-fractal-voronoi")))
+                .find(|n| {
+                    n.definition_ref()
+                        .is_some_and(|r| r.starts_with("std-fractal-voronoi"))
+                })
                 .expect("the scene has Fractal Voronoi")
                 .id
                 .clone();
@@ -2773,27 +3596,52 @@ mod tests {
         });
 
         let position = |cx: &gpui::VisualTestContext, id: &str| {
-            editor.read_with(cx, |e, _| e.model().node(id).map(|n| (n.position.x, n.position.y)).expect("node"))
+            editor.read_with(cx, |e, _| {
+                e.model()
+                    .node(id)
+                    .map(|n| (n.position.x, n.position.y))
+                    .expect("node")
+            })
         };
         let before = position(cx, &uv);
         drag_card(cx, &uv);
-        assert_ne!(position(cx, &uv), before, "a node in the root document drags");
+        assert_ne!(
+            position(cx, &uv),
+            before,
+            "a node in the root document drags"
+        );
 
         editor.update(cx, |e, cx| e.enter_group(&group, cx));
         fit(&editor, cx);
         let inner = editor.read_with(cx, |e, _| {
-            let plain = |n: &&shader_graph::graph::GraphNode| n.side().is_none() && !n.is(REROUTE) && !n.is(LAYOUT_FRAME);
-            e.model().active_document().nodes.iter().find(plain).expect("the group has a node").id.clone()
+            let plain = |n: &&shader_graph::graph::GraphNode| {
+                n.side().is_none() && !n.is(REROUTE) && !n.is(LAYOUT_FRAME)
+            };
+            e.model()
+                .active_document()
+                .nodes
+                .iter()
+                .find(plain)
+                .expect("the group has a node")
+                .id
+                .clone()
         });
         let before = position(cx, &inner);
         drag_card(cx, &inner);
-        assert_eq!(position(cx, &inner), before, "a node in a locked group does not drag");
+        assert_eq!(
+            position(cx, &inner),
+            before,
+            "a node in a locked group does not drag"
+        );
         assert!(!editor.read_with(cx, |e, cx| e.flow.read(cx).options.nodes_draggable));
     }
 
     /// Fits the whole document in the window and draws until it has settled.
     fn fit(editor: &Entity<Editor>, cx: &mut gpui::VisualTestContext) {
-        editor.update(cx, |e, cx| e.flow.update(cx, |f, cx| f.fit_view(Default::default(), cx)));
+        editor.update(cx, |e, cx| {
+            e.flow
+                .update(cx, |f, cx| f.fit_view(Default::default(), cx))
+        });
         settle(cx);
     }
 

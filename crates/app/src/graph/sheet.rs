@@ -11,16 +11,18 @@ use gpui::{
     IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
     Window, div, prelude::FluentBuilder as _, px,
 };
-use shader_graph::graph::{
-    FrameTint, GraphModel, GroupSide, LAYOUT_FRAME, REROUTE, frame_note, frame_tint, set_frame_note,
-    set_frame_tint,
-};
-use shader_graph::passes::{ItemSizeMode, TextureFormat};
-use shader_graph::types::{HandleType, SOCKET_TYPES, TypeVariable, WgslType, type_set_of};
-use shader_graph::zones::{DEFAULT_MAX_ITERATIONS, MAX_ITERATIONS, is_zone_node_type, zone_max_iterations};
 use gpui_component::Disableable as _;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use shader_graph::graph::{
+    FrameTint, GraphModel, GroupSide, LAYOUT_FRAME, REROUTE, frame_note, frame_tint,
+    set_frame_note, set_frame_tint,
+};
+use shader_graph::passes::{ItemSizeMode, TextureFormat};
+use shader_graph::types::{HandleType, SOCKET_TYPES, TypeVariable, WgslType, type_set_of};
+use shader_graph::zones::{
+    DEFAULT_MAX_ITERATIONS, MAX_ITERATIONS, is_zone_node_type, zone_max_iterations,
+};
 use theme::{ActiveTheme as _, Icon, IconName, NumberEvent, NumberField};
 
 use super::frames::tint_color;
@@ -64,12 +66,16 @@ pub(super) fn field(
         input.set_value(value.to_owned(), window, cx);
         input
     });
-    cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, _, cx| {
-        if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-            let text = input.read(cx).value().to_string();
-            commit(this, text, cx);
-        }
-    })
+    cx.subscribe_in(
+        &input,
+        window,
+        move |this, input, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                let text = input.read(cx).value().to_string();
+                commit(this, text, cx);
+            }
+        },
+    )
     .detach();
     editor.sheet_fields.inputs.insert(key, input.clone());
     input
@@ -94,12 +100,22 @@ fn text_area(
     }
     let (placeholder, value) = (placeholder.to_owned(), value.to_owned());
     let area = cx.new(|cx| new_text_area(&placeholder, &value, window, cx));
-    cx.subscribe_in(&area, window, move |this, area, event: &InputEvent, _, cx| {
-        if matches!(event, InputEvent::PressEnter { secondary: true, .. } | InputEvent::Blur) {
-            let text = area.read(cx).value().to_string();
-            commit(this, text, cx);
-        }
-    })
+    cx.subscribe_in(
+        &area,
+        window,
+        move |this, area, event: &InputEvent, _, cx| {
+            if matches!(
+                event,
+                InputEvent::PressEnter {
+                    secondary: true,
+                    ..
+                } | InputEvent::Blur
+            ) {
+                let text = area.read(cx).value().to_string();
+                commit(this, text, cx);
+            }
+        },
+    )
     .detach();
     editor.sheet_fields.areas.insert(key, area.clone());
     area
@@ -123,7 +139,10 @@ pub(super) fn number(
         f.set_value(value, cx);
         f
     });
-    cx.subscribe(&field, move |this, _, NumberEvent::Change(v), cx| commit(this, *v, cx)).detach();
+    cx.subscribe(&field, move |this, _, NumberEvent::Change(v), cx| {
+        commit(this, *v, cx)
+    })
+    .detach();
     editor.sheet_fields.numbers.insert(key, field.clone());
     field
 }
@@ -185,30 +204,44 @@ pub(super) fn outline_button(
         .border_color(input)
         .text_size(theme.text.sm)
         .when(disabled, |d| d.opacity(0.5))
-        .when(!disabled, |d| d.cursor_pointer().hover(move |s| s.bg(fg.opacity(0.08))))
-        .on_click(cx.safe_listener(move |this, event: &gpui::ClickEvent, _, cx| {
-            if !disabled {
-                on_click(this, event.position(), cx);
-            }
-        }))
+        .when(!disabled, |d| {
+            d.cursor_pointer().hover(move |s| s.bg(fg.opacity(0.08)))
+        })
+        .on_click(
+            cx.safe_listener(move |this, event: &gpui::ClickEvent, _, cx| {
+                if !disabled {
+                    on_click(this, event.position(), cx);
+                }
+            }),
+        )
         .child(label.into())
 }
 
 pub(super) fn heading(text: &str, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
-    div().text_size(theme.text.sm).font_weight(gpui::FontWeight::MEDIUM).child(text.to_owned())
+    div()
+        .text_size(theme.text.sm)
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .child(text.to_owned())
 }
 
 pub(super) fn hint(text: &str, cx: &Context<Editor>) -> gpui::Div {
     let theme = cx.theme();
-    div().text_size(theme.text.xs).text_color(theme.colors.muted_foreground).child(text.to_owned())
+    div()
+        .text_size(theme.text.xs)
+        .text_color(theme.colors.muted_foreground)
+        .child(text.to_owned())
 }
 
 pub(super) fn boxed(input: Entity<InputState>, cx: &Context<Editor>) -> gpui::Div {
     boxed_disabled(input, false, cx)
 }
 
-pub(super) fn boxed_disabled(input: Entity<InputState>, disabled: bool, cx: &Context<Editor>) -> gpui::Div {
+pub(super) fn boxed_disabled(
+    input: Entity<InputState>,
+    disabled: bool,
+    cx: &Context<Editor>,
+) -> gpui::Div {
     let theme = cx.theme();
     div()
         .px_1()
@@ -295,13 +328,22 @@ fn subject(model: &GraphModel, node_id: &str) -> Option<Subject> {
         node_type: node.node_type.clone(),
         hide_links: node.data.hide_links == Some(true),
         locked: model.is_locked() || is_locked_group(model, node),
-        frame: node.is(LAYOUT_FRAME).then(|| (frame_note(&node.data).unwrap_or_default().to_owned(), frame_tint(&node.data))),
+        frame: node.is(LAYOUT_FRAME).then(|| {
+            (
+                frame_note(&node.data).unwrap_or_default().to_owned(),
+                frame_tint(&node.data),
+            )
+        }),
         zone,
         group,
     })
 }
 
-pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>) -> Option<AnyElement> {
+pub fn render(
+    editor: &mut Editor,
+    window: &mut Window,
+    cx: &mut Context<Editor>,
+) -> Option<AnyElement> {
     let node_id = editor.sheet.clone()?;
     let theme = cx.theme().clone();
     let c = &theme.colors;
@@ -317,7 +359,8 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             let id = id.clone();
             this.edit(cx, move |m: &mut GraphModel| {
                 let text = text.trim().to_owned();
-                let custom = (!text.is_empty() && text != m.default_node_label(&id)).then_some(text);
+                let custom =
+                    (!text.is_empty() && text != m.default_node_label(&id)).then_some(text);
                 if m.node(&id).is_some_and(|n| n.data.label != custom) {
                     m.set_node_label(&id, custom);
                 }
@@ -350,7 +393,9 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             .when(!disabled, |d| d.cursor_pointer().hover(|s| s.bg(c.muted)))
             .tooltip({
                 let text = format!("Reset to {default}");
-                move |window, cx| gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                }
             })
             .on_click(cx.safe_listener(move |this, _, _, cx| {
                 if disabled {
@@ -368,7 +413,18 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
             .flex_col()
             .gap_1p5()
             .child(heading("Label", cx))
-            .child(div().flex().items_center().gap_1().child(div().flex_1().child(boxed_disabled(label_input, locked, cx))).child(reset)),
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(boxed_disabled(label_input, locked, cx)),
+                    )
+                    .child(reset),
+            ),
     );
 
     if subject.node_type == REROUTE {
@@ -412,35 +468,74 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                 });
             })
         };
-        let input = text_area(editor, format!("note-{node_id}"), &note, "What this part of the graph does…", window, cx, commit);
+        let input = text_area(
+            editor,
+            format!("note-{node_id}"),
+            &note,
+            "What this part of the graph does…",
+            window,
+            cx,
+            commit,
+        );
         body = body
-            .child(div().flex().flex_col().gap_1p5().child(heading("Note", cx)).child(div().p_1().border_1().border_color(c.input).rounded(theme.radius.md).child(Textarea::new(&input).appearance(false))))
             .child(
-                div().flex().flex_col().gap_1p5().child(heading("Colour", cx)).child(
-                    div().flex().flex_wrap().gap_1p5().children(
-                        std::iter::once(None).chain(FrameTint::ALL.into_iter().map(Some)).map(|option| {
-                            let id = node_id.clone();
-                            let name = option.map_or_else(|| "None".to_owned(), FrameTint::label);
-                            div()
-                                .id(SharedString::from(format!("tint-{name}")))
-                                .size(px(28.0))
-                                .rounded_full()
-                                .border_1()
-                                .border_color(c.border)
-                                .bg(tint_color(option, &theme).opacity(0.6))
-                                .when(tint == option, |d| d.border_2().border_color(c.primary))
-                                .when(!locked, |d| d.cursor_pointer())
-                                .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(name.clone()).build(window, cx))
-                                .on_click(cx.safe_listener(move |this, _, _, cx| {
-                                    if locked {
-                                        return;
-                                    }
-                                    let id = id.clone();
-                                    this.edit(cx, move |m| m.update_node_data(&id, |d| set_frame_tint(d, option)));
-                                }))
-                        }),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1p5()
+                    .child(heading("Note", cx))
+                    .child(
+                        div()
+                            .p_1()
+                            .border_1()
+                            .border_color(c.input)
+                            .rounded(theme.radius.md)
+                            .child(Textarea::new(&input).appearance(false)),
                     ),
-                ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1p5()
+                    .child(heading("Colour", cx))
+                    .child(
+                        div().flex().flex_wrap().gap_1p5().children(
+                            std::iter::once(None)
+                                .chain(FrameTint::ALL.into_iter().map(Some))
+                                .map(|option| {
+                                    let id = node_id.clone();
+                                    let name =
+                                        option.map_or_else(|| "None".to_owned(), FrameTint::label);
+                                    div()
+                                        .id(SharedString::from(format!("tint-{name}")))
+                                        .size(px(28.0))
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(c.border)
+                                        .bg(tint_color(option, &theme).opacity(0.6))
+                                        .when(tint == option, |d| {
+                                            d.border_2().border_color(c.primary)
+                                        })
+                                        .when(!locked, |d| d.cursor_pointer())
+                                        .tooltip(move |window, cx| {
+                                            gpui_component::tooltip::Tooltip::new(name.clone())
+                                                .build(window, cx)
+                                        })
+                                        .on_click(cx.safe_listener(move |this, _, _, cx| {
+                                            if locked {
+                                                return;
+                                            }
+                                            let id = id.clone();
+                                            this.edit(cx, move |m| {
+                                                m.update_node_data(&id, |d| {
+                                                    set_frame_tint(d, option)
+                                                })
+                                            });
+                                        }))
+                                }),
+                        ),
+                    ),
             );
     }
 
@@ -476,10 +571,21 @@ pub fn render(editor: &mut Editor, window: &mut Window, cx: &mut Context<Editor>
                             .flex()
                             .flex_col()
                             .gap(px(2.0))
-                            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(subject.shown_label.clone()))
-                            .children((subject.label.is_some()).then(|| hint(&subject.default_label, cx))),
+                            .child(
+                                div()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child(subject.shown_label.clone()),
+                            )
+                            .children(
+                                (subject.label.is_some()).then(|| hint(&subject.default_label, cx)),
+                            ),
                     )
-                    .child(button("close-sheet", Icon::new(IconName::X).size(px(14.0)), cx, |this, cx| this.close_sheet(cx))),
+                    .child(button(
+                        "close-sheet",
+                        Icon::new(IconName::X).size(px(14.0)),
+                        cx,
+                        |this, cx| this.close_sheet(cx),
+                    )),
             )
             .child(body)
             .into_any_element(),
@@ -507,11 +613,28 @@ fn group_settings(
             let node = node.clone();
             Rc::new(move |this, text, cx| {
                 let node = node.clone();
-                this.edit(cx, move |m: &mut GraphModel| m.set_group_label(&node, &text));
+                this.edit(cx, move |m: &mut GraphModel| {
+                    m.set_group_label(&node, &text)
+                });
             })
         };
-        let input = field(editor, format!("group-{reference}"), &group.label, "Group name", window, cx, commit);
-        body = body.child(div().flex().flex_col().gap_1p5().child(heading("Group name", cx)).child(boxed_disabled(input, locked, cx)));
+        let input = field(
+            editor,
+            format!("group-{reference}"),
+            &group.label,
+            "Group name",
+            window,
+            cx,
+            commit,
+        );
+        body = body.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1p5()
+                .child(heading("Group name", cx))
+                .child(boxed_disabled(input, locked, cx)),
+        );
     }
 
     if !group.variables.is_empty() || !locked {
@@ -529,11 +652,26 @@ fn group_settings(
                 let (reference, id) = (reference.clone(), variable.id.clone());
                 Rc::new(move |this, text, cx| {
                     let (reference, id) = (reference.clone(), id.clone());
-                    this.edit(cx, move |m| m.set_type_variable(&reference, &id, Some(&text), None));
+                    this.edit(cx, move |m| {
+                        m.set_type_variable(&reference, &id, Some(&text), None)
+                    });
                 })
             };
-            let name = field(editor, format!("variable-{}", variable.id), &variable.name, "Name", window, cx, name_commit);
-            let (w, r, vid, types) = (weak.clone(), reference.clone(), variable.id.clone(), variable.types.clone());
+            let name = field(
+                editor,
+                format!("variable-{}", variable.id),
+                &variable.name,
+                "Name",
+                window,
+                cx,
+                name_commit,
+            );
+            let (w, r, vid, types) = (
+                weak.clone(),
+                reference.clone(),
+                variable.id.clone(),
+                variable.types.clone(),
+            );
             let types_button = outline_button(
                 SharedString::from(format!("types-{}", variable.id)),
                 type_set_picker::label(&variable.types),
@@ -543,7 +681,9 @@ fn group_settings(
                     let (r, vid) = (r.clone(), vid.clone());
                     let change: type_set_picker::Change = Rc::new(move |next, e, cx| {
                         let (r, vid) = (r.clone(), vid.clone());
-                        e.edit(cx, move |m| m.set_type_variable(&r, &vid, None, Some(&next)));
+                        e.edit(cx, move |m| {
+                            m.set_type_variable(&r, &vid, None, Some(&next))
+                        });
                     });
                     let items = type_set_picker::items(&w, at, types.clone(), change);
                     this.open_list(at, items, cx);
@@ -561,7 +701,12 @@ fn group_settings(
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().w(px(56.0)).flex_none().child(boxed_disabled(name, locked, cx)))
+                    .child(
+                        div()
+                            .w(px(56.0))
+                            .flex_none()
+                            .child(boxed_disabled(name, locked, cx)),
+                    )
                     .child(div().flex().flex_1().min_w_0().child(types_button))
                     .child(
                         div()
@@ -569,24 +714,38 @@ fn group_settings(
                             .flex_none()
                             .text_size(theme.text.xs)
                             .text_color(theme.colors.muted_foreground)
-                            .child(format!("{sockets} {}", if sockets == 1 { "socket" } else { "sockets" })),
+                            .child(format!(
+                                "{sockets} {}",
+                                if sockets == 1 { "socket" } else { "sockets" }
+                            )),
                     )
                     .when(!locked, |d| {
-                        d.child(button(SharedString::from(format!("rm-{}", variable.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
-                            let (r, vid) = (r.clone(), vid.clone());
-                            this.edit(cx, move |m| m.remove_type_variable(&r, &vid));
-                        }))
+                        d.child(button(
+                            SharedString::from(format!("rm-{}", variable.id)),
+                            Icon::new(IconName::Trash).size(px(14.0)),
+                            cx,
+                            move |this, cx| {
+                                let (r, vid) = (r.clone(), vid.clone());
+                                this.edit(cx, move |m| m.remove_type_variable(&r, &vid));
+                            },
+                        ))
                     }),
             );
         }
         if !locked {
             let r = reference.clone();
-            section = section.child(outline_button("add-variable", "Add shared type", false, cx, move |this, _, cx| {
-                let r = r.clone();
-                this.edit(cx, move |m| {
-                    m.add_type_variable(&r, shader_graph::types::FLOAT_TYPES);
-                });
-            }));
+            section = section.child(outline_button(
+                "add-variable",
+                "Add shared type",
+                false,
+                cx,
+                move |this, _, cx| {
+                    let r = r.clone();
+                    this.edit(cx, move |m| {
+                        m.add_type_variable(&r, shader_graph::types::FLOAT_TYPES);
+                    });
+                },
+            ));
         }
         body = body.child(section);
     }
@@ -597,11 +756,23 @@ fn group_settings(
     ] {
         let mut section = div().flex().flex_col().gap_1p5().child(heading(title, cx));
         for handle in handles {
-            let detailed = side == GroupSide::Input && !handle.ty.is_inferred() && !matches!(handle.ty, HandleType::Fixed(t) if t.is_texture());
+            let detailed = side == GroupSide::Input
+                && !handle.ty.is_inferred()
+                && !matches!(handle.ty, HandleType::Fixed(t) if t.is_texture());
             let open = editor.sheet_fields.expanded.contains(&handle.id);
             let toggle_id = handle.id.clone();
-            let details = (detailed && open)
-                .then(|| super::handle_details::details(editor, window, &reference, &handle, &group.defaults, &group.variables, locked, cx));
+            let details = (detailed && open).then(|| {
+                super::handle_details::details(
+                    editor,
+                    window,
+                    &reference,
+                    &handle,
+                    &group.defaults,
+                    &group.variables,
+                    locked,
+                    cx,
+                )
+            });
             let commit: Commit = {
                 let (reference, id) = (reference.clone(), handle.id.clone());
                 Rc::new(move |this, text, cx| {
@@ -611,9 +782,22 @@ fn group_settings(
                     });
                 })
             };
-            let input = field(editor, format!("handle-{reference}-{}", handle.id), &handle.label, "", window, cx, commit);
+            let input = field(
+                editor,
+                format!("handle-{reference}-{}", handle.id),
+                &handle.label,
+                "",
+                window,
+                cx,
+                commit,
+            );
             let current = type_label(&handle.ty, &group.variables);
-            let (w, r, hid, variables) = (weak.clone(), reference.clone(), handle.id.clone(), group.variables.clone());
+            let (w, r, hid, variables) = (
+                weak.clone(),
+                reference.clone(),
+                handle.id.clone(),
+                group.variables.clone(),
+            );
             let handle_ty = handle.ty.clone();
             let type_button = outline_button(
                 SharedString::from(format!("type-{}", handle.id)),
@@ -630,7 +814,14 @@ fn group_settings(
                                 Some(handle_ty.variable() == Some(v.id.as_str())),
                                 on_editor(&w, move |e, cx| {
                                     let (r, hid, vid) = (r.clone(), hid.clone(), vid.clone());
-                                    e.edit(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::Variable { variable: vid }));
+                                    e.edit(cx, move |m| {
+                                        m.set_handle_type(
+                                            &r,
+                                            side,
+                                            &hid,
+                                            HandleType::Variable { variable: vid },
+                                        )
+                                    });
                                 }),
                             )
                             .detail(type_set_of(&v.types).map_or("Custom", |s| s.label))
@@ -643,7 +834,9 @@ fn group_settings(
                             Some(handle_ty.is_inferred()),
                             on_editor(&w, move |e, cx| {
                                 let (r, hid) = (r.clone(), hid.clone());
-                                e.edit(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::inferred()));
+                                e.edit(cx, move |m| {
+                                    m.set_handle_type(&r, side, &hid, HandleType::inferred())
+                                });
                             }),
                         )
                         .detail("What reaches it");
@@ -659,7 +852,9 @@ fn group_settings(
                         inferred: None,
                         on_pick: Rc::new(move |ty, e, cx| {
                             let (r, hid) = (r2.clone(), hid2.clone());
-                            e.edit(cx, move |m| m.set_handle_type(&r, side, &hid, HandleType::Fixed(ty)));
+                            e.edit(cx, move |m| {
+                                m.set_handle_type(&r, side, &hid, HandleType::Fixed(ty))
+                            });
                         }),
                         on_reset: None,
                         extra,
@@ -670,42 +865,78 @@ fn group_settings(
             let (r1, h1) = (reference.clone(), handle.id.clone());
             let (r2, h2) = (reference.clone(), handle.id.clone());
             let (r3, h3) = (reference.clone(), handle.id.clone());
-            let handle_row =
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(div().flex_1().min_w_0().child(boxed_disabled(input, locked, cx)))
-                    .child(div().w(px(96.0)).flex_none().flex().child(type_button))
-                    .when(detailed, |d| {
-                        d.child(button(SharedString::from(format!("expand-{}", handle.id)), if open { Icon::new(IconName::CaretDown).size(px(14.0)).into_any_element() } else { Icon::new(IconName::CaretRight).size(px(14.0)).into_any_element() }, cx, move |this, cx| {
+            let handle_row = div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(boxed_disabled(input, locked, cx)),
+                )
+                .child(div().w(px(96.0)).flex_none().flex().child(type_button))
+                .when(detailed, |d| {
+                    d.child(button(
+                        SharedString::from(format!("expand-{}", handle.id)),
+                        if open {
+                            Icon::new(IconName::CaretDown)
+                                .size(px(14.0))
+                                .into_any_element()
+                        } else {
+                            Icon::new(IconName::CaretRight)
+                                .size(px(14.0))
+                                .into_any_element()
+                        },
+                        cx,
+                        move |this, cx| {
                             if !this.sheet_fields.expanded.remove(&toggle_id) {
                                 this.sheet_fields.expanded.insert(toggle_id.clone());
                             }
                             cx.notify();
-                        }))
-                    })
-                    .when(!locked, |d| {
-                        d.child(button(SharedString::from(format!("up-{}", handle.id)), Icon::new(IconName::ArrowUp).size(px(14.0)), cx, move |this, cx| {
+                        },
+                    ))
+                })
+                .when(!locked, |d| {
+                    d.child(button(
+                        SharedString::from(format!("up-{}", handle.id)),
+                        Icon::new(IconName::ArrowUp).size(px(14.0)),
+                        cx,
+                        move |this, cx| {
                             let (r, h) = (r1.clone(), h1.clone());
                             this.edit(cx, move |m| m.move_handle(&r, side, &h, -1));
-                        }))
-                        .child(button(SharedString::from(format!("down-{}", handle.id)), Icon::new(IconName::ArrowDown).size(px(14.0)), cx, move |this, cx| {
+                        },
+                    ))
+                    .child(button(
+                        SharedString::from(format!("down-{}", handle.id)),
+                        Icon::new(IconName::ArrowDown).size(px(14.0)),
+                        cx,
+                        move |this, cx| {
                             let (r, h) = (r2.clone(), h2.clone());
                             this.edit(cx, move |m| m.move_handle(&r, side, &h, 1));
-                        }))
-                        .child(button(SharedString::from(format!("del-{}", handle.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
+                        },
+                    ))
+                    .child(button(
+                        SharedString::from(format!("del-{}", handle.id)),
+                        Icon::new(IconName::Trash).size(px(14.0)),
+                        cx,
+                        move |this, cx| {
                             let (r, h) = (r3.clone(), h3.clone());
                             this.edit(cx, move |m| m.remove_handle(&r, side, &h));
-                        }))
-                    });
+                        },
+                    ))
+                });
             section = section.child(handle_row).children(details);
         }
         if !locked {
             let (w, r) = (weak.clone(), reference.clone());
             section = section.child(outline_button(
                 SharedString::from(format!("add-{title}")),
-                if side == GroupSide::Input { "Add input" } else { "Add output" },
+                if side == GroupSide::Input {
+                    "Add input"
+                } else {
+                    "Add output"
+                },
                 false,
                 cx,
                 move |this, at, cx| {
@@ -713,7 +944,14 @@ fn group_settings(
                     let mut extra: Vec<ListItem> = Vec::new();
                     if side == GroupSide::Input {
                         for (label, ty, variants) in [
-                            ("Enum", WgslType::U32, vec![shader_graph::types::EnumVariant::new(0, "Option 1"), shader_graph::types::EnumVariant::new(1, "Option 2")]),
+                            (
+                                "Enum",
+                                WgslType::U32,
+                                vec![
+                                    shader_graph::types::EnumVariant::new(0, "Option 1"),
+                                    shader_graph::types::EnumVariant::new(1, "Option 2"),
+                                ],
+                            ),
                             ("Checkbox", WgslType::Bool, GraphModel::toggle_variants()),
                         ] {
                             let r = r.clone();
@@ -723,7 +961,13 @@ fn group_settings(
                                 on_editor(&w, move |e, cx| {
                                     let (r, variants) = (r.clone(), variants.clone());
                                     e.edit(cx, move |m| {
-                                        m.add_handle(&r, side, HandleType::Fixed(ty), Some(variants), None);
+                                        m.add_handle(
+                                            &r,
+                                            side,
+                                            HandleType::Fixed(ty),
+                                            Some(variants),
+                                            None,
+                                        );
                                     });
                                 }),
                             ));
@@ -782,8 +1026,14 @@ fn zone_settings(
     let weak = cx.entity().downgrade();
     let (nodes, items, variables) = {
         let model = editor.model();
-        let Some(nodes) = model.zone_nodes(zone) else { return body };
-        (nodes, model.zone_items_of(zone), model.active_document().type_variables.clone())
+        let Some(nodes) = model.zone_nodes(zone) else {
+            return body;
+        };
+        (
+            nodes,
+            model.zone_items_of(zone),
+            model.active_document().type_variables.clone(),
+        )
     };
     let simulation = nodes.kind == shader_graph::zones::ZoneKind::Simulation;
     let (title, description) = if simulation {
@@ -797,7 +1047,14 @@ fn zone_settings(
             "Nodes linked from the Repeat Input run once per iteration. Each state item carries a value from one iteration to the next.",
         )
     };
-    body = body.child(div().flex().flex_col().gap_1p5().child(heading(title, cx)).child(hint(description, cx)));
+    body = body.child(
+        div()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .child(heading(title, cx))
+            .child(hint(description, cx)),
+    );
 
     if !simulation {
         let id = zone.to_owned();
@@ -807,7 +1064,12 @@ fn zone_settings(
             format!("max-{zone}"),
             f64::from(max),
             cx,
-            |cx| NumberField::new(f64::from(DEFAULT_MAX_ITERATIONS), cx).integer().min(0.0).max(f64::from(MAX_ITERATIONS)),
+            |cx| {
+                NumberField::new(f64::from(DEFAULT_MAX_ITERATIONS), cx)
+                    .integer()
+                    .min(0.0)
+                    .max(f64::from(MAX_ITERATIONS))
+            },
             Rc::new(move |this, value, cx| {
                 let id = id.clone();
                 this.edit(cx, move |m| m.set_zone_max_iterations(&id, value as u32));
@@ -824,8 +1086,16 @@ fn zone_settings(
         );
     }
 
-    let item_types: Vec<WgslType> = if simulation { SOCKET_TYPES.to_vec() } else { WgslType::ALL.to_vec() };
-    let mut section = div().flex().flex_col().gap_1p5().child(heading("State items", cx));
+    let item_types: Vec<WgslType> = if simulation {
+        SOCKET_TYPES.to_vec()
+    } else {
+        WgslType::ALL.to_vec()
+    };
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap_1p5()
+        .child(heading("State items", cx));
     for item in items {
         let commit: Commit = {
             let (zone, id) = (zone.to_owned(), item.id.clone());
@@ -836,63 +1106,97 @@ fn zone_settings(
                 });
             })
         };
-        let input = field(editor, format!("item-{zone}-{}", item.id), &item.label, "", window, cx, commit);
-        let shared = item.ty.variable().and_then(|v| variables.iter().find(|x| x.id == v)).cloned();
+        let input = field(
+            editor,
+            format!("item-{zone}-{}", item.id),
+            &item.label,
+            "",
+            window,
+            cx,
+            commit,
+        );
+        let shared = item
+            .ty
+            .variable()
+            .and_then(|v| variables.iter().find(|x| x.id == v))
+            .cloned();
         let label = shared
             .as_ref()
             .map(|v| v.name.clone())
             .or_else(|| item.ty.is_inferred().then(|| "Inferred".to_owned()))
             .unwrap_or_else(|| type_label(&item.ty, &variables));
-        let (w, z, iid, ty, vars, types) =
-            (weak.clone(), zone.to_owned(), item.id.clone(), item.ty.clone(), variables.clone(), item_types.clone());
-        let type_button = outline_button(SharedString::from(format!("item-type-{}", item.id)), label, locked, cx, move |this, at, cx| {
-            let mut extra = vec![{
-                let (z, iid) = (z.clone(), iid.clone());
-                ListItem::new(
-                    "Inferred",
-                    Some(ty.is_inferred()),
-                    on_editor(&w, move |e, cx| {
-                        let (z, iid) = (z.clone(), iid.clone());
-                        e.edit(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::inferred()));
-                    }),
-                )
-                .detail("Initial value")
-            }];
-            for (i, v) in vars.iter().enumerate() {
-                let (z, iid, vid) = (z.clone(), iid.clone(), v.id.clone());
-                let mut entry = ListItem::new(
-                    format!("{} (shared)", v.name),
-                    Some(ty.variable() == Some(v.id.as_str())),
-                    on_editor(&w, move |e, cx| {
-                        let (z, iid, vid) = (z.clone(), iid.clone(), vid.clone());
-                        e.edit(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::Variable { variable: vid }));
-                    }),
-                );
-                if i == 0 {
-                    entry = entry.separated();
+        let (w, z, iid, ty, vars, types) = (
+            weak.clone(),
+            zone.to_owned(),
+            item.id.clone(),
+            item.ty.clone(),
+            variables.clone(),
+            item_types.clone(),
+        );
+        let type_button = outline_button(
+            SharedString::from(format!("item-type-{}", item.id)),
+            label,
+            locked,
+            cx,
+            move |this, at, cx| {
+                let mut extra = vec![{
+                    let (z, iid) = (z.clone(), iid.clone());
+                    ListItem::new(
+                        "Inferred",
+                        Some(ty.is_inferred()),
+                        on_editor(&w, move |e, cx| {
+                            let (z, iid) = (z.clone(), iid.clone());
+                            e.edit(cx, move |m| {
+                                m.set_zone_item_type(&z, &iid, HandleType::inferred())
+                            });
+                        }),
+                    )
+                    .detail("Initial value")
+                }];
+                for (i, v) in vars.iter().enumerate() {
+                    let (z, iid, vid) = (z.clone(), iid.clone(), v.id.clone());
+                    let mut entry = ListItem::new(
+                        format!("{} (shared)", v.name),
+                        Some(ty.variable() == Some(v.id.as_str())),
+                        on_editor(&w, move |e, cx| {
+                            let (z, iid, vid) = (z.clone(), iid.clone(), vid.clone());
+                            e.edit(cx, move |m| {
+                                m.set_zone_item_type(
+                                    &z,
+                                    &iid,
+                                    HandleType::Variable { variable: vid },
+                                )
+                            });
+                        }),
+                    );
+                    if i == 0 {
+                        entry = entry.separated();
+                    }
+                    extra.push(entry);
                 }
-                extra.push(entry);
-            }
-            let (z, iid) = (z.clone(), iid.clone());
-            this.open_type_picker(
-                at,
-                TypePicker {
-                    types: types.clone(),
-                    value: match &ty {
-                        HandleType::Fixed(t) => Some(*t),
-                        _ => None,
+                let (z, iid) = (z.clone(), iid.clone());
+                this.open_type_picker(
+                    at,
+                    TypePicker {
+                        types: types.clone(),
+                        value: match &ty {
+                            HandleType::Fixed(t) => Some(*t),
+                            _ => None,
+                        },
+                        inferred: None,
+                        on_pick: Rc::new(move |t, e, cx| {
+                            let (z, iid) = (z.clone(), iid.clone());
+                            e.edit(cx, move |m| {
+                                m.set_zone_item_type(&z, &iid, HandleType::Fixed(t))
+                            });
+                        }),
+                        on_reset: None,
+                        extra,
                     },
-                    inferred: None,
-                    on_pick: Rc::new(move |t, e, cx| {
-                        let (z, iid) = (z.clone(), iid.clone());
-                        e.edit(cx, move |m| m.set_zone_item_type(&z, &iid, HandleType::Fixed(t)));
-                    }),
-                    on_reset: None,
-                    extra,
-                },
-                cx,
-            );
-        });
+                    cx,
+                );
+            },
+        );
 
         let mut row = div()
             .flex()
@@ -946,8 +1250,11 @@ fn zone_settings(
                 locked,
                 cx,
                 move |this, at, cx| {
-                    let choices: [(&str, Option<ItemSizeMode>); 3] =
-                        [("Canvas", None), ("Scale", Some(ItemSizeMode::Scale)), ("Pixels", Some(ItemSizeMode::Pixels))];
+                    let choices: [(&str, Option<ItemSizeMode>); 3] = [
+                        ("Canvas", None),
+                        ("Scale", Some(ItemSizeMode::Scale)),
+                        ("Pixels", Some(ItemSizeMode::Pixels)),
+                    ];
                     let entries = choices
                         .into_iter()
                         .map(|(label, mode)| {
@@ -970,53 +1277,74 @@ fn zone_settings(
         let (z2, i2) = (zone.to_owned(), item.id.clone());
         let (z3, i3) = (zone.to_owned(), item.id.clone());
         section = section.child(row.when(!locked, |d| {
-            d.child(button(SharedString::from(format!("iup-{}", item.id)), Icon::new(IconName::ArrowUp).size(px(14.0)), cx, move |this, cx| {
-                let (z, i) = (z1.clone(), i1.clone());
-                this.edit(cx, move |m| m.move_zone_item(&z, &i, -1));
-            }))
-            .child(button(SharedString::from(format!("idown-{}", item.id)), Icon::new(IconName::ArrowDown).size(px(14.0)), cx, move |this, cx| {
-                let (z, i) = (z2.clone(), i2.clone());
-                this.edit(cx, move |m| m.move_zone_item(&z, &i, 1));
-            }))
-            .child(button(SharedString::from(format!("idel-{}", item.id)), Icon::new(IconName::Trash).size(px(14.0)), cx, move |this, cx| {
-                let (z, i) = (z3.clone(), i3.clone());
-                this.edit(cx, move |m| m.remove_zone_item(&z, &i));
-            }))
+            d.child(button(
+                SharedString::from(format!("iup-{}", item.id)),
+                Icon::new(IconName::ArrowUp).size(px(14.0)),
+                cx,
+                move |this, cx| {
+                    let (z, i) = (z1.clone(), i1.clone());
+                    this.edit(cx, move |m| m.move_zone_item(&z, &i, -1));
+                },
+            ))
+            .child(button(
+                SharedString::from(format!("idown-{}", item.id)),
+                Icon::new(IconName::ArrowDown).size(px(14.0)),
+                cx,
+                move |this, cx| {
+                    let (z, i) = (z2.clone(), i2.clone());
+                    this.edit(cx, move |m| m.move_zone_item(&z, &i, 1));
+                },
+            ))
+            .child(button(
+                SharedString::from(format!("idel-{}", item.id)),
+                Icon::new(IconName::Trash).size(px(14.0)),
+                cx,
+                move |this, cx| {
+                    let (z, i) = (z3.clone(), i3.clone());
+                    this.edit(cx, move |m| m.remove_zone_item(&z, &i));
+                },
+            ))
         }));
     }
     if !locked {
         let (w, z, types) = (weak, zone.to_owned(), item_types);
-        section = section.child(outline_button("add-item", "Add item", false, cx, move |this, at, cx| {
-            let (z, z2) = (z.clone(), z.clone());
-            let inferred = ListItem::new(
-                "Inferred",
-                None,
-                on_editor(&w, move |e, cx| {
-                    let z = z2.clone();
-                    e.edit(cx, move |m| {
-                        m.add_zone_item(&z, HandleType::inferred(), None);
-                    });
-                }),
-            )
-            .detail("Initial value");
-            this.open_type_picker(
-                at,
-                TypePicker {
-                    types: types.clone(),
-                    value: None,
-                    inferred: None,
-                    on_pick: Rc::new(move |t, e, cx| {
-                        let z = z.clone();
+        section = section.child(outline_button(
+            "add-item",
+            "Add item",
+            false,
+            cx,
+            move |this, at, cx| {
+                let (z, z2) = (z.clone(), z.clone());
+                let inferred = ListItem::new(
+                    "Inferred",
+                    None,
+                    on_editor(&w, move |e, cx| {
+                        let z = z2.clone();
                         e.edit(cx, move |m| {
-                            m.add_zone_item(&z, HandleType::Fixed(t), None);
+                            m.add_zone_item(&z, HandleType::inferred(), None);
                         });
                     }),
-                    on_reset: None,
-                    extra: vec![inferred],
-                },
-                cx,
-            );
-        }));
+                )
+                .detail("Initial value");
+                this.open_type_picker(
+                    at,
+                    TypePicker {
+                        types: types.clone(),
+                        value: None,
+                        inferred: None,
+                        on_pick: Rc::new(move |t, e, cx| {
+                            let z = z.clone();
+                            e.edit(cx, move |m| {
+                                m.add_zone_item(&z, HandleType::Fixed(t), None);
+                            });
+                        }),
+                        on_reset: None,
+                        extra: vec![inferred],
+                    },
+                    cx,
+                );
+            },
+        ));
     }
     body.child(section)
 }
@@ -1034,7 +1362,9 @@ mod tests {
 
     impl Render for Area {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            guard::render("area host", || div().w(px(300.0)).child(Textarea::new(&self.0)))
+            guard::render("area host", || {
+                div().w(px(300.0)).child(Textarea::new(&self.0))
+            })
         }
     }
 
@@ -1042,7 +1372,8 @@ mod tests {
 
     fn setup(cx: &mut TestAppContext) -> (Entity<TextareaState>, Events, &mut VisualTestContext) {
         cx.update(theme::init);
-        let (host, cx) = cx.add_window_view(|window, cx| Area(cx.new(|cx| new_text_area("", "", window, cx))));
+        let (host, cx) =
+            cx.add_window_view(|window, cx| Area(cx.new(|cx| new_text_area("", "", window, cx))));
         let area = cx.read(|cx| host.read(cx).0.clone());
         let events = Rc::new(RefCell::new(Vec::new()));
         let log = events.clone();
@@ -1050,7 +1381,9 @@ mod tests {
             cx.subscribe(&area, move |_, event: &InputEvent, _| {
                 log.borrow_mut().push(match event {
                     InputEvent::Change => "change",
-                    InputEvent::PressEnter { secondary: true, .. } => "submit",
+                    InputEvent::PressEnter {
+                        secondary: true, ..
+                    } => "submit",
                     InputEvent::PressEnter { .. } => "enter",
                     InputEvent::Blur => "blur",
                     InputEvent::Focus => "focus",
@@ -1074,7 +1407,12 @@ mod tests {
         cx.simulate_keystrokes("enter");
         cx.simulate_input("two");
         assert_eq!(value(&area, cx), "one\ntwo");
-        assert!(events.borrow().iter().all(|e| matches!(*e, "change" | "enter")));
+        assert!(
+            events
+                .borrow()
+                .iter()
+                .all(|e| matches!(*e, "change" | "enter"))
+        );
     }
 
     #[gpui::test]

@@ -118,7 +118,9 @@ fn parse_number(text: &str) -> Option<f64> {
 
 fn constrain(value: f64, integer: bool, min: Option<f64>, max: Option<f64>) -> f64 {
     let value = if integer { value.round() } else { value };
-    value.max(min.unwrap_or(f64::NEG_INFINITY)).min(max.unwrap_or(f64::INFINITY))
+    value
+        .max(min.unwrap_or(f64::NEG_INFINITY))
+        .min(max.unwrap_or(f64::INFINITY))
 }
 
 #[derive(Default)]
@@ -245,202 +247,228 @@ pub fn format_number(value: f64, integer: bool) -> SharedString {
 }
 
 impl RenderOnce for Scrub {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement { guard::render("number field", || {
-        let colors = cx.theme().colors.clone();
-        let z = self.zoom;
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| ScrubState::default());
-        let scrubbing = state.read(cx).scrubbing;
-        let pressed = state.read(cx).pressed.is_some();
-        let (integer, value, min, max) = (self.integer, self.value, self.min, self.max);
-        let clamp = move |v: f64| constrain(v, integer, min, max);
-        let entry = window.use_keyed_state((self.id.clone(), "entry"), cx, |window, cx| {
-            EntryState::new(window, cx)
-        });
-        let typing = entry.read(cx).editing;
-        let input = entry.read(cx).input.clone();
-        entry.update(cx, |e, _| {
-            e.value = value;
-            e.integer = integer;
-            e.min = min;
-            e.max = max;
-            e.on_change = self.on_change.clone();
-        });
-        let group: SharedString = format!("scrub-{:?}", self.id).into();
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        guard::render("number field", || {
+            let colors = cx.theme().colors.clone();
+            let z = self.zoom;
+            let state = window.use_keyed_state(self.id.clone(), cx, |_, _| ScrubState::default());
+            let scrubbing = state.read(cx).scrubbing;
+            let pressed = state.read(cx).pressed.is_some();
+            let (integer, value, min, max) = (self.integer, self.value, self.min, self.max);
+            let clamp = move |v: f64| constrain(v, integer, min, max);
+            let entry = window.use_keyed_state((self.id.clone(), "entry"), cx, |window, cx| {
+                EntryState::new(window, cx)
+            });
+            let typing = entry.read(cx).editing;
+            let input = entry.read(cx).input.clone();
+            entry.update(cx, |e, _| {
+                e.value = value;
+                e.integer = integer;
+                e.min = min;
+                e.max = max;
+                e.on_change = self.on_change.clone();
+            });
+            let group: SharedString = format!("scrub-{:?}", self.id).into();
 
-        let side = |right: bool| {
+            let side = |right: bool| {
+                let on_change = self.on_change.clone();
+                let fg = colors.foreground;
+                div()
+                    .id(if right { "inc" } else { "dec" })
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .when(right, |d| d.right_0())
+                    .when(!right, |d| d.left_0())
+                    .w(px(16.0 * z))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(fg)
+                    .opacity(0.0)
+                    .group_hover(group.clone(), |s| s.opacity(0.5))
+                    .hover(move |s| s.opacity(1.0).bg(fg.opacity(0.1)))
+                    .child(
+                        Icon::new(if right {
+                            IconName::CaretRight
+                        } else {
+                            IconName::CaretLeft
+                        })
+                        .size(px(10.0 * z)),
+                    )
+                    .on_mouse_down(MouseButton::Left, move |e, window, cx| {
+                        guard::guard("scrub step", || {
+                            cx.stop_propagation();
+                            let by = step(integer, e.modifiers.shift);
+                            if let Some(f) = &on_change {
+                                f(
+                                    clamp(value + if right { by } else { -by }),
+                                    Edit::Commit,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        });
+                    })
+            };
+
             let on_change = self.on_change.clone();
+            let press_state = state.clone();
             let fg = colors.foreground;
             div()
-                .id(if right { "inc" } else { "dec" })
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .when(right, |d| d.right_0())
-                .when(!right, |d| d.left_0())
-                .w(px(16.0 * z))
+                .id(self.id.clone())
+                .group(group.clone())
+                .relative()
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(fg)
-                .opacity(0.0)
-                .group_hover(group.clone(), |s| s.opacity(0.5))
-                .hover(move |s| s.opacity(1.0).bg(fg.opacity(0.1)))
-                .child(Icon::new(if right { IconName::CaretRight } else { IconName::CaretLeft }).size(px(10.0 * z)))
-                .on_mouse_down(MouseButton::Left, move |e, window, cx| {
-                    guard::guard("scrub step", || {
-                        cx.stop_propagation();
-                        let by = step(integer, e.modifiers.shift);
-                        if let Some(f) = &on_change {
-                            f(
-                                clamp(value + if right { by } else { -by }),
-                                Edit::Commit,
-                                window,
-                                cx,
-                            );
-                        }
-                    });
+                .h(px(22.0 * z))
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .when(self.stack.rounds_top() && self.stack.rounds_bottom(), |d| {
+                    d.rounded(px(4.0 * z))
                 })
-        };
-
-        let on_change = self.on_change.clone();
-        let press_state = state.clone();
-        let fg = colors.foreground;
-        div()
-            .id(self.id.clone())
-            .group(group.clone())
-            .relative()
-            .flex()
-            .items_center()
-            .justify_center()
-            .h(px(22.0 * z))
-            .flex_1()
-            .min_w_0()
-            .overflow_hidden()
-            .when(self.stack.rounds_top() && self.stack.rounds_bottom(), |d| d.rounded(px(4.0 * z)))
-            .when(self.stack.rounds_top() && !self.stack.rounds_bottom(), |d| d.rounded_t(px(4.0 * z)))
-            .when(!self.stack.rounds_top() && self.stack.rounds_bottom(), |d| d.rounded_b(px(4.0 * z)))
-            .when(self.stack.separated(), |d| d.border_t(px(z)).border_color(colors.border))
-            .bg(fg.opacity(if scrubbing || pressed { 0.1 } else { 0.05 }))
-            .text_size(px(12.0 * z))
-            .text_color(fg)
-            .when(self.readonly, |d| d.opacity(0.5))
-            .when(typing, |d| {
-                let entry = entry.clone();
-                let field = div()
-                    .w_full()
-                    .h(px(22.0 * z))
-                    .min_w_0()
-                    .on_action(move |_: &Escape, window, cx| {
-                        cx.stop_propagation();
-                        guard::guard("number entry", || {
-                            entry.update(cx, |e, cx| {
-                                e.finish(cx);
-                                e.restore_focus(window, cx);
-                            });
-                        });
-                    })
-                    .child(
-                        // The input's own size sets its text and padding, so they are
-                        // overridden here to follow the zoom. Its height fills the wrapper.
-                        Input::new(&input)
-                            .appearance(false)
-                            .px(px(4.0 * z))
-                            .py(px(0.0))
-                            .text_size(px(12.0 * z))
-                            .line_height(px(15.0 * z))
-                            .text_align(TextAlign::Center),
-                    );
-                #[cfg(test)]
-                let field = field.debug_selector(|| "scrub-entry".into());
-                d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(field)
-            })
-            .when(!self.readonly && !typing, |d| {
-                d.cursor(CursorStyle::ResizeLeftRight)
-                    .hover(move |s| s.bg(fg.opacity(0.08)))
-                    .on_mouse_down(MouseButton::Left, move |e, _, cx| {
-                        guard::guard("scrub press", || {
-                            cx.stop_propagation();
-                            press_state.update(cx, |s, cx| {
-                                s.pressed = Some((f32::from(e.position.x), value));
-                                s.scrubbing = false;
-                                s.last = value;
-                                cx.notify();
-                            });
-                        });
-                    })
-                    .child(side(false))
-                    .child(side(true))
-            })
-            .when(!typing, |d| d.child(format_number(value, integer)))
-            .when(pressed && !typing, |d| {
-                let state = state.clone();
-                let entry = entry.clone();
-                d.child(
-                    canvas(
-                        |_, _, _| {},
-                        move |_, _, window, _| { guard::guard("fields canvas", || {
-                            let on_move = state.clone();
-                            let changed = on_change.clone();
-                            window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
-                                guard::guard("scrub drag", || {
-                                    if phase != DispatchPhase::Bubble {
-                                        return;
-                                    }
-                                    let Some((start_x, start)) = on_move.read(cx).pressed else {
-                                        return;
-                                    };
-                                    let dx = f32::from(e.position.x) - start_x;
-                                    let scrubbing = on_move.read(cx).scrubbing;
-                                    if !scrubbing && dx.abs() <= DRAG_THRESHOLD {
-                                        return;
-                                    }
-                                    let by = step(integer, e.modifiers.shift);
-                                    let next = clamp(
-                                        start
-                                            + f64::from(dx.signum())
-                                                * by
-                                                * f64::from((dx.abs() / 2.0).ceil()),
-                                    );
-                                    on_move.update(cx, |s, cx| {
-                                        s.scrubbing = true;
-                                        s.last = next;
-                                        cx.notify();
-                                    });
-                                    if let Some(f) = &changed {
-                                        f(next, Edit::Preview, window, cx);
-                                    }
-                                });
-                            });
-                            let on_up = state.clone();
-                            let changed = on_change.clone();
-                            window.on_mouse_event(move |_: &MouseUpEvent, phase, window, cx| {
-                                guard::guard("scrub release", || {
-                                    if phase != DispatchPhase::Bubble {
-                                        return;
-                                    }
-                                    let (was_scrubbing, last) = {
-                                        let s = on_up.read(cx);
-                                        (s.scrubbing, s.last)
-                                    };
-                                    on_up.update(cx, |s, cx| {
-                                        *s = ScrubState::default();
-                                        cx.notify();
-                                    });
-                                    if !was_scrubbing {
-                                        entry.update(cx, |e, cx| e.start(window, cx));
-                                    } else if let Some(f) = &changed {
-                                        f(last, Edit::Commit, window, cx);
-                                    }
-                                });
-                            });
-                        }); },
-                    )
-                    .absolute()
-                    .size_0(),
+                .when(
+                    self.stack.rounds_top() && !self.stack.rounds_bottom(),
+                    |d| d.rounded_t(px(4.0 * z)),
                 )
-            })
-    })
+                .when(
+                    !self.stack.rounds_top() && self.stack.rounds_bottom(),
+                    |d| d.rounded_b(px(4.0 * z)),
+                )
+                .when(self.stack.separated(), |d| {
+                    d.border_t(px(z)).border_color(colors.border)
+                })
+                .bg(fg.opacity(if scrubbing || pressed { 0.1 } else { 0.05 }))
+                .text_size(px(12.0 * z))
+                .text_color(fg)
+                .when(self.readonly, |d| d.opacity(0.5))
+                .when(typing, |d| {
+                    let entry = entry.clone();
+                    let field = div()
+                        .w_full()
+                        .h(px(22.0 * z))
+                        .min_w_0()
+                        .on_action(move |_: &Escape, window, cx| {
+                            cx.stop_propagation();
+                            guard::guard("number entry", || {
+                                entry.update(cx, |e, cx| {
+                                    e.finish(cx);
+                                    e.restore_focus(window, cx);
+                                });
+                            });
+                        })
+                        .child(
+                            // The input's own size sets its text and padding, so they are
+                            // overridden here to follow the zoom. Its height fills the wrapper.
+                            Input::new(&input)
+                                .appearance(false)
+                                .px(px(4.0 * z))
+                                .py(px(0.0))
+                                .text_size(px(12.0 * z))
+                                .line_height(px(15.0 * z))
+                                .text_align(TextAlign::Center),
+                        );
+                    #[cfg(test)]
+                    let field = field.debug_selector(|| "scrub-entry".into());
+                    d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(field)
+                })
+                .when(!self.readonly && !typing, |d| {
+                    d.cursor(CursorStyle::ResizeLeftRight)
+                        .hover(move |s| s.bg(fg.opacity(0.08)))
+                        .on_mouse_down(MouseButton::Left, move |e, _, cx| {
+                            guard::guard("scrub press", || {
+                                cx.stop_propagation();
+                                press_state.update(cx, |s, cx| {
+                                    s.pressed = Some((f32::from(e.position.x), value));
+                                    s.scrubbing = false;
+                                    s.last = value;
+                                    cx.notify();
+                                });
+                            });
+                        })
+                        .child(side(false))
+                        .child(side(true))
+                })
+                .when(!typing, |d| d.child(format_number(value, integer)))
+                .when(pressed && !typing, |d| {
+                    let state = state.clone();
+                    let entry = entry.clone();
+                    d.child(
+                        canvas(
+                            |_, _, _| {},
+                            move |_, _, window, _| {
+                                guard::guard("fields canvas", || {
+                                    let on_move = state.clone();
+                                    let changed = on_change.clone();
+                                    window.on_mouse_event(
+                                        move |e: &MouseMoveEvent, phase, window, cx| {
+                                            guard::guard("scrub drag", || {
+                                                if phase != DispatchPhase::Bubble {
+                                                    return;
+                                                }
+                                                let Some((start_x, start)) =
+                                                    on_move.read(cx).pressed
+                                                else {
+                                                    return;
+                                                };
+                                                let dx = f32::from(e.position.x) - start_x;
+                                                let scrubbing = on_move.read(cx).scrubbing;
+                                                if !scrubbing && dx.abs() <= DRAG_THRESHOLD {
+                                                    return;
+                                                }
+                                                let by = step(integer, e.modifiers.shift);
+                                                let next = clamp(
+                                                    start
+                                                        + f64::from(dx.signum())
+                                                            * by
+                                                            * f64::from((dx.abs() / 2.0).ceil()),
+                                                );
+                                                on_move.update(cx, |s, cx| {
+                                                    s.scrubbing = true;
+                                                    s.last = next;
+                                                    cx.notify();
+                                                });
+                                                if let Some(f) = &changed {
+                                                    f(next, Edit::Preview, window, cx);
+                                                }
+                                            });
+                                        },
+                                    );
+                                    let on_up = state.clone();
+                                    let changed = on_change.clone();
+                                    window.on_mouse_event(
+                                        move |_: &MouseUpEvent, phase, window, cx| {
+                                            guard::guard("scrub release", || {
+                                                if phase != DispatchPhase::Bubble {
+                                                    return;
+                                                }
+                                                let (was_scrubbing, last) = {
+                                                    let s = on_up.read(cx);
+                                                    (s.scrubbing, s.last)
+                                                };
+                                                on_up.update(cx, |s, cx| {
+                                                    *s = ScrubState::default();
+                                                    cx.notify();
+                                                });
+                                                if !was_scrubbing {
+                                                    entry.update(cx, |e, cx| e.start(window, cx));
+                                                } else if let Some(f) = &changed {
+                                                    f(last, Edit::Commit, window, cx);
+                                                }
+                                            });
+                                        },
+                                    );
+                                });
+                            },
+                        )
+                        .absolute()
+                        .size_0(),
+                    )
+                })
+        })
     }
 }
 
@@ -482,7 +510,11 @@ pub fn picker(
             });
         })
         .child(div().truncate().child(label.into()))
-        .child(Icon::new(IconName::CaretDown).size(px(10.0 * zoom)).color(colors.muted_foreground))
+        .child(
+            Icon::new(IconName::CaretDown)
+                .size(px(10.0 * zoom))
+                .color(colors.muted_foreground),
+        )
 }
 
 /// A checkbox drawn at `zoom`, so it scales with the card around it.
@@ -495,7 +527,11 @@ pub fn checkbox(
     on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let colors = &cx.theme().colors;
-    let (fill, line) = if checked { (colors.primary, colors.primary) } else { (colors.background, colors.input) };
+    let (fill, line) = if checked {
+        (colors.primary, colors.primary)
+    } else {
+        (colors.background, colors.input)
+    };
     div()
         .id(id.into())
         .flex_none()
@@ -509,7 +545,13 @@ pub fn checkbox(
         .bg(fill)
         .when(disabled, |d| d.opacity(0.5))
         .when(!disabled, |d| d.cursor_pointer())
-        .when(checked, |d| d.child(Icon::new(IconName::Check).size(px(12.0 * zoom)).color(colors.primary_foreground)))
+        .when(checked, |d| {
+            d.child(
+                Icon::new(IconName::Check)
+                    .size(px(12.0 * zoom))
+                    .color(colors.primary_foreground),
+            )
+        })
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             guard::guard("checkbox click", || {
                 cx.stop_propagation();
@@ -540,15 +582,15 @@ mod tests {
             let host = cx.entity();
             let changes = self.changes.clone();
             div().w(px(200.0)).h(px(40.0)).child(
-                Scrub::new("n", self.value, self.zoom).range(Some(0.0), Some(10.0)).on_change(
-                    move |v, edit, _, cx| {
+                Scrub::new("n", self.value, self.zoom)
+                    .range(Some(0.0), Some(10.0))
+                    .on_change(move |v, edit, _, cx| {
                         changes.borrow_mut().push((v, edit));
                         host.update(cx, |h, cx| {
                             h.value = v;
                             cx.notify();
                         });
-                    },
-                ),
+                    }),
             )
         }
     }
@@ -561,7 +603,11 @@ mod tests {
         cx.update(theme::init);
         let changes = Rc::new(RefCell::new(Vec::new()));
         let shared = changes.clone();
-        let (_, cx) = cx.add_window_view(move |_, _| Host { value: 1.0, zoom, changes: shared });
+        let (_, cx) = cx.add_window_view(move |_, _| Host {
+            value: 1.0,
+            zoom,
+            changes: shared,
+        });
         cx.run_until_parked();
         (changes, cx)
     }
@@ -594,7 +640,9 @@ mod tests {
         let (_, cx) = setup_at(cx, 2.0);
         cx.simulate_click(point(px(100.0), px(22.0)), Modifiers::default());
         cx.run_until_parked();
-        let entry = cx.debug_bounds("scrub-entry").expect("typing shows the entry");
+        let entry = cx
+            .debug_bounds("scrub-entry")
+            .expect("typing shows the entry");
         assert_eq!(entry.size.height, px(44.0));
     }
 

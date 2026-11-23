@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, IntoElement,
-    ParentElement as _, Render, Styled as _, Window, WindowBounds, WindowOptions, div, px, size,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement as _,
+    Render, Styled as _, Window, WindowBounds, WindowOptions, div, px, size,
 };
 use gpui_flow::{
     ControlsOptions, Edge, Flow, FlowEvent, HandleType, MiniMapOptions, Node, NodeProps, Position,
@@ -88,7 +88,13 @@ impl Demo {
                 cx,
             );
             flow.set_edges(
-                vec![Edge::new("e1", "a", Some("out0".into()), "b", Some("in0".into()))],
+                vec![Edge::new(
+                    "e1",
+                    "a",
+                    Some("out0".into()),
+                    "b",
+                    Some("in0".into()),
+                )],
                 cx,
             );
         });

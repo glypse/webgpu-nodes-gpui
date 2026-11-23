@@ -1,7 +1,7 @@
 use super::ColorSpace;
 use super::{
-    ACHROMATIC, Hsv, Lch, Rgb, decode_rgb, encode_rgb, hsv_to_rgb, linear_to_oklch, oklch_to_linear,
-    rgb_to_hsv,
+    ACHROMATIC, Hsv, Lch, Rgb, decode_rgb, encode_rgb, hsv_to_rgb, linear_to_oklch,
+    oklch_to_linear, rgb_to_hsv,
 };
 
 /// What three colour components are. RGB is linear (what the shader computes

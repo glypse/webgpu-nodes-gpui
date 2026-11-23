@@ -5,15 +5,23 @@ use std::path::Path;
 
 use anyhow::Result;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Entity, EntityId, Global, KeyBinding, TitlebarOptions,
-    WindowBounds, WindowOptions, actions, point, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Entity, EntityId, Global, KeyBinding,
+    TitlebarOptions, WindowBounds, WindowOptions, actions, point, px, size,
 };
 use gpui_component::Root;
 
 use crate::preferences_window::PreferencesDialog;
 use crate::shell::{Shell, Start};
 
-actions!(windows, [NewOutputWindow, ToggleFullscreen, ToggleOutputStretch, CloseWindow]);
+actions!(
+    windows,
+    [
+        NewOutputWindow,
+        ToggleFullscreen,
+        ToggleOutputStretch,
+        CloseWindow
+    ]
+);
 
 /// The size of a project window opened without one, in points.
 pub const DEFAULT_SIZE: (f32, f32) = (1400.0, 860.0);
@@ -47,7 +55,8 @@ pub fn init(cx: &mut App) {
         cx.defer(|cx| {
             guard::guard("toggle full screen", || {
                 if let Some(active) = cx.active_window() {
-                    cx.update_window(active, |_, window, _| window.toggle_fullscreen()).ok();
+                    cx.update_window(active, |_, window, _| window.toggle_fullscreen())
+                        .ok();
                 }
             });
         });
@@ -58,7 +67,8 @@ pub fn init(cx: &mut App) {
                 if let Some(active) = cx.active_window()
                     && shell_in(active, cx).is_none()
                 {
-                    cx.update_window(active, |_, window, _| window.remove_window()).ok();
+                    cx.update_window(active, |_, window, _| window.remove_window())
+                        .ok();
                 }
             });
         });
@@ -74,7 +84,14 @@ pub fn shell_of_view(view: &gpui::AnyView, cx: &App) -> Option<Entity<Shell>> {
     if let Ok(shell) = view.clone().downcast::<Shell>() {
         return Some(shell);
     }
-    view.clone().downcast::<Root>().ok()?.read(cx).view().clone().downcast::<Shell>().ok()
+    view.clone()
+        .downcast::<Root>()
+        .ok()?
+        .read(cx)
+        .view()
+        .clone()
+        .downcast::<Shell>()
+        .ok()
 }
 
 /// The shell a window shows, if it is a project window.
@@ -87,7 +104,10 @@ pub fn shell_in(handle: AnyWindowHandle, cx: &App) -> Option<Entity<Shell>> {
 
 /// The project windows. A window being updated right now can't be read, so is left out.
 pub fn project_windows(cx: &App) -> Vec<(AnyWindowHandle, Entity<Shell>)> {
-    cx.windows().into_iter().filter_map(|handle| Some((handle, shell_in(handle, cx)?))).collect()
+    cx.windows()
+        .into_iter()
+        .filter_map(|handle| Some((handle, shell_in(handle, cx)?)))
+        .collect()
 }
 
 /// The window of another project window that has `path` open.
@@ -99,7 +119,8 @@ pub fn find_project(path: &Path, except: EntityId, cx: &App) -> Option<AnyWindow
 }
 
 pub fn activate(handle: AnyWindowHandle, cx: &mut App) {
-    cx.update_window(handle, |_, window, _| window.activate_window()).ok();
+    cx.update_window(handle, |_, window, _| window.activate_window())
+        .ok();
 }
 
 /// Opens a project window beside the one with bounds `beside`, or else centred at `size` (in points).
@@ -119,7 +140,10 @@ pub fn open_project(
     };
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions { title: Some("webgpu-nodes".into()), ..Default::default() }),
+        titlebar: Some(TitlebarOptions {
+            title: Some("webgpu-nodes".into()),
+            ..Default::default()
+        }),
         // Playback is driven by this window's frames, which must not slow down while another window,
         // such as an output on a second display, has the focus.
         inactive_frame_interval: None,
@@ -145,7 +169,10 @@ pub fn open_preferences(cx: &mut App) {
     let bounds = Bounds::centered(None, size(px(560.0), px(480.0)), cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions { title: Some("Preferences".into()), ..Default::default() }),
+        titlebar: Some(TitlebarOptions {
+            title: Some("Preferences".into()),
+            ..Default::default()
+        }),
         ..Default::default()
     };
     match cx.open_window(options, |window, cx| {
@@ -178,18 +205,35 @@ pub fn add_output(handle: AnyWindowHandle, owner: EntityId, cx: &mut App) {
 #[cfg(test)]
 pub fn outputs_of(owner: EntityId, cx: &App) -> Vec<AnyWindowHandle> {
     cx.try_global::<Registry>()
-        .map(|r| r.outputs.iter().filter(|o| o.owner == owner).map(|o| o.handle).filter(|h| live(*h, cx)).collect())
+        .map(|r| {
+            r.outputs
+                .iter()
+                .filter(|o| o.owner == owner)
+                .map(|o| o.handle)
+                .filter(|h| live(*h, cx))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 /// Closes the outputs of a project window that is gone.
 pub fn owner_closed(owner: EntityId, cx: &mut App) {
-    let Some(registry) = cx.try_global::<Registry>() else { return };
-    let gone: Vec<AnyWindowHandle> = registry.outputs.iter().filter(|o| o.owner == owner).map(|o| o.handle).collect();
+    let Some(registry) = cx.try_global::<Registry>() else {
+        return;
+    };
+    let gone: Vec<AnyWindowHandle> = registry
+        .outputs
+        .iter()
+        .filter(|o| o.owner == owner)
+        .map(|o| o.handle)
+        .collect();
     for handle in gone {
-        cx.update_window(handle, |_, window, _| window.remove_window()).ok();
+        cx.update_window(handle, |_, window, _| window.remove_window())
+            .ok();
     }
-    cx.global_mut::<Registry>().outputs.retain(|o| o.owner != owner);
+    cx.global_mut::<Registry>()
+        .outputs
+        .retain(|o| o.owner != owner);
 }
 
 #[cfg(test)]
@@ -206,7 +250,8 @@ mod tests {
 
     /// A project window that starts without a project file.
     fn project_window(cx: &mut TestAppContext) -> (Entity<Shell>, VisualTestContext) {
-        let (shell, cx) = cx.add_window_view(|window, cx| Shell::start(Start::Blank, None, window, cx));
+        let (shell, cx) =
+            cx.add_window_view(|window, cx| Shell::start(Start::Blank, None, window, cx));
         cx.run_until_parked();
         (shell, cx.clone())
     }
@@ -261,18 +306,27 @@ mod tests {
         app(cx);
         let (a, mut ca) = project_window(cx);
         let (b, mut cb) = project_window(cx);
-        assert_ne!(a.read_with(&ca, |s, _| s.playback().entity_id()), b.read_with(&cb, |s, _| s.playback().entity_id()));
+        assert_ne!(
+            a.read_with(&ca, |s, _| s.playback().entity_id()),
+            b.read_with(&cb, |s, _| s.playback().entity_id())
+        );
 
         make_dirty(&a, &mut ca);
         assert!(dirty(&a, &ca));
-        assert!(!dirty(&b, &cb), "editing one project leaves the other alone");
+        assert!(
+            !dirty(&b, &cb),
+            "editing one project leaves the other alone"
+        );
 
         ca.dispatch_action(TogglePlayback);
         assert!(playing(&a, &ca));
         assert!(!playing(&b, &cb), "playback is per window");
         cb.dispatch_action(TogglePlayback);
         cb.dispatch_action(TogglePlayback);
-        assert!(playing(&a, &ca) && !playing(&b, &cb), "a menu action goes to the window it is dispatched in");
+        assert!(
+            playing(&a, &ca) && !playing(&b, &cb),
+            "a menu action goes to the window it is dispatched in"
+        );
         assert_eq!(window_count(cx), 2);
     }
 
@@ -305,7 +359,11 @@ mod tests {
         cx.update(|cx| shell::confirm_all_discards(cx, move |_| done.set(true)));
 
         for _ in 0..2 {
-            let ask = if ca.has_pending_prompt() { &mut ca } else { &mut cb };
+            let ask = if ca.has_pending_prompt() {
+                &mut ca
+            } else {
+                &mut cb
+            };
             assert!(ask.has_pending_prompt(), "each dirty window asks in turn");
             assert!(!quit.get());
             ask.simulate_prompt_answer("Discard");
@@ -325,25 +383,42 @@ mod tests {
         let quit = Rc::new(Cell::new(false));
         let done = quit.clone();
         cx.update(|cx| shell::confirm_all_discards(cx, move |_| done.set(true)));
-        let ask = if ca.has_pending_prompt() { &mut ca } else { &mut cb };
+        let ask = if ca.has_pending_prompt() {
+            &mut ca
+        } else {
+            &mut cb
+        };
         ask.simulate_prompt_answer("Cancel");
         ask.run_until_parked();
         assert!(!quit.get());
-        assert!(!ca.has_pending_prompt() && !cb.has_pending_prompt(), "nothing else is asked");
+        assert!(
+            !ca.has_pending_prompt() && !cb.has_pending_prompt(),
+            "nothing else is asked"
+        );
     }
 
     #[gpui::test]
-    fn new_replaces_nothing_in_an_untouched_window_and_opens_a_window_otherwise(cx: &mut TestAppContext) {
+    fn new_replaces_nothing_in_an_untouched_window_and_opens_a_window_otherwise(
+        cx: &mut TestAppContext,
+    ) {
         app(cx);
         let (a, mut ca) = project_window(cx);
         ca.dispatch_action(NewProject);
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 1, "a new project is already what New would open");
+        assert_eq!(
+            window_count(cx),
+            1,
+            "a new project is already what New would open"
+        );
 
         make_dirty(&a, &mut ca);
         ca.dispatch_action(NewProject);
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 2, "New opens a window beside a project with changes");
+        assert_eq!(
+            window_count(cx),
+            2,
+            "New opens a window beside a project with changes"
+        );
         assert!(dirty(&a, &ca), "and keeps them");
     }
 
@@ -352,7 +427,8 @@ mod tests {
         app(cx);
         let (a, mut ca) = project_window(cx);
         let (_, mut cb) = project_window(cx);
-        let preferences_open = |cx: &mut TestAppContext| cx.update(|cx| cx.global::<Registry>().preferences.is_some());
+        let preferences_open =
+            |cx: &mut TestAppContext| cx.update(|cx| cx.global::<Registry>().preferences.is_some());
 
         ca.dispatch_action(OpenPreferences);
         cx.run_until_parked();
@@ -361,21 +437,35 @@ mod tests {
 
         cb.dispatch_action(OpenPreferences);
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 3, "opening it again shows the one that is open");
+        assert_eq!(
+            window_count(cx),
+            3,
+            "opening it again shows the one that is open"
+        );
 
         assert!(close(&mut cb));
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 2, "the preferences don't close with a project");
+        assert_eq!(
+            window_count(cx),
+            2,
+            "the preferences don't close with a project"
+        );
         assert!(preferences_open(cx));
         drop(a);
         assert!(close(&mut ca));
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 1, "nor do they follow the project window that opened them");
+        assert_eq!(
+            window_count(cx),
+            1,
+            "nor do they follow the project window that opened them"
+        );
         assert!(preferences_open(cx));
     }
 
     #[gpui::test]
-    fn an_output_window_shows_its_projects_playback_without_drawing_frames(cx: &mut TestAppContext) {
+    fn an_output_window_shows_its_projects_playback_without_drawing_frames(
+        cx: &mut TestAppContext,
+    ) {
         app(cx);
         let (a, mut ca) = project_window(cx);
         let (b, mut cb) = project_window(cx);
@@ -386,7 +476,13 @@ mod tests {
         assert_eq!(outputs.len(), 1);
         assert!(cx.update(|cx| outputs_of(b.entity_id(), cx)).is_empty());
 
-        let view = cx.update(|cx| outputs[0].downcast::<OutputView>().and_then(|h| h.entity(cx).ok())).expect("an output view");
+        let view = cx
+            .update(|cx| {
+                outputs[0]
+                    .downcast::<OutputView>()
+                    .and_then(|h| h.entity(cx).ok())
+            })
+            .expect("an output view");
         assert_eq!(
             view.read_with(&ca, |v, _| v.playback().entity_id()),
             a.read_with(&ca, |s, _| s.playback().entity_id()),
@@ -399,17 +495,29 @@ mod tests {
             output.update(|window, _| window.refresh());
             output.run_until_parked();
         }
-        assert_eq!(a.read_with(&ca, |s, cx| s.playback().read(cx).submitted()), submitted, "drawing the output renders nothing");
+        assert_eq!(
+            a.read_with(&ca, |s, cx| s.playback().read(cx).submitted()),
+            submitted,
+            "drawing the output renders nothing"
+        );
 
         view.update(&mut output, |v, cx| v.toggle_stretch(cx));
         assert!(view.read_with(&output, |v, _| v.stretch()));
 
         assert!(close(&mut cb));
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 2, "an output stays when another project closes");
+        assert_eq!(
+            window_count(cx),
+            2,
+            "an output stays when another project closes"
+        );
         drop(a);
         assert!(close(&mut ca));
         cx.run_until_parked();
-        assert_eq!(window_count(cx), 0, "the outputs close with their project window");
+        assert_eq!(
+            window_count(cx),
+            0,
+            "the outputs close with their project window"
+        );
     }
 }

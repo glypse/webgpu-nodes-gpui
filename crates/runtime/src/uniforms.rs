@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use shader_graph::{UniformBlock, UniformScalar};
 #[cfg(test)]
 use shader_graph::UniformField;
+use shader_graph::{UniformBlock, UniformScalar};
 
 /// Writes the values `lookup` gives for `block`'s fields, at the offsets it lays out. A field
 /// without a value is left alone; a value shorter than its field pads with zeros.
@@ -63,7 +63,11 @@ mod tests {
         };
         let values = BTreeMap::from([("a".to_string(), vec![1.5]), ("b".to_string(), vec![7.0])]);
         let mut bytes = [0u8; 32];
-        pack_block(&block, |name| values.get(name).map(|v| Cow::Borrowed(v.as_slice())), &mut bytes);
+        pack_block(
+            &block,
+            |name| values.get(name).map(|v| Cow::Borrowed(v.as_slice())),
+            &mut bytes,
+        );
         assert_eq!(&bytes[0..4], &1.5f32.to_le_bytes());
         assert_eq!(&bytes[16..20], &7u32.to_le_bytes());
         assert_eq!(&bytes[20..24], &0u32.to_le_bytes());

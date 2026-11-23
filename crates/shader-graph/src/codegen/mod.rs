@@ -46,7 +46,9 @@ pub fn generate_program(
     options: &ShaderOptions,
 ) -> Result<Program, CodegenError> {
     let plan = generate_render_plan(CodegenGraph { project, resolver }, options)?;
-    let target = plan.target().ok_or_else(|| CodegenError::Unsupported("the frame has no pass".to_owned()))?;
+    let target = plan
+        .target()
+        .ok_or_else(|| CodegenError::Unsupported("the frame has no pass".to_owned()))?;
     Ok(Program {
         program: Box::new(target.program.clone()),
         uniforms: plan.uniforms.clone(),

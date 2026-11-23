@@ -91,7 +91,10 @@ impl Schema {
 
     fn text(&mut self, path: &str, text: &str, max: usize) {
         if text.len() > max {
-            self.fail(path, format!("too long: {} bytes, at most {max}", text.len()));
+            self.fail(
+                path,
+                format!("too long: {} bytes, at most {max}", text.len()),
+            );
         }
     }
 
@@ -114,8 +117,14 @@ impl Schema {
             self.list(&format!("{path}.variants"), variants);
             for (i, variant) in variants.iter().enumerate() {
                 self.variant(&format!("{path}.variants[{i}]"), variant);
-                if variants[..i].iter().any(|earlier| earlier.value == variant.value) {
-                    self.fail(&format!("{path}.variants[{i}].value"), "duplicates an earlier variant's value");
+                if variants[..i]
+                    .iter()
+                    .any(|earlier| earlier.value == variant.value)
+                {
+                    self.fail(
+                        &format!("{path}.variants[{i}].value"),
+                        "duplicates an earlier variant's value",
+                    );
                 }
             }
         }
@@ -140,7 +149,10 @@ impl Schema {
 
     fn variant(&mut self, path: &str, variant: &EnumVariant) {
         if u32::try_from(variant.value).is_err() {
-            self.fail(&format!("{path}.value"), "must fit an unsigned 32-bit integer");
+            self.fail(
+                &format!("{path}.value"),
+                "must fit an unsigned 32-bit integer",
+            );
         }
         self.label(&format!("{path}.label"), &variant.label);
         if let Some(types) = &variant.types {
@@ -166,13 +178,21 @@ impl Schema {
         for key in data.values.keys().chain(data.types.keys()) {
             self.id(&format!("{path}.values"), key);
         }
-        self.length(&format!("{path}.values"), data.values.len(), MAX_LIST_LENGTH);
+        self.length(
+            &format!("{path}.values"),
+            data.values.len(),
+            MAX_LIST_LENGTH,
+        );
         self.length(&format!("{path}.types"), data.types.len(), MAX_LIST_LENGTH);
         for (key, value) in &data.settings {
             self.id(&format!("{path}.settings"), key);
             self.label(&format!("{path}.settings.{key}"), value);
         }
-        self.length(&format!("{path}.settings"), data.settings.len(), MAX_LIST_LENGTH);
+        self.length(
+            &format!("{path}.settings"),
+            data.settings.len(),
+            MAX_LIST_LENGTH,
+        );
         self.length(&format!("{path}.extra"), data.extra.len(), MAX_LIST_LENGTH);
         if let Some(items) = &data.items {
             self.list(&format!("{path}.items"), items);
@@ -250,7 +270,11 @@ impl Schema {
             doc.nodes.len(),
             MAX_NODES_PER_DOCUMENT,
         );
-        self.length(&format!("{path}.defaults"), doc.defaults.len(), MAX_LIST_LENGTH);
+        self.length(
+            &format!("{path}.defaults"),
+            doc.defaults.len(),
+            MAX_LIST_LENGTH,
+        );
         self.length(
             &format!("{path}.edges"),
             doc.edges.len(),
@@ -304,7 +328,10 @@ pub fn schema_issues(project: &GraphProject) -> Vec<String> {
     // Counted before the library's definitions are added, so only what the file holds is judged.
     let nodes: usize = project.definitions.values().map(|d| d.nodes.len()).sum();
     if nodes > MAX_PROJECT_NODES {
-        schema.fail("definitions", format!("too many nodes: {nodes}, at most {MAX_PROJECT_NODES}"));
+        schema.fail(
+            "definitions",
+            format!("too many nodes: {nodes}, at most {MAX_PROJECT_NODES}"),
+        );
     }
     for (key, doc) in &project.definitions {
         schema.id("definitions", key);
@@ -315,7 +342,10 @@ pub fn schema_issues(project: &GraphProject) -> Vec<String> {
     for asset in &project.assets {
         schema.id("assets.id", asset.id());
         if !asset.is_valid() {
-            schema.fail("assets", format!("\"{}\" isn't a valid asset", asset.name()));
+            schema.fail(
+                "assets",
+                format!("\"{}\" isn't a valid asset", asset.name()),
+            );
         }
     }
     schema.0
@@ -458,10 +488,12 @@ fn node_id_issues(project: &GraphProject) -> Vec<GraphIssue> {
     for (key, doc) in &project.definitions {
         for node in &doc.nodes {
             match owner.get(node.id.as_str()) {
-                Some(first) if *first != key.as_str() => issues.push(GraphIssue::NodeIdInTwoDefinitions {
-                    id: node.id.clone(),
-                    definition: key.clone(),
-                }),
+                Some(first) if *first != key.as_str() => {
+                    issues.push(GraphIssue::NodeIdInTwoDefinitions {
+                        id: node.id.clone(),
+                        definition: key.clone(),
+                    })
+                }
                 Some(_) => {}
                 None => {
                     owner.insert(&node.id, key);

@@ -21,7 +21,10 @@ fn frame_code(g: &TestGraph) -> String {
     for pass in &plan.passes {
         validate_wgsl(&pass.program.code);
     }
-    plan.passes.last().map(|p| p.program.code.clone()).unwrap_or_default()
+    plan.passes
+        .last()
+        .map(|p| p.program.code.clone())
+        .unwrap_or_default()
 }
 
 fn sampled(format: TextureFormat, scale: f64) -> TestGraph {
@@ -35,13 +38,19 @@ fn sampled(format: TextureFormat, scale: f64) -> TestGraph {
 #[test]
 fn textures_are_read_exactly_when_made_for_the_passes_size() {
     let code = frame_code(&sampled(TextureFormat::Rgba16Float, 1.0));
-    assert!(code.contains("textureLoad(runtime_texture_0, vec2i(runtime_fragment.position), 0)"), "{code}");
+    assert!(
+        code.contains("textureLoad(runtime_texture_0, vec2i(runtime_fragment.position), 0)"),
+        "{code}"
+    );
 }
 
 #[test]
 fn textures_are_sampled_when_made_for_another_size() {
     let code = frame_code(&sampled(TextureFormat::Rgba16Float, 0.5));
-    assert!(code.contains("textureSampleLevel(runtime_texture_0, runtime_sampler_linear_clamp"), "{code}");
+    assert!(
+        code.contains("textureSampleLevel(runtime_texture_0, runtime_sampler_linear_clamp"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -53,7 +62,11 @@ fn thirty_two_bit_floats_are_filtered_by_hand() {
 
 #[test]
 fn integers_are_read_at_the_nearest_texel() {
-    for format in [TextureFormat::Rgba32Uint, TextureFormat::R32Sint, TextureFormat::Rg32Uint] {
+    for format in [
+        TextureFormat::Rgba32Uint,
+        TextureFormat::R32Sint,
+        TextureFormat::Rg32Uint,
+    ] {
         let code = frame_code(&sampled(format, 0.5));
         assert!(code.contains("vec4f(textureLoad("), "{format:?}: {code}");
         assert!(!code.contains("texture_bilinear"), "{code}");
@@ -85,7 +98,10 @@ fn every_format_is_read_by_sample_texture_in_every_mode() {
                     }
                 }
                 let result = std::panic::catch_unwind(|| frame_code(&g));
-                assert!(result.is_ok(), "{format:?}, interpolation {interpolation:?}, extension {extension:?}");
+                assert!(
+                    result.is_ok(),
+                    "{format:?}, interpolation {interpolation:?}, extension {extension:?}"
+                );
             }
         }
     }
@@ -113,7 +129,10 @@ fn a_known_extension_is_the_samplers_addressing_where_hardware_samples() {
     g.link((&sample, "color"), (&out, "color"));
     g.set(&sample, "extension", 1.0);
     let code = frame_code(&g);
-    assert!(code.contains("texture_extend") && !code.contains("runtime_sampler"), "{code}");
+    assert!(
+        code.contains("texture_extend") && !code.contains("runtime_sampler"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -126,7 +145,10 @@ fn a_transparent_extension_reads_nothing_outside() {
     g.link((&sample, "color"), (&out, "color"));
     g.set(&sample, "extension", 3.0);
     let code = frame_code(&g);
-    assert!(code.contains("texture_outside") && code.contains("vec4f(0.0)"), "{code}");
+    assert!(
+        code.contains("texture_outside") && code.contains("vec4f(0.0)"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -148,8 +170,14 @@ fn texture_size_gives_size_texel_and_levels() {
     let out = g.output();
     g.link((&total, "result"), (&out, "color"));
     let code = frame_code(&g);
-    assert!(code.contains("textureDimensions(runtime_texture_0, clamp("), "{code}");
-    assert!(code.contains("i32(textureNumLevels(runtime_texture_0))"), "{code}");
+    assert!(
+        code.contains("textureDimensions(runtime_texture_0, clamp("),
+        "{code}"
+    );
+    assert!(
+        code.contains("i32(textureNumLevels(runtime_texture_0))"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -182,5 +210,8 @@ fn load_texel_converts_what_the_texture_holds() {
     let out = g.output();
     g.link((&load, "value"), (&out, "color"));
     let code = frame_code(&g);
-    assert!(code.contains("vec4f(textureLoad(runtime_texture_0"), "converted from vec4i: {code}");
+    assert!(
+        code.contains("vec4f(textureLoad(runtime_texture_0"),
+        "converted from vec4i: {code}"
+    );
 }

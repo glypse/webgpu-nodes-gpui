@@ -4,7 +4,7 @@
 use crate::codegen::{DISPLAY_P3_FIELD, FRAGMENT_VAR, FRAME_VAR};
 use crate::types::{
     BOOL_TYPES, FLOAT_VEC_TYPES, INTEGER_TYPES, InputControl, NUMERIC_TYPES, NodeCategory,
-    NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeSetting, ScalarKind, SIGNED_TYPES,
+    NodeData, NodeDescriptor, NodeInputDef, NodeOutputDef, NodeSetting, SIGNED_TYPES, ScalarKind,
     TypeFamily, UINT_TYPES, VEC_TYPES, WgslType, make_type,
 };
 use crate::types::{FLOAT_TYPES, HelperName, SOCKET_TYPES};
@@ -20,10 +20,19 @@ pub const FALLBACK: &str = "fallback";
 pub const FALLBACK_VALUE: &str = "value";
 pub const FALLBACK_DEFAULT: &str = "default";
 /// Measurable as WGSL's `length` and `distance` measure them.
-const MEASURED_TYPES: &[WgslType] = &[WgslType::Vec2f, WgslType::Vec3f, WgslType::Vec4f, WgslType::F32];
+const MEASURED_TYPES: &[WgslType] = &[
+    WgslType::Vec2f,
+    WgslType::Vec3f,
+    WgslType::Vec4f,
+    WgslType::F32,
+];
 
 fn op_options(types: &'static [WgslType], ids: [&'static str; 2]) -> BinaryOptions {
-    BinaryOptions { types, ids, ..BinaryOptions::default() }
+    BinaryOptions {
+        types,
+        ids,
+        ..BinaryOptions::default()
+    }
 }
 
 fn math(d: D, aliases: &[&str]) -> D {
@@ -51,7 +60,12 @@ pub(super) fn input_nodes() -> Vec<D> {
                     .collect(),
             )
             .outputs(vec![NodeOutputDef::new("value", "value", WgslType::F32)])
-            .defaults(float_values([("x", 0.0), ("y", 0.0), ("z", 0.0), ("w", 0.0)]))
+            .defaults(float_values([
+                ("x", 0.0),
+                ("y", 0.0),
+                ("z", 0.0),
+                ("w", 0.0),
+            ]))
             .wgsl(|ctx| {
                 let ids: Vec<String> = ctx.resolved_inputs.iter().map(|i| i.id.clone()).collect();
                 let args: Vec<String> = ids.iter().map(|id| ctx.promote_input(id)).collect();
@@ -59,11 +73,17 @@ pub(super) fn input_nodes() -> Vec<D> {
                 if ctx.output_type.components() == 1 {
                     vec![format!("let {} = {args};", ctx.var_name)]
                 } else {
-                    vec![format!("let {} = {}({args});", ctx.var_name, ctx.output_type.wgsl_name())]
+                    vec![format!(
+                        "let {} = {}({args});",
+                        ctx.var_name,
+                        ctx.output_type.wgsl_name()
+                    )]
                 }
             });
-        d.type_family =
-            Some(TypeFamily { key: "declare".to_owned(), types: WgslType::ALL.to_vec() });
+        d.type_family = Some(TypeFamily {
+            key: "declare".to_owned(),
+            types: WgslType::ALL.to_vec(),
+        });
         d.resolve_inputs = Some(std::sync::Arc::new(|out, _| {
             let scalar = make_type(out.kind(), 1);
             COMPONENTS[..out.components()]
@@ -75,7 +95,15 @@ pub(super) fn input_nodes() -> Vec<D> {
     };
 
     let time = D::new("time", "Time", NodeCategory::Input)
-        .aliases(&["Scene Time", "Absolute Time", "Seconds", "Frame", "Frame Index", "iTime", "iFrame"])
+        .aliases(&[
+            "Scene Time",
+            "Absolute Time",
+            "Seconds",
+            "Frame",
+            "Frame Index",
+            "iTime",
+            "iFrame",
+        ])
         .static_outputs()
         .outputs(vec![
             NodeOutputDef::new("seconds", "seconds", WgslType::F32),
@@ -90,7 +118,14 @@ pub(super) fn input_nodes() -> Vec<D> {
 
     vec![
         declare,
-        uniform_reader("uv", "UV", "uv", WgslType::Vec2f, format!("{FRAGMENT_VAR}.uv")).aliases(&[
+        uniform_reader(
+            "uv",
+            "UV",
+            "uv",
+            WgslType::Vec2f,
+            format!("{FRAGMENT_VAR}.uv"),
+        )
+        .aliases(&[
             "Texture Coordinate",
             "TexCoord",
             "Screen Position",
@@ -98,8 +133,14 @@ pub(super) fn input_nodes() -> Vec<D> {
             "fragCoord",
         ]),
         time,
-        uniform_reader("delta", "Delta", "delta", WgslType::F32, format!("{FRAME_VAR}.delta"))
-            .aliases(&["Delta Time", "Frame Time", "iTimeDelta"]),
+        uniform_reader(
+            "delta",
+            "Delta",
+            "delta",
+            WgslType::F32,
+            format!("{FRAME_VAR}.delta"),
+        )
+        .aliases(&["Delta Time", "Frame Time", "iTimeDelta"]),
         uniform_reader(
             "resolution",
             "Resolution",
@@ -112,7 +153,10 @@ pub(super) fn input_nodes() -> Vec<D> {
 }
 
 fn float_unary(ty: &str, label: &str, f: &'static str, aliases: &[&str]) -> D {
-    math(unary_fn(ty, label, f, FLOAT_TYPES, NodeCategory::Math), aliases)
+    math(
+        unary_fn(ty, label, f, FLOAT_TYPES, NodeCategory::Math),
+        aliases,
+    )
 }
 
 pub(super) fn math_nodes() -> Vec<D> {
@@ -136,7 +180,10 @@ pub(super) fn math_nodes() -> Vec<D> {
         )
     };
     let float3 = |ty: &str, label: &str, ids: [&'static str; 3], defaults: [f64; 3]| {
-        let inputs = ids.iter().map(|id| NodeInputDef::new(*id, *id, FLOAT_TYPES)).collect();
+        let inputs = ids
+            .iter()
+            .map(|id| NodeInputDef::new(*id, *id, FLOAT_TYPES))
+            .collect();
         let d: Vec<_> = ids.iter().copied().zip(defaults).collect();
         n_ary_fn(ty, label, ty, inputs, &d)
     };
@@ -146,23 +193,46 @@ pub(super) fn math_nodes() -> Vec<D> {
             "clamp",
             "Clamp",
             "clamp",
-            ids.iter().map(|id| NodeInputDef::new(*id, *id, NUMERIC_TYPES)).collect(),
+            ids.iter()
+                .map(|id| NodeInputDef::new(*id, *id, NUMERIC_TYPES))
+                .collect(),
             &[("e", 0.0), ("low", 0.0), ("high", 1.0)],
         )
     };
     vec![
-        math(variadic_op("add", "Add", " + "), &["Plus", "Sum", "Vector Math"]),
         math(
-            binary_node("sub", "Subtract", |a, b, _| format!("{a} - {b}"), BinaryOptions::default()),
+            variadic_op("add", "Add", " + "),
+            &["Plus", "Sum", "Vector Math"],
+        ),
+        math(
+            binary_node(
+                "sub",
+                "Subtract",
+                |a, b, _| format!("{a} - {b}"),
+                BinaryOptions::default(),
+            ),
             &["Minus", "Difference", "Vector Math"],
         ),
-        math(variadic_op("mul", "Multiply", " * "), &["Times", "Product", "Scale", "Vector Math"]),
         math(
-            binary_node("div", "Divide", safe(HelperName::SafeDiv), BinaryOptions::default()),
+            variadic_op("mul", "Multiply", " * "),
+            &["Times", "Product", "Scale", "Vector Math"],
+        ),
+        math(
+            binary_node(
+                "div",
+                "Divide",
+                safe(HelperName::SafeDiv),
+                BinaryOptions::default(),
+            ),
             &["Quotient", "Vector Math"],
         ),
         math(
-            binary_node("mod", "Modulo", safe(HelperName::SafeMod), BinaryOptions::default()),
+            binary_node(
+                "mod",
+                "Modulo",
+                safe(HelperName::SafeMod),
+                BinaryOptions::default(),
+            ),
             &["Remainder", "fmod", "Truncated Modulo", "Vector Math"],
         ),
         math(
@@ -174,15 +244,36 @@ pub(super) fn math_nodes() -> Vec<D> {
         ),
         math(
             float3("mix", "Mix", ["e1", "e2", "e3"], [0.0; 3]),
-            &["Lerp", "Linear Interpolate", "Interpolate", "Blend", "Mix Color", "Cross Fade"],
+            &[
+                "Lerp",
+                "Linear Interpolate",
+                "Interpolate",
+                "Blend",
+                "Mix Color",
+                "Cross Fade",
+            ],
         ),
         math(
-            float3("smoothstep", "Smoothstep", ["low", "high", "x"], [0.0, 1.0, 0.0]),
+            float3(
+                "smoothstep",
+                "Smoothstep",
+                ["low", "high", "x"],
+                [0.0, 1.0, 0.0],
+            ),
             &["Smooth Step", "Hermite", "Ease", "Smooth Threshold"],
         ),
-        math(unary_fn("abs", "Absolute", "abs", NUMERIC_TYPES, cat), &["Vector Math"]),
-        math(variadic_fn("min", "Minimum", "min"), &["Darken", "Vector Math"]),
-        math(variadic_fn("max", "Maximum", "max"), &["Lighten", "Vector Math"]),
+        math(
+            unary_fn("abs", "Absolute", "abs", NUMERIC_TYPES, cat),
+            &["Vector Math"],
+        ),
+        math(
+            variadic_fn("min", "Minimum", "min"),
+            &["Darken", "Vector Math"],
+        ),
+        math(
+            variadic_fn("max", "Maximum", "max"),
+            &["Lighten", "Vector Math"],
+        ),
         math(
             float_pair("step", "Step", "step", ["edge", "x"]),
             &["Threshold", "Greater Than", "Heaviside"],
@@ -200,15 +291,36 @@ pub(super) fn math_nodes() -> Vec<D> {
         float_unary("sin", "Sine", "sin", &[]),
         float_unary("cos", "Cosine", "cos", &[]),
         float_unary("tan", "Tangent", "tan", &[]),
-        float_unary("atan", "Arc Tangent", "atan", &["atan", "Arctangent", "Inverse Tangent"]),
-        math(float_pair("atan2", "Arc Tangent 2", "atan2", ["y", "x"]), &["atan2", "Arctangent 2", "Angle"]),
+        float_unary(
+            "atan",
+            "Arc Tangent",
+            "atan",
+            &["atan", "Arctangent", "Inverse Tangent"],
+        ),
+        math(
+            float_pair("atan2", "Arc Tangent 2", "atan2", ["y", "x"]),
+            &["atan2", "Arctangent 2", "Angle"],
+        ),
         float_unary("floor", "Floor", "floor", &["Round Down"]),
         float_unary("ceil", "Ceil", "ceil", &["Ceiling", "Round Up"]),
         float_unary("fract", "Fract", "fract", &["Fraction", "Fractional Part"]),
         float_unary("round", "Round", "round", &["Nearest Integer", "rint"]),
-        math(unary_fn("sign", "Sign", "sign", SIGNED_TYPES, cat), &["Signum", "sgn"]),
-        float_unary("log", "Logarithm", "log", &["ln", "Natural Logarithm", "log"]),
-        float_unary("exp", "Exponential", "exp", &["exp", "e^x", "Natural Exponent"]),
+        math(
+            unary_fn("sign", "Sign", "sign", SIGNED_TYPES, cat),
+            &["Signum", "sgn"],
+        ),
+        float_unary(
+            "log",
+            "Logarithm",
+            "log",
+            &["ln", "Natural Logarithm", "log"],
+        ),
+        float_unary(
+            "exp",
+            "Exponential",
+            "exp",
+            &["exp", "e^x", "Natural Exponent"],
+        ),
         float_unary("sqrt", "Square Root", "sqrt", &["sqrt", "Root"]),
     ]
 }
@@ -216,7 +328,17 @@ pub(super) fn math_nodes() -> Vec<D> {
 pub(super) fn vector_nodes() -> Vec<D> {
     let cat = NodeCategory::Vector;
     let pair = |ty: &str, label: &str, f: &'static str, types: &'static [WgslType], labels| {
-        binary_fn(ty, label, f, BinaryOptions { types, ids: ["e1", "e2"], labels, category: cat })
+        binary_fn(
+            ty,
+            label,
+            f,
+            BinaryOptions {
+                types,
+                ids: ["e1", "e2"],
+                labels,
+                category: cat,
+            },
+        )
     };
     let length = D::new("length", "Length", cat)
         .aliases(&["Magnitude", "Norm", "Vector Math"])
@@ -242,7 +364,12 @@ pub(super) fn vector_nodes() -> Vec<D> {
                 "Shuffle",
             ])
             .inputs(vec![NodeInputDef::new("v", "v", VEC_TYPES)])
-            .outputs(COMPONENTS.iter().map(|c| NodeOutputDef::new(*c, *c, WgslType::F32)).collect())
+            .outputs(
+                COMPONENTS
+                    .iter()
+                    .map(|c| NodeOutputDef::new(*c, *c, WgslType::F32))
+                    .collect(),
+            )
             .output_type(|t, _| make_type(t.kind(), 1))
             .wgsl(|ctx| {
                 let source = ctx.promote_input("v");
@@ -261,8 +388,17 @@ pub(super) fn vector_nodes() -> Vec<D> {
         d
     };
     let count = D::new(COMPONENT_COUNT, "Component Count", cat)
-        .aliases(&["Dimensions", "Vector Size", "Vector Width", "Length of Type"])
-        .inputs(vec![NodeInputDef::new(COMPONENT_COUNT_INPUT, "value", &WgslType::ALL)])
+        .aliases(&[
+            "Dimensions",
+            "Vector Size",
+            "Vector Width",
+            "Length of Type",
+        ])
+        .inputs(vec![NodeInputDef::new(
+            COMPONENT_COUNT_INPUT,
+            "value",
+            &WgslType::ALL,
+        )])
         .outputs(vec![NodeOutputDef::new("count", "count", WgslType::U32)])
         .static_outputs()
         .wgsl(|ctx| {
@@ -277,12 +413,21 @@ pub(super) fn vector_nodes() -> Vec<D> {
             .aliases(&["Vector Math"])
             .output_type(|_, _| WgslType::F32),
         length,
-        math(unary_fn("normalize", "Normalize", "normalize", FLOAT_VEC_TYPES, cat), &["Normalise", "Unit Vector", "Vector Math"]),
+        math(
+            unary_fn("normalize", "Normalize", "normalize", FLOAT_VEC_TYPES, cat),
+            &["Normalise", "Unit Vector", "Vector Math"],
+        ),
         pair("cross", "Cross Product", "cross", &[WgslType::Vec3f], None)
             .aliases(&["Vector Product", "Vector Math"])
             .output_type(|_, _| WgslType::Vec3f),
-        pair("reflect", "Reflect", "reflect", FLOAT_VEC_TYPES, Some(["incident", "normal"]))
-            .aliases(&["Reflection", "Vector Math"]),
+        pair(
+            "reflect",
+            "Reflect",
+            "reflect",
+            FLOAT_VEC_TYPES,
+            Some(["incident", "normal"]),
+        )
+        .aliases(&["Reflection", "Vector Math"]),
         separate,
         count,
     ]
@@ -290,8 +435,11 @@ pub(super) fn vector_nodes() -> Vec<D> {
 
 pub(super) fn integer_nodes() -> Vec<D> {
     let cat = NodeCategory::Integer;
-    let bitwise_setting =
-        NodeSetting::new("op", "Operation", &[("&", "And"), ("|", "Or"), ("^", "Xor")]);
+    let bitwise_setting = NodeSetting::new(
+        "op",
+        "Operation",
+        &[("&", "And"), ("|", "Or"), ("^", "Xor")],
+    );
     let shift_setting = NodeSetting::new("op", "Direction", &[("<<", "Left"), (">>", "Right")]);
     let bitwise = {
         let setting = bitwise_setting.clone();
@@ -299,7 +447,11 @@ pub(super) fn integer_nodes() -> Vec<D> {
             "bitwise",
             "Bitwise",
             move |a, b, ctx| format!("{a} {} {b}", setting.value(&ctx.data)),
-            BinaryOptions { types: INTEGER_TYPES, category: cat, ..BinaryOptions::default() },
+            BinaryOptions {
+                types: INTEGER_TYPES,
+                category: cat,
+                ..BinaryOptions::default()
+            },
         )
         .aliases(&["Bitwise And", "Bitwise Or", "Bitwise Xor"])
         .defaults(float_values([("a", 0.0), ("b", 0.0)]).setting("op", "&"))
@@ -329,7 +481,11 @@ pub(super) fn integer_nodes() -> Vec<D> {
                     format!("{shift_type}(31u)")
                 };
                 let a = ctx.promote_input("a");
-                vec![format!("let {} = {a} {} ({amount} & {mask});", ctx.var_name, setting.value(&ctx.data))]
+                vec![format!(
+                    "let {} = {a} {} ({amount} & {mask});",
+                    ctx.var_name,
+                    setting.value(&ctx.data)
+                )]
             })
     };
     let not = math(
@@ -359,7 +515,14 @@ pub(super) fn logic_nodes() -> Vec<D> {
     let compare = {
         let setting = compare_setting.clone();
         D::new("compare", "Compare", cat)
-            .aliases(&["Greater Than", "Less Than", "Equal", "Not Equal", "Comparison", "If"])
+            .aliases(&[
+                "Greater Than",
+                "Less Than",
+                "Equal",
+                "Not Equal",
+                "Comparison",
+                "If",
+            ])
             .inputs(vec![
                 NodeInputDef::new("a", "a", NUMERIC_TYPES),
                 NodeInputDef::new("b", "b", NUMERIC_TYPES),
@@ -370,11 +533,22 @@ pub(super) fn logic_nodes() -> Vec<D> {
             .output_type(|t, _| make_type(ScalarKind::Bool, t.components()))
             .wgsl(move |ctx| {
                 let (a, b) = (ctx.promote_input("a"), ctx.promote_input("b"));
-                vec![format!("let {} = {a} {} {b};", ctx.var_name, setting.value(&ctx.data))]
+                vec![format!(
+                    "let {} = {a} {} {b};",
+                    ctx.var_name,
+                    setting.value(&ctx.data)
+                )]
             })
     };
     let switch = D::new("switch", "Switch", cat)
-        .aliases(&["If", "Select", "Branch", "Conditional", "Ternary", "Static Switch"])
+        .aliases(&[
+            "If",
+            "Select",
+            "Branch",
+            "Conditional",
+            "Ternary",
+            "Static Switch",
+        ])
         .primary("false")
         .inputs(vec![
             NodeInputDef::new("condition", "condition", BOOL_TYPES),
@@ -397,7 +571,10 @@ pub(super) fn logic_nodes() -> Vec<D> {
                 condition = crate::types::convert_var(&condition, condition_type, target);
             }
             let (f, t) = (ctx.promote_input("false"), ctx.promote_input("true"));
-            vec![format!("let {} = select({f}, {t}, {condition});", ctx.var_name)]
+            vec![format!(
+                "let {} = select({f}, {t}, {condition});",
+                ctx.var_name
+            )]
         });
     let boolean_setting = NodeSetting::new(
         "op",
@@ -424,7 +601,11 @@ pub(super) fn logic_nodes() -> Vec<D> {
                 "xnor" => format!("{a} == {b}"),
                 _ => format!("{a} & {b}"),
             },
-            BinaryOptions { types: BOOL_TYPES, category: cat, ..BinaryOptions::default() },
+            BinaryOptions {
+                types: BOOL_TYPES,
+                category: cat,
+                ..BinaryOptions::default()
+            },
         )
         .aliases(&["And", "Or", "Xor", "Nand", "Nor", "Logic"])
         .defaults({
@@ -457,7 +638,11 @@ pub(super) fn logic_nodes() -> Vec<D> {
             .output_type(|_, _| WgslType::Bool)
             .wgsl(move |ctx| {
                 let e = ctx.promote_input("e");
-                vec![format!("let {} = {}({e});", ctx.var_name, setting.value(&ctx.data))]
+                vec![format!(
+                    "let {} = {}({e});",
+                    ctx.var_name,
+                    setting.value(&ctx.data)
+                )]
             })
     };
     // Presence is known while compiling (never a runtime "null"): `value` is
@@ -472,7 +657,11 @@ pub(super) fn logic_nodes() -> Vec<D> {
         .outputs(vec![NodeOutputDef::new("result", "result", WgslType::F32)])
         .defaults(float_values([(FALLBACK_DEFAULT, 0.0)]))
         .wgsl(|ctx| {
-            let chosen = if ctx.is_present(FALLBACK_VALUE) { FALLBACK_VALUE } else { FALLBACK_DEFAULT };
+            let chosen = if ctx.is_present(FALLBACK_VALUE) {
+                FALLBACK_VALUE
+            } else {
+                FALLBACK_DEFAULT
+            };
             let e = ctx.promote_input(chosen);
             vec![format!("let {} = {e};", ctx.var_name)]
         });
@@ -487,7 +676,8 @@ pub(super) fn converter_nodes() -> Vec<D> {
             .aliases(&["Truncate", "Cast", "Convert"]),
         convert_node("to-uint", "To Unsigned", ScalarKind::U32, true)
             .aliases(&["uint", "Cast", "Convert"]),
-        convert_node("to-bool", "To Boolean", ScalarKind::Bool, false).aliases(&["Cast", "Convert"]),
+        convert_node("to-bool", "To Boolean", ScalarKind::Bool, false)
+            .aliases(&["Cast", "Convert"]),
     ]
 }
 

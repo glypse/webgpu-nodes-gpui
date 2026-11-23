@@ -1,12 +1,17 @@
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EntityId, InteractiveElement as _,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point,
-    Render, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
-    canvas, div, img, point, prelude::FluentBuilder as _, px, size,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EntityId,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    ParentElement as _, Pixels, Point, Render, ScrollEvent, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder as _, px,
+    size,
+};
+use gpui_component::{
+    Selectable as _, Sizable as _,
+    button::{Button, ButtonVariants as _},
+    menu::{PopupMenu, PopupMenuItem},
 };
 use guard::SafeListener as _;
 use runtime::Size;
-use gpui_component::{Selectable as _, Sizable as _, button::{Button, ButtonVariants as _}, menu::{PopupMenu, PopupMenuItem}};
 use theme::{ActiveTheme as _, Icon, IconName, popup};
 
 use crate::playback::{Playback, Shown, device_size};
@@ -87,11 +92,16 @@ impl PreviewArea {
     /// The size of the frame the area shows, which its own canvas size catches up with once the new render is drawn.
     fn resolution(&self, cx: &App) -> Size {
         let playback = self.playback.read(cx);
-        playback.pane_frame(self.id).map_or_else(|| playback.size_of(self.id), |(size, _)| size)
+        playback
+            .pane_frame(self.id)
+            .map_or_else(|| playback.size_of(self.id), |(size, _)| size)
     }
 
     fn pane_dims(&self) -> (f32, f32) {
-        (f32::from(self.pane.size.width), f32::from(self.pane.size.height))
+        (
+            f32::from(self.pane.size.width),
+            f32::from(self.pane.size.height),
+        )
     }
 
     fn fit_zoom(&self, cx: &App) -> f32 {
@@ -100,7 +110,8 @@ impl PreviewArea {
             return 1.0;
         }
         let (pane_width, pane_height) = self.pane_dims();
-        ((pane_width * self.scale) / res.width as f32).min((pane_height * self.scale) / res.height as f32)
+        ((pane_width * self.scale) / res.width as f32)
+            .min((pane_height * self.scale) / res.height as f32)
     }
 
     pub fn fit(&mut self, cx: &mut Context<Self>) {
@@ -250,20 +261,19 @@ impl Render for PreviewArea {
                             .into_any_element(),
                     }
                 }))
-                .on_scroll(
-                    cx.safe_listener(move |this, event: &ScrollEvent, _, cx| {
-                        let delta = event.delta.pixel_delta(px(20.0)).y;
-                        let boost = if event.modifiers.control { 10.0 } else { 1.0 };
-                        let factor = 2f32.powf(f32::from(delta) * WHEEL_SPEED * boost);
-                        let anchor = event.position - this.pane.origin;
-                        this.zoom_by(factor, Some(anchor), cx);
-                    }),
-                )
+                .on_scroll(cx.safe_listener(move |this, event: &ScrollEvent, _, cx| {
+                    let delta = event.delta.pixel_delta(px(20.0)).y;
+                    let boost = if event.modifiers.control { 10.0 } else { 1.0 };
+                    let factor = 2f32.powf(f32::from(delta) * WHEEL_SPEED * boost);
+                    let anchor = event.position - this.pane.origin;
+                    this.zoom_by(factor, Some(anchor), cx);
+                }))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.safe_listener(move |this, event: &MouseDownEvent, window, cx| {
                         this.panning = Some(event.position);
-                        this.playback.update(cx, |p, cx| p.follow_pane(id, window, cx));
+                        this.playback
+                            .update(cx, |p, cx| p.follow_pane(id, window, cx));
                         cx.notify();
                     }),
                 )
@@ -399,18 +409,21 @@ impl PreviewToolbar {
                 let following = playback.read(cx).following();
                 let current = playback.read(cx).resolution;
                 PopupMenu::build(window, cx, move |menu, _, _| {
-                    RESOLUTIONS.iter().fold(menu.min_w(px(176.0)), |menu, &(width, height)| {
-                        let playback = playback.clone();
-                        let size = Size::new(width, height);
-                        menu.item(
-                            PopupMenuItem::new(format!("{width} × {height}"))
-                                .checked(current == size)
-                                .disabled(following)
-                                .on_click(popup::on_select(move |window, cx| {
-                                    playback.update(cx, |p, cx| p.set_resolution(size, window, cx));
-                                })),
-                        )
-                    })
+                    RESOLUTIONS
+                        .iter()
+                        .fold(menu.min_w(px(176.0)), |menu, &(width, height)| {
+                            let playback = playback.clone();
+                            let size = Size::new(width, height);
+                            menu.item(
+                                PopupMenuItem::new(format!("{width} × {height}"))
+                                    .checked(current == size)
+                                    .disabled(following)
+                                    .on_click(popup::on_select(move |window, cx| {
+                                        playback
+                                            .update(cx, |p, cx| p.set_resolution(size, window, cx));
+                                    })),
+                            )
+                        })
                 })
             }
             Open::Zoom => {
@@ -434,21 +447,41 @@ impl PreviewToolbar {
                 PopupMenu::build(window, cx, move |menu, _, _| {
                     let menu = menu
                         .min_w(px(176.0))
-                        .item(popup::row("Zoom in", Some("+".into()), false).on_click(popup::on_select(zoom_in)))
-                        .item(popup::row("Zoom out", Some("−".into()), false).on_click(popup::on_select(zoom_out)))
+                        .item(
+                            popup::row("Zoom in", Some("+".into()), false)
+                                .on_click(popup::on_select(zoom_in)),
+                        )
+                        .item(
+                            popup::row("Zoom out", Some("−".into()), false)
+                                .on_click(popup::on_select(zoom_out)),
+                        )
                         .separator()
-                        .item(popup::row("Fit view", Some("0".into()), false).on_click(popup::on_select(fit)))
-                        .item(popup::row("Actual size", Some("1".into()), false).on_click(popup::on_select(actual)))
+                        .item(
+                            popup::row("Fit view", Some("0".into()), false)
+                                .on_click(popup::on_select(fit)),
+                        )
+                        .item(
+                            popup::row("Actual size", Some("1".into()), false)
+                                .on_click(popup::on_select(actual)),
+                        )
                         .separator();
                     percentages.into_iter().fold(menu, |menu, (zoom, select)| {
-                        menu.item(PopupMenuItem::new(format!("{}%", zoom * 100.0)).on_click(popup::on_select(select)))
+                        menu.item(
+                            PopupMenuItem::new(format!("{}%", zoom * 100.0))
+                                .on_click(popup::on_select(select)),
+                        )
                     })
                 })
             }
             Open::Export => PopupMenu::build(window, cx, move |menu, _, _| {
-                menu.min_w(px(176.0)).item(PopupMenuItem::new("Export frame as PNG").on_click(popup::on_select(move |window, cx| {
-                    export_png(&playback, window, cx);
-                })))
+                menu.min_w(px(176.0))
+                    .item(
+                        PopupMenuItem::new("Export frame as PNG").on_click(popup::on_select(
+                            move |window, cx| {
+                                export_png(&playback, window, cx);
+                            },
+                        )),
+                    )
             }),
         }
     }
@@ -465,16 +498,14 @@ pub(crate) fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut A
     };
     let directory = std::env::var_os("HOME").map_or_else(std::env::temp_dir, Into::into);
     let path = cx.prompt_for_new_path(&directory, Some("frame.png"));
-    cx.spawn(async move |_| {
-        match path.await {
-            Ok(Ok(Some(path))) => {
-                if let Err(error) = std::fs::write(&path, png) {
-                    log::error!("export to {} failed: {error:#}", path.display());
-                }
+    cx.spawn(async move |_| match path.await {
+        Ok(Ok(Some(path))) => {
+            if let Err(error) = std::fs::write(&path, png) {
+                log::error!("export to {} failed: {error:#}", path.display());
             }
-            Ok(Err(error)) => log::error!("the save dialog failed: {error:#}"),
-            _ => {}
         }
+        Ok(Err(error)) => log::error!("the save dialog failed: {error:#}"),
+        _ => {}
     })
     .detach();
 }
@@ -482,7 +513,12 @@ pub(crate) fn export_png(playback: &Entity<Playback>, _: &mut Window, cx: &mut A
 impl Render for PreviewToolbar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         guard::render("PreviewToolbar", || {
-            if let Some(kind) = self.open.as_ref().filter(|m| m.popup.is_none()).map(|m| m.kind) {
+            if let Some(kind) = self
+                .open
+                .as_ref()
+                .filter(|m| m.popup.is_none())
+                .map(|m| m.kind)
+            {
                 let menu = self.menu(kind, window, cx);
                 let opened = popup::open(window, cx, menu, |this: &mut Self, cx| {
                     this.open = None;
@@ -499,7 +535,11 @@ impl Render for PreviewToolbar {
                 let this = this.clone();
                 move |event: &ClickEvent, _: &mut Window, cx: &mut App| {
                     this.update(cx, |this, cx| {
-                        this.open = Some(OpenMenu { kind, at: event.position() + point(px(0.0), px(8.0)), popup: None });
+                        this.open = Some(OpenMenu {
+                            kind,
+                            at: event.position() + point(px(0.0), px(8.0)),
+                            popup: None,
+                        });
                         cx.notify();
                     });
                 }
@@ -560,7 +600,9 @@ pub fn new_area(
     let forget = {
         let playback = playback.clone();
         cx.observe_release(&area, move |_, cx| {
-            guard::guard("forget preview pane", || playback.update(cx, |p, cx| p.forget_pane(id, cx)));
+            guard::guard("forget preview pane", || {
+                playback.update(cx, |p, cx| p.forget_pane(id, cx))
+            });
         })
     };
     area.update(cx, |this, _| this._released = Some(forget));
@@ -582,7 +624,10 @@ mod tests {
 
     impl Render for Harness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().w(px(self.width)).h(px(300.0)).child(self.area.clone())
+            div()
+                .w(px(self.width))
+                .h(px(300.0))
+                .child(self.area.clone())
         }
     }
 
@@ -616,7 +661,11 @@ mod tests {
             cx.notify();
         });
         redraw(cx);
-        assert_eq!(size(cx), device_size(500.0, 300.0, scale).expect("a pane"), "a resize is drawn at once");
+        assert_eq!(
+            size(cx),
+            device_size(500.0, 300.0, scale).expect("a pane"),
+            "a resize is drawn at once"
+        );
 
         cx.update(|window, cx| {
             playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx));
@@ -634,27 +683,38 @@ mod tests {
     impl Render for Pair {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().flex().children(
-                self.areas.iter().zip(self.widths).map(|(area, width)| div().w(px(width)).h(px(300.0)).child(area.clone())),
+                self.areas
+                    .iter()
+                    .zip(self.widths)
+                    .map(|(area, width)| div().w(px(width)).h(px(300.0)).child(area.clone())),
             )
         }
     }
 
     #[gpui::test]
-    fn each_preview_area_gets_a_render_of_its_size_and_equal_sizes_share_one(cx: &mut TestAppContext) {
+    fn each_preview_area_gets_a_render_of_its_size_and_equal_sizes_share_one(
+        cx: &mut TestAppContext,
+    ) {
         cx.update(theme::init);
         let (pair, cx) = cx.add_window_view(|_, cx| {
             let playback = cx.new(|_| Playback::new());
             let areas = [(); 2].map(|_| cx.new(|cx| PreviewArea::new(playback.clone(), cx)));
-            Pair { areas, widths: [400.0, 250.0] }
+            Pair {
+                areas,
+                widths: [400.0, 250.0],
+            }
         });
         let playback = pair.read_with(cx, |p, cx| p.areas[0].read(cx).playback.clone());
-        let ids: [EntityId; 2] = pair.read_with(cx, |p, _| [p.areas[0].entity_id(), p.areas[1].entity_id()]);
+        let ids: [EntityId; 2] =
+            pair.read_with(cx, |p, _| [p.areas[0].entity_id(), p.areas[1].entity_id()]);
         let stored = Size::new(1920, 1080);
         let scale = cx.update(|window, _| window.scale_factor());
         let pane = |width: f32| device_size(width, 300.0, scale).expect("a pane");
         let sizes = |cx: &gpui::VisualTestContext| playback.read_with(cx, |p, _| p.render_sizes());
 
-        cx.update(|window, cx| playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx)));
+        cx.update(|window, cx| {
+            playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx))
+        });
         redraw(cx);
         assert_eq!(sizes(cx), [stored], "a fixed canvas is drawn once");
         playback.read_with(cx, |p, _| {
@@ -677,9 +737,15 @@ mod tests {
             cx.notify();
         });
         redraw(cx);
-        assert_eq!(sizes(cx), [pane(400.0)], "areas of the same size share a render");
+        assert_eq!(
+            sizes(cx),
+            [pane(400.0)],
+            "areas of the same size share a render"
+        );
 
-        cx.update(|window, cx| playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx)));
+        cx.update(|window, cx| {
+            playback.update(cx, |p, cx| p.set_canvas(false, stored, window, cx))
+        });
         redraw(cx);
         assert_eq!(sizes(cx), [stored]);
     }
@@ -717,7 +783,10 @@ mod tests {
         let controls = ["preview-resolution", "preview-zoom", "preview-export"];
         let bounds: Vec<_> = controls
             .iter()
-            .map(|name| cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn")))
+            .map(|name| {
+                cx.debug_bounds(name)
+                    .unwrap_or_else(|| panic!("{name} is drawn"))
+            })
             .collect();
         for (name, b) in controls.iter().zip(&bounds) {
             assert!(b.size.height > px(0.0), "{name} has no height: {b:?}");

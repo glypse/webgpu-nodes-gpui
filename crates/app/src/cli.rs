@@ -77,7 +77,10 @@ impl FromStr for Size {
                 .filter(|v| v.is_finite() && *v >= 1.0)
                 .ok_or_else(|| format!("`{text}` is not WIDTHxHEIGHT with sizes of at least 1"))
         };
-        Ok(Self { width: parse(w)?, height: parse(h)? })
+        Ok(Self {
+            width: parse(w)?,
+            height: parse(h)?,
+        })
     }
 }
 
@@ -116,7 +119,13 @@ mod tests {
         assert_eq!(cli.project, Some(PathBuf::from("scene.json")));
         assert!(cli.play);
         assert_eq!(cli.seconds, Some(10.0));
-        assert_eq!(cli.window, Some(Size { width: 800.0, height: 600.0 }));
+        assert_eq!(
+            cli.window,
+            Some(Size {
+                width: 800.0,
+                height: 600.0
+            })
+        );
         assert!(cli.records());
         assert!(cli.bounded());
     }

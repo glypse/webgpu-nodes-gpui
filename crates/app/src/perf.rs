@@ -15,7 +15,11 @@ mod tests {
 
     use crate::shell::{Shell, init};
 
-    fn timed<T>(label: &str, cx: &mut gpui::VisualTestContext, f: impl FnOnce(&mut gpui::VisualTestContext) -> T) -> T {
+    fn timed<T>(
+        label: &str,
+        cx: &mut gpui::VisualTestContext,
+        f: impl FnOnce(&mut gpui::VisualTestContext) -> T,
+    ) -> T {
         let t = Instant::now();
         let r = f(cx);
         let edit = t.elapsed();
@@ -26,7 +30,13 @@ mod tests {
         r
     }
 
-    fn open_scene(cx: &mut TestAppContext) -> (Entity<Editor>, Rc<RefCell<Vec<&'static str>>>, &mut gpui::VisualTestContext) {
+    fn open_scene(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<Editor>,
+        Rc<RefCell<Vec<&'static str>>>,
+        &mut gpui::VisualTestContext,
+    ) {
         cx.update(|cx| {
             theme::init(cx);
             crate::preferences::init(cx);
@@ -57,14 +67,29 @@ mod tests {
     fn moving_between_groups_leaves_the_program_alone(cx: &mut TestAppContext) {
         let (editor, events, cx) = open_scene(cx);
         let group = editor.read_with(cx, |e, _| {
-            e.model().root().nodes.iter().find(|n| n.definition_ref().is_some()).map(|n| n.id.clone())
+            e.model()
+                .root()
+                .nodes
+                .iter()
+                .find(|n| n.definition_ref().is_some())
+                .map(|n| n.id.clone())
         });
         let group = group.expect("a group");
         editor.update(cx, |e, cx| e.enter_group(&group, cx));
-        assert!(editor.read_with(cx, |e, _| !e.model().path().is_empty()), "entered the group");
+        assert!(
+            editor.read_with(cx, |e, _| !e.model().path().is_empty()),
+            "entered the group"
+        );
         editor.update(cx, |e, cx| e.jump_to(0, cx));
-        assert!(editor.read_with(cx, |e, _| e.model().path().is_empty()), "left it again");
-        assert!(events.borrow().is_empty(), "the program didn't change, but {:?} were emitted", events.borrow());
+        assert!(
+            editor.read_with(cx, |e, _| e.model().path().is_empty()),
+            "left it again"
+        );
+        assert!(
+            events.borrow().is_empty(),
+            "the program didn't change, but {:?} were emitted",
+            events.borrow()
+        );
     }
 
     #[gpui::test]
@@ -111,13 +136,29 @@ mod tests {
         cx.run_until_parked();
         let editor = shell.read_with(cx, |s, _| s.editor().clone());
         let group = editor.read_with(cx, |e, _| {
-            e.model().root().nodes.iter().find(|n| n.definition_ref().is_some_and(|r| r.starts_with("std-fractal-voronoi"))).map(|n| n.id.clone())
+            e.model()
+                .root()
+                .nodes
+                .iter()
+                .find(|n| {
+                    n.definition_ref()
+                        .is_some_and(|r| r.starts_with("std-fractal-voronoi"))
+                })
+                .map(|n| n.id.clone())
         });
         let group = group.expect("a fractal voronoi group");
-        timed("no-op edit (sync + regenerate)", cx, |cx| editor.update(cx, |e, cx| e.edit(cx, |_| {})));
-        timed("frame without sheet", cx, |cx| editor.update(cx, |_, cx| cx.notify()));
-        timed("clone", cx, |cx| editor.update(cx, |e, cx| e.clone_group(&group, cx)));
-        timed("enter", cx, |cx| editor.update(cx, |e, cx| e.enter_group(&group, cx)));
+        timed("no-op edit (sync + regenerate)", cx, |cx| {
+            editor.update(cx, |e, cx| e.edit(cx, |_| {}))
+        });
+        timed("frame without sheet", cx, |cx| {
+            editor.update(cx, |_, cx| cx.notify())
+        });
+        timed("clone", cx, |cx| {
+            editor.update(cx, |e, cx| e.clone_group(&group, cx))
+        });
+        timed("enter", cx, |cx| {
+            editor.update(cx, |e, cx| e.enter_group(&group, cx))
+        });
         timed("exit", cx, |cx| editor.update(cx, |e, cx| e.jump_to(0, cx)));
         timed("settings fps", cx, |cx| {
             editor.update(cx, |e, cx| {
@@ -133,9 +174,13 @@ mod tests {
                 e.update_settings(s, cx);
             })
         });
-        timed("open sheet", cx, |cx| editor.update(cx, |e, cx| e.open_sheet(&group, cx)));
+        timed("open sheet", cx, |cx| {
+            editor.update(cx, |e, cx| e.open_sheet(&group, cx))
+        });
         for _ in 0..3 {
-            timed("frame with sheet", cx, |cx| editor.update(cx, |_, cx| cx.notify()));
+            timed("frame with sheet", cx, |cx| {
+                editor.update(cx, |_, cx| cx.notify())
+            });
         }
         let playback = shell.read_with(cx, |s, _| s.playback().clone());
         cx.update(|window, cx| playback.update(cx, |p, cx| p.toggle(window, cx)));
@@ -145,10 +190,15 @@ mod tests {
             cx.run_until_parked();
             cx.update(|window, _| window.refresh());
         }
-        eprintln!("30 frames while playing with the sheet open: {:?}", t.elapsed());
+        eprintln!(
+            "30 frames while playing with the sheet open: {:?}",
+            t.elapsed()
+        );
         let _ = before;
         cx.update(|window, cx| playback.update(cx, |p, cx| p.toggle(window, cx)));
-        timed("no-op edit with sheet", cx, |cx| editor.update(cx, |e, cx| e.edit(cx, |_| {})));
+        timed("no-op edit with sheet", cx, |cx| {
+            editor.update(cx, |e, cx| e.edit(cx, |_| {}))
+        });
         timed("delete", cx, |cx| {
             editor.update(cx, |e, cx| {
                 e.edit(cx, |m| {

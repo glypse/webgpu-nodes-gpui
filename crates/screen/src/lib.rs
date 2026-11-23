@@ -14,7 +14,9 @@ mod view;
 #[cfg(test)]
 mod tests;
 
-pub use gestures::{CORNER_DRAG_PX, JOIN_ZONE_PX, Outcome, Pixels as ScreenPixels, corner_outcome, split_at};
+pub use gestures::{
+    CORNER_DRAG_PX, JOIN_ZONE_PX, Outcome, Pixels as ScreenPixels, corner_outcome, split_at,
+};
 pub use view::{AreaContent, Editor, HEADER_HEIGHT, ScreenEvent, ScreenView, toolbar_slot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

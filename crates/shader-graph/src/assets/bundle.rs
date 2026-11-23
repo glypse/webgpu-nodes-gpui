@@ -63,11 +63,13 @@ pub struct Bundle {
 /// SHA-256 of a file's bytes, hex.
 pub fn asset_hash(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
-    Sha256::digest(bytes).iter().fold(String::with_capacity(64), |mut hex, b| {
-        // Writing to a String can't fail.
-        let _ = write!(hex, "{b:02x}");
-        hex
-    })
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, b| {
+            // Writing to a String can't fail.
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
 }
 
 /// A bundle of `json` and the files of the assets it uses, by bundle path.
@@ -79,14 +81,17 @@ pub fn pack_bundle<'a>(
     let write = |e: zip::result::ZipError| BundleError::Write(e.to_string());
     let io = |e: std::io::Error| BundleError::Write(e.to_string());
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    writer.start_file(kind.json_name(), SimpleFileOptions::default()).map_err(write)?;
+    writer
+        .start_file(kind.json_name(), SimpleFileOptions::default())
+        .map_err(write)?;
     writer.write_all(json.as_bytes()).map_err(io)?;
     for (path, data) in files {
         if !is_asset_path(path) {
             return Err(BundleError::NotAnAssetPath(path.to_owned()));
         }
         // Media is compressed already: storing it saves time for nothing lost.
-        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
         writer.start_file(path, options).map_err(write)?;
         writer.write_all(data).map_err(io)?;
     }
@@ -110,7 +115,9 @@ pub fn unpack_bundle(bytes: &[u8], kind: BundleKind) -> Result<Bundle, BundleErr
     let mut json = None;
     let mut files = BTreeMap::new();
     for index in 0..archive.len() {
-        let entry = archive.by_index(index).map_err(|_| BundleError::NotABundle)?;
+        let entry = archive
+            .by_index(index)
+            .map_err(|_| BundleError::NotABundle)?;
         let Ok(entry_name) = entry.name().map(|n| n.into_owned()) else {
             log::warn!("a bundle entry with a name that isn't UTF-8 is left out");
             continue;
@@ -166,7 +173,9 @@ pub struct VerifiedFiles {
 pub fn verified_files(mut bundle: Bundle, assets: &[Asset]) -> VerifiedFiles {
     let mut verified = VerifiedFiles::default();
     for asset in assets {
-        let Some(data) = bundle.files.remove(asset.file()) else { continue };
+        let Some(data) = bundle.files.remove(asset.file()) else {
+            continue;
+        };
         if data.len() as u64 == asset.file_info().bytes && asset_hash(&data) == asset.hash() {
             verified.files.insert(asset.id().to_owned(), data);
         } else {
@@ -197,7 +206,9 @@ mod tests {
     fn zipped(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (name, data) in entries {
-            writer.start_file(*name, SimpleFileOptions::default()).expect("starts");
+            writer
+                .start_file(*name, SimpleFileOptions::default())
+                .expect("starts");
             writer.write_all(data).expect("writes");
         }
         writer.finish().expect("finishes").into_inner()
@@ -213,7 +224,8 @@ mod tests {
     #[test]
     fn a_bundle_round_trips_its_json_and_files() {
         let path = "assets/images/a1.png";
-        let bytes = pack_bundle(BundleKind::Project, "{}", [(path, &[1u8, 2, 3][..])]).expect("packs");
+        let bytes =
+            pack_bundle(BundleKind::Project, "{}", [(path, &[1u8, 2, 3][..])]).expect("packs");
         let bundle = unpack_bundle(&bytes, BundleKind::Project).expect("unpacks");
         assert_eq!(bundle.json, "{}");
         assert_eq!(bundle.files.keys().collect::<Vec<_>>(), [path]);
@@ -223,15 +235,24 @@ mod tests {
     #[test]
     fn rejects_what_isnt_a_bundle_of_the_kind_asked_for() {
         let groups = pack_bundle(BundleKind::Groups, "{}", []).expect("packs");
-        assert_eq!(unpack_bundle(&groups, BundleKind::Project), Err(BundleError::MissingJson("project.json")));
-        assert_eq!(unpack_bundle(b"{}", BundleKind::Project), Err(BundleError::NotABundle));
+        assert_eq!(
+            unpack_bundle(&groups, BundleKind::Project),
+            Err(BundleError::MissingJson("project.json"))
+        );
+        assert_eq!(
+            unpack_bundle(b"{}", BundleKind::Project),
+            Err(BundleError::NotABundle)
+        );
     }
 
     #[test]
     fn refuses_to_pack_a_path_that_isnt_an_assets() {
         for path in ["project.json", "../evil", "__proto__"] {
             let result = pack_bundle(BundleKind::Project, "{}", [(path, &[0u8][..])]);
-            assert!(matches!(result, Err(BundleError::NotAnAssetPath(_))), "{path}");
+            assert!(
+                matches!(result, Err(BundleError::NotAnAssetPath(_))),
+                "{path}"
+            );
         }
     }
 
@@ -244,7 +265,10 @@ mod tests {
             ("assets/images/a.png", b"x"),
         ]);
         let bundle = unpack_bundle(&bytes, BundleKind::Project).expect("unpacks");
-        assert_eq!(bundle.files.keys().collect::<Vec<_>>(), ["assets/images/a.png"]);
+        assert_eq!(
+            bundle.files.keys().collect::<Vec<_>>(),
+            ["assets/images/a.png"]
+        );
     }
 
     #[test]
@@ -261,11 +285,19 @@ mod tests {
     #[test]
     fn keeps_files_that_are_what_their_asset_says_and_no_others() {
         let honest = [1u8, 2, 3];
-        let (a, b, short) = (image_of("a", &honest), image_of("b", &honest), image_of("c", &honest));
+        let (a, b, short) = (
+            image_of("a", &honest),
+            image_of("b", &honest),
+            image_of("c", &honest),
+        );
         let bytes = pack_bundle(
             BundleKind::Project,
             "{}",
-            [(a.file(), &honest[..]), (b.file(), &[4, 5, 6][..]), (short.file(), &honest[1..])],
+            [
+                (a.file(), &honest[..]),
+                (b.file(), &[4, 5, 6][..]),
+                (short.file(), &honest[1..]),
+            ],
         )
         .expect("packs");
         let bundle = unpack_bundle(&bytes, BundleKind::Project).expect("unpacks");

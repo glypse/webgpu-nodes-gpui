@@ -23,13 +23,16 @@ impl GraphModel {
     fn set_custom_sockets(&mut self, node_id: &str, sockets: CustomSockets) {
         let key = self.active_definition_ref();
         {
-            let Some(doc) = self.project.definitions.get_mut(&key) else { return };
+            let Some(doc) = self.project.definitions.get_mut(&key) else {
+                return;
+            };
             if let Some(node) = doc.node_mut(node_id) {
                 node.data.sockets = Some(sockets.clone());
             }
             doc.edges.retain(|e| {
                 !(e.target == node_id && !sockets.inputs.iter().any(|s| s.id == e.target_handle))
-                    && !(e.source == node_id && !sockets.outputs.iter().any(|s| s.id == e.source_handle))
+                    && !(e.source == node_id
+                        && !sockets.outputs.iter().any(|s| s.id == e.source_handle))
             });
         }
         self.project.reindex();
@@ -44,16 +47,31 @@ impl GraphModel {
         input: bool,
         update: impl FnOnce(&mut Vec<HandleDef>),
     ) {
-        let Some(node) = self.custom_node(node_id) else { return };
+        let Some(node) = self.custom_node(node_id) else {
+            return;
+        };
         let mut sockets = custom_sockets(&node.data);
-        update(if input { &mut sockets.inputs } else { &mut sockets.outputs });
+        update(if input {
+            &mut sockets.inputs
+        } else {
+            &mut sockets.outputs
+        });
         self.set_custom_sockets(node_id, sockets);
     }
 
     /// Append a socket with a free name; returns it.
-    pub fn add_custom_socket(&mut self, node_id: &str, input: bool, ty: WgslType) -> Option<HandleDef> {
+    pub fn add_custom_socket(
+        &mut self,
+        node_id: &str,
+        input: bool,
+        ty: WgslType,
+    ) -> Option<HandleDef> {
         let node = self.custom_node(node_id)?;
-        let socket = HandleDef::new(new_id(), new_socket_label(&custom_sockets(&node.data), input), ty);
+        let socket = HandleDef::new(
+            new_id(),
+            new_socket_label(&custom_sockets(&node.data), input),
+            ty,
+        );
         let added = socket.clone();
         self.update_sockets(node_id, input, |s| s.push(added));
         Some(socket)
@@ -66,12 +84,24 @@ impl GraphModel {
     /// Rename a socket, which is also the variable the code reads or writes.
     /// Rejects names that aren't WGSL identifiers or that another socket has;
     /// returns whether it was applied.
-    pub fn rename_custom_socket(&mut self, node_id: &str, input: bool, socket_id: &str, label: &str) -> bool {
-        let Some(node) = self.custom_node(node_id) else { return false };
+    pub fn rename_custom_socket(
+        &mut self,
+        node_id: &str,
+        input: bool,
+        socket_id: &str,
+        label: &str,
+    ) -> bool {
+        let Some(node) = self.custom_node(node_id) else {
+            return false;
+        };
         let name = label.trim();
         let sockets = custom_sockets(&node.data);
         if !is_socket_name(name)
-            || sockets.inputs.iter().chain(&sockets.outputs).any(|s| s.id != socket_id && s.label == name)
+            || sockets
+                .inputs
+                .iter()
+                .chain(&sockets.outputs)
+                .any(|s| s.id != socket_id && s.label == name)
         {
             return false;
         }
@@ -84,7 +114,13 @@ impl GraphModel {
     }
 
     /// Change a socket's type; links that no longer fit are removed.
-    pub fn set_custom_socket_type(&mut self, node_id: &str, input: bool, socket_id: &str, ty: WgslType) {
+    pub fn set_custom_socket_type(
+        &mut self,
+        node_id: &str,
+        input: bool,
+        socket_id: &str,
+        ty: WgslType,
+    ) {
         self.update_sockets(node_id, input, |list| {
             for s in list.iter_mut().filter(|s| s.id == socket_id) {
                 s.ty = ty;
@@ -93,12 +129,19 @@ impl GraphModel {
     }
 
     /// Move a socket up (-1) or down (+1) among its side's.
-    pub fn move_custom_socket(&mut self, node_id: &str, input: bool, socket_id: &str, offset: isize) {
+    pub fn move_custom_socket(
+        &mut self,
+        node_id: &str,
+        input: bool,
+        socket_id: &str,
+        offset: isize,
+    ) {
         self.update_sockets(node_id, input, |list| {
             if let Some(index) = list.iter().position(|s| s.id == socket_id)
-                && let Some(target) = index.checked_add_signed(offset).filter(|t| *t < list.len()) {
-                    list.swap(index, target);
-                }
+                && let Some(target) = index.checked_add_signed(offset).filter(|t| *t < list.len())
+            {
+                list.swap(index, target);
+            }
         });
     }
 }

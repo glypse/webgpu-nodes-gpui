@@ -6,7 +6,9 @@ use std::io::Cursor;
 use image::{ImageDecoder as _, ImageReader, metadata::Orientation};
 use thiserror::Error;
 
-use super::asset::{Asset, AssetFile, AssetKind, VideoFile, asset_file, asset_kind_of, asset_name, valid_side};
+use super::asset::{
+    Asset, AssetFile, AssetKind, VideoFile, asset_file, asset_kind_of, asset_name, valid_side,
+};
 use super::bundle::asset_hash;
 
 /// A file picked to import: its name and media type as the platform gave them, and its bytes.
@@ -55,7 +57,11 @@ impl VideoProbe for NoVideos {
 /// Describes an image or video file as an asset with `id`. An image's size is
 /// the size it is shown at, after its EXIF orientation; a video's is its
 /// display size, as `probe` reads it.
-pub fn describe_asset(id: &str, file: ImportFile, probe: &dyn VideoProbe) -> Result<Asset, ImportError> {
+pub fn describe_asset(
+    id: &str,
+    file: ImportFile,
+    probe: &dyn VideoProbe,
+) -> Result<Asset, ImportError> {
     let kind = asset_kind_of(file.mime).ok_or(ImportError::Unreadable)?;
     let common = |width, height| AssetFile {
         id: id.to_owned(),
@@ -73,7 +79,9 @@ pub fn describe_asset(id: &str, file: ImportFile, probe: &dyn VideoProbe) -> Res
             Ok(Asset::Image(common(width, height)))
         }
         AssetKind::Video => {
-            let info = probe.probe(file.bytes).map_err(ImportError::UnreadableVideo)?;
+            let info = probe
+                .probe(file.bytes)
+                .map_err(ImportError::UnreadableVideo)?;
             if !valid_side(info.width) || !valid_side(info.height) {
                 return Err(ImportError::Unreadable);
             }
@@ -90,7 +98,9 @@ pub fn describe_asset(id: &str, file: ImportFile, probe: &dyn VideoProbe) -> Res
 /// The size an image's pixels have once upright, read from its header; `None`
 /// when it can't be read or is beyond what an asset can be.
 fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
     let mut decoder = reader.into_decoder().ok()?;
     let (width, height) = decoder.dimensions();
     let orientation = decoder.orientation().unwrap_or_else(|e| {
@@ -99,9 +109,16 @@ fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
     });
     let turned = matches!(
         orientation,
-        Orientation::Rotate90 | Orientation::Rotate270 | Orientation::Rotate90FlipH | Orientation::Rotate270FlipH
+        Orientation::Rotate90
+            | Orientation::Rotate270
+            | Orientation::Rotate90FlipH
+            | Orientation::Rotate270FlipH
     );
-    let (width, height) = if turned { (height, width) } else { (width, height) };
+    let (width, height) = if turned {
+        (height, width)
+    } else {
+        (width, height)
+    };
     (valid_side(width) && valid_side(height)).then_some((width, height))
 }
 
@@ -112,7 +129,9 @@ mod tests {
     fn png(width: u32, height: u32) -> Vec<u8> {
         let image = image::RgbaImage::from_pixel(width, height, image::Rgba([1, 2, 3, 255]));
         let mut out = Cursor::new(Vec::new());
-        image.write_to(&mut out, image::ImageFormat::Png).expect("encodes");
+        image
+            .write_to(&mut out, image::ImageFormat::Png)
+            .expect("encodes");
         out.into_inner()
     }
 
@@ -123,7 +142,9 @@ mod tests {
     #[test]
     fn describes_an_image_by_its_header_and_its_bytes() {
         let bytes = png(3, 2);
-        let Ok(Asset::Image(asset)) = describe_asset("a1", file("Holiday.PNG", "image/png", &bytes), &NoVideos) else {
+        let Ok(Asset::Image(asset)) =
+            describe_asset("a1", file("Holiday.PNG", "image/png", &bytes), &NoVideos)
+        else {
             panic!("an image");
         };
         assert_eq!(asset.name, "Holiday");
@@ -136,9 +157,18 @@ mod tests {
     #[test]
     fn refuses_what_isnt_an_image_it_can_read() {
         let bytes = png(1, 1);
-        assert_eq!(describe_asset("a", file("x.svg", "image/svg+xml", &bytes), &NoVideos), Err(ImportError::Unreadable));
-        assert_eq!(describe_asset("a", file("x.txt", "text/plain", &bytes), &NoVideos), Err(ImportError::Unreadable));
-        assert_eq!(describe_asset("a", file("x.png", "image/png", b"not an image"), &NoVideos), Err(ImportError::Unreadable));
+        assert_eq!(
+            describe_asset("a", file("x.svg", "image/svg+xml", &bytes), &NoVideos),
+            Err(ImportError::Unreadable)
+        );
+        assert_eq!(
+            describe_asset("a", file("x.txt", "text/plain", &bytes), &NoVideos),
+            Err(ImportError::Unreadable)
+        );
+        assert_eq!(
+            describe_asset("a", file("x.png", "image/png", b"not an image"), &NoVideos),
+            Err(ImportError::Unreadable)
+        );
     }
 
     struct Probe(VideoInfo);
@@ -151,9 +181,16 @@ mod tests {
 
     #[test]
     fn describes_a_video_by_what_the_probe_reads() {
-        let info = VideoInfo { width: 640, height: 360, duration: 2.5, frame_rate: 24.0 };
+        let info = VideoInfo {
+            width: 640,
+            height: 360,
+            duration: 2.5,
+            frame_rate: 24.0,
+        };
         let bytes = b"a movie";
-        let Ok(Asset::Video(video)) = describe_asset("v1", file("Clip.MP4", "video/mp4", bytes), &Probe(info)) else {
+        let Ok(Asset::Video(video)) =
+            describe_asset("v1", file("Clip.MP4", "video/mp4", bytes), &Probe(info))
+        else {
             panic!("a video");
         };
         assert_eq!(video.file.name, "Clip");
@@ -168,7 +205,9 @@ mod tests {
     fn refuses_a_video_the_probe_cant_read() {
         assert_eq!(
             describe_asset("v", file("c.mp4", "video/mp4", b""), &NoVideos),
-            Err(ImportError::UnreadableVideo("videos can't be read here".to_owned()))
+            Err(ImportError::UnreadableVideo(
+                "videos can't be read here".to_owned()
+            ))
         );
     }
 }

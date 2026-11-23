@@ -56,17 +56,35 @@ pub struct PathParams {
 }
 
 impl PathParams {
-    pub fn new(source: Xy, source_position: Position, target: Xy, target_position: Position) -> Self {
-        Self { source, source_position, target, target_position }
+    pub fn new(
+        source: Xy,
+        source_position: Position,
+        target: Xy,
+        target_position: Position,
+    ) -> Self {
+        Self {
+            source,
+            source_position,
+            target,
+            target_position,
+        }
     }
 }
 
 /// The midpoint between the ends, as `getEdgeCenter`.
 pub fn edge_center(source: Xy, target: Xy) -> Xy {
     let ox = (target.x - source.x).abs() / 2.0;
-    let cx = if target.x < source.x { target.x + ox } else { target.x - ox };
+    let cx = if target.x < source.x {
+        target.x + ox
+    } else {
+        target.x - ox
+    };
     let oy = (target.y - source.y).abs() / 2.0;
-    let cy = if target.y < source.y { target.y + oy } else { target.y - oy };
+    let cy = if target.y < source.y {
+        target.y + oy
+    } else {
+        target.y - oy
+    };
     Xy::new(cx, cy)
 }
 
@@ -96,11 +114,17 @@ pub fn bezier_path(p: PathParams, curvature: f32) -> EdgePath {
         p.source.x * 0.125 + c1.x * 0.375 + c2.x * 0.375 + p.target.x * 0.125,
         p.source.y * 0.125 + c1.y * 0.375 + c2.y * 0.375 + p.target.y * 0.125,
     );
-    EdgePath { segments: vec![Segment::Move(p.source), Segment::Cubic(c1, c2, p.target)], label }
+    EdgePath {
+        segments: vec![Segment::Move(p.source), Segment::Cubic(c1, c2, p.target)],
+        label,
+    }
 }
 
 pub fn straight_path(source: Xy, target: Xy) -> EdgePath {
-    EdgePath { segments: vec![Segment::Move(source), Segment::Line(target)], label: edge_center(source, target) }
+    EdgePath {
+        segments: vec![Segment::Move(source), Segment::Line(target)],
+        label: edge_center(source, target),
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -111,7 +135,10 @@ pub struct StepOptions {
 
 impl Default for StepOptions {
     fn default() -> Self {
-        Self { border_radius: 5.0, offset: 20.0 }
+        Self {
+            border_radius: 5.0,
+            offset: 20.0,
+        }
     }
 }
 
@@ -139,7 +166,11 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy) {
         p.target.y + target_dir.y * opts.offset,
     );
     let dir = if matches!(p.source_position, Position::Left | Position::Right) {
-        if source_gapped.x < target_gapped.x { Xy::new(1.0, 0.0) } else { Xy::new(-1.0, 0.0) }
+        if source_gapped.x < target_gapped.x {
+            Xy::new(1.0, 0.0)
+        } else {
+            Xy::new(-1.0, 0.0)
+        }
     } else if source_gapped.y < target_gapped.y {
         Xy::new(0.0, 1.0)
     } else {
@@ -169,7 +200,11 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy) {
         let vertical_split = vec![Xy::new(cx, source_gapped.y), Xy::new(cx, target_gapped.y)];
         let horizontal_split = vec![Xy::new(source_gapped.x, cy), Xy::new(target_gapped.x, cy)];
         points = if axis(source_dir, horizontal) == curr_dir {
-            if horizontal { vertical_split } else { horizontal_split }
+            if horizontal {
+                vertical_split
+            } else {
+                horizontal_split
+            }
         } else if horizontal {
             horizontal_split
         } else {
@@ -179,7 +214,11 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy) {
         let source_target = vec![Xy::new(source_gapped.x, target_gapped.y)];
         let target_source = vec![Xy::new(target_gapped.x, source_gapped.y)];
         points = if horizontal {
-            if source_dir.x == curr_dir { target_source.clone() } else { source_target.clone() }
+            if source_dir.x == curr_dir {
+                target_source.clone()
+            } else {
+                source_target.clone()
+            }
         } else if source_dir.y == curr_dir {
             source_target.clone()
         } else {
@@ -218,7 +257,11 @@ fn step_points(p: PathParams, opts: StepOptions) -> (Vec<Xy>, Xy) {
                 || (axis(source_dir, horizontal) != 1.0
                     && ((!is_same_dir && lt) || (is_same_dir && gt)));
             if flip {
-                points = if horizontal { source_target } else { target_source };
+                points = if horizontal {
+                    source_target
+                } else {
+                    target_source
+                };
             }
         }
 
@@ -272,7 +315,13 @@ pub fn smooth_step_path(p: PathParams, opts: StepOptions) -> EdgePath {
     let (points, label) = step_points(p, opts);
     let mut segments = vec![Segment::Move(points[0])];
     for i in 1..points.len() - 1 {
-        bend(points[i - 1], points[i], points[i + 1], opts.border_radius, &mut segments);
+        bend(
+            points[i - 1],
+            points[i],
+            points[i + 1],
+            opts.border_radius,
+            &mut segments,
+        );
     }
     segments.push(Segment::Line(*points.last().unwrap()));
     EdgePath { segments, label }
@@ -357,16 +406,27 @@ mod tests {
         // Source control: x1 + 0.5 * (x2 - x1); target control mirrors it.
         assert_eq!(
             path.segments[1],
-            Segment::Cubic(Xy::new(75.0, 20.0), Xy::new(75.0, 100.0), Xy::new(150.0, 100.0))
+            Segment::Cubic(
+                Xy::new(75.0, 20.0),
+                Xy::new(75.0, 100.0),
+                Xy::new(150.0, 100.0)
+            )
         );
         assert_eq!(path.label, Xy::new(75.0, 60.0));
     }
 
     #[test]
     fn bezier_loops_back_when_the_target_is_behind() {
-        let p = PathParams::new(Xy::new(100.0, 0.0), Position::Right, Xy::new(0.0, 0.0), Position::Left);
+        let p = PathParams::new(
+            Xy::new(100.0, 0.0),
+            Position::Right,
+            Xy::new(0.0, 0.0),
+            Position::Left,
+        );
         let path = bezier_path(p, DEFAULT_CURVATURE);
-        let Segment::Cubic(c1, c2, _) = path.segments[1] else { panic!() };
+        let Segment::Cubic(c1, c2, _) = path.segments[1] else {
+            panic!()
+        };
         // 0.25 * 25 * sqrt(100)
         assert!((c1.x - 162.5).abs() < 1e-3);
         assert!((c2.x - -62.5).abs() < 1e-3);
@@ -381,7 +441,10 @@ mod tests {
 
     #[test]
     fn smooth_step_goes_through_the_centre_column() {
-        let path = smooth_step_path(params(Position::Right, Position::Left), StepOptions::default());
+        let path = smooth_step_path(
+            params(Position::Right, Position::Left),
+            StepOptions::default(),
+        );
         let points = flatten(&path.segments, 4);
         assert_eq!(points[0], Xy::new(0.0, 20.0));
         assert_eq!(*points.last().unwrap(), Xy::new(150.0, 100.0));
@@ -392,7 +455,10 @@ mod tests {
 
     #[test]
     fn step_edge_has_square_corners() {
-        let opts = StepOptions { border_radius: 0.0, ..StepOptions::default() };
+        let opts = StepOptions {
+            border_radius: 0.0,
+            ..StepOptions::default()
+        };
         let path = smooth_step_path(params(Position::Right, Position::Left), opts);
         let pts = flatten(&path.segments, 4);
         assert!(pts.iter().any(|p| *p == Xy::new(75.0, 20.0)));
@@ -401,7 +467,10 @@ mod tests {
 
     #[test]
     fn mixed_positions_route_around() {
-        let path = smooth_step_path(params(Position::Right, Position::Top), StepOptions::default());
+        let path = smooth_step_path(
+            params(Position::Right, Position::Top),
+            StepOptions::default(),
+        );
         let pts = flatten(&path.segments, 4);
         assert_eq!(*pts.last().unwrap(), Xy::new(150.0, 100.0));
     }

@@ -36,15 +36,25 @@ pub fn read(path: &Path) -> Result<Loaded> {
 fn parse(bytes: &[u8]) -> Result<Loaded> {
     if !bytes.starts_with(ZIP_MAGIC) {
         let json = std::str::from_utf8(bytes).map_err(|_| anyhow!("it isn't text or a bundle"))?;
-        return Ok(Loaded { project: GraphProject::from_json(json)?, files: AssetFiles::new() });
+        return Ok(Loaded {
+            project: GraphProject::from_json(json)?,
+            files: AssetFiles::new(),
+        });
     }
     let bundle = unpack_bundle(bytes, BundleKind::Project)?;
     let project = GraphProject::from_json(&bundle.json)?;
     let verified = verified_files(bundle, &project.assets);
     for asset in &verified.altered {
-        log::warn!("the file of the asset \"{}\" isn't what the project says, so it's left out", asset.name());
+        log::warn!(
+            "the file of the asset \"{}\" isn't what the project says, so it's left out",
+            asset.name()
+        );
     }
-    let files = verified.files.into_iter().map(|(id, data)| (id, Arc::new(data))).collect();
+    let files = verified
+        .files
+        .into_iter()
+        .map(|(id, data)| (id, Arc::new(data)))
+        .collect();
     Ok(Loaded { project, files })
 }
 
@@ -59,7 +69,12 @@ pub fn pack(kind: BundleKind, json: &str, assets: &[Asset], files: &AssetFiles) 
 
 /// Writes the project and its assets' files as a bundle, replacing the file only once it is whole.
 pub fn write(path: &Path, project: &GraphProject, files: &AssetFiles) -> Result<()> {
-    let bytes = pack(BundleKind::Project, &project.to_json(), &project.assets, files)?;
+    let bytes = pack(
+        BundleKind::Project,
+        &project.to_json(),
+        &project.assets,
+        files,
+    )?;
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(".tmp");
     let temporary = PathBuf::from(temporary);
@@ -68,12 +83,18 @@ pub fn write(path: &Path, project: &GraphProject, files: &AssetFiles) -> Result<
 }
 
 fn last_project_file() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("webgpu-nodes").join("last-project"))
+    Some(
+        dirs::config_dir()?
+            .join("webgpu-nodes")
+            .join("last-project"),
+    )
 }
 
 /// Remembers which project to reopen on the next start; `None` forgets it.
 pub fn remember(path: Option<&Path>) {
-    let Some(file) = last_project_file() else { return };
+    let Some(file) = last_project_file() else {
+        return;
+    };
     let result = match path {
         Some(path) => file
             .parent()
@@ -96,7 +117,10 @@ pub fn last() -> Option<PathBuf> {
 }
 
 pub fn file_name(path: &Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 #[cfg(test)]
@@ -149,7 +173,10 @@ mod tests {
         write(&path, &project, &files).expect("write");
         let loaded = read(&path).expect("read");
         assert_eq!(loaded.project, project);
-        assert_eq!(loaded.files.get("a1").map(|f| f.as_slice()), Some(&bytes[..]));
+        assert_eq!(
+            loaded.files.get("a1").map(|f| f.as_slice()),
+            Some(&bytes[..])
+        );
         fs::remove_dir_all(dir).ok();
     }
 
@@ -170,7 +197,10 @@ mod tests {
     #[test]
     fn bare_json_reads_too() {
         let project = loaded_default();
-        assert_eq!(parse(project.to_json().as_bytes()).expect("parse").project, project);
+        assert_eq!(
+            parse(project.to_json().as_bytes()).expect("parse").project,
+            project
+        );
     }
 
     #[test]

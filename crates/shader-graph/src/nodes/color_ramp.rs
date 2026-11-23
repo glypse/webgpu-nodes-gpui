@@ -454,7 +454,10 @@ pub fn build_color_ramp_descriptor(data: &NodeData) -> NodeDescriptor {
                 hue: mode(RAMP_HUE),
             };
             let color = crate::ramp::evaluate_ramp(&colors, factor, modes);
-            super::cpu::output("color", super::cpu::coerce(&color[..width], ctx.output_type))
+            super::cpu::output(
+                "color",
+                super::cpu::coerce(&color[..width], ctx.output_type),
+            )
         })
         .wgsl(move |ctx| ramp_statements(ctx, &stops));
     d.primary_input = primary;
@@ -467,7 +470,9 @@ fn ramp_statements(ctx: &mut WgslCtx, stops: &[RampStop]) -> Vec<String> {
     let count = stops.len();
     let rgba = ctx.output_type == WgslType::Vec4f;
     if count < 2 {
-        let Some(only) = stops.first() else { return vec![format!("let {v} = {};", ctx.output_type.zero())] };
+        let Some(only) = stops.first() else {
+            return vec![format!("let {v} = {};", ctx.output_type.zero())];
+        };
         return vec![format!("let {v} = {};", ctx.promote_input(&only.id))];
     }
 

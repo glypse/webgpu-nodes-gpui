@@ -1,15 +1,24 @@
 use super::builders::{model_for, node, with_data};
 use crate::catalog::{
-    AddMenuEntry, EntryKind, NAMED_REROUTES, Pending, add_entry, add_entry_connected, add_menu_entries, connectable_entries,
-    search_entries,
+    AddMenuEntry, EntryKind, NAMED_REROUTES, Pending, add_entry, add_entry_connected,
+    add_menu_entries, connectable_entries, search_entries,
 };
 use crate::graph::{GraphModel, Point};
 use crate::types::NodeData;
 
 fn graph() -> GraphModel {
-    let named = NodeData { label: Some("Scale".to_owned()), hide_links: Some(true), ..Default::default() };
+    let named = NodeData {
+        label: Some("Scale".to_owned()),
+        hide_links: Some(true),
+        ..Default::default()
+    };
     model_for(
-        vec![node("t", "time"), with_data(node("scale", "reroute"), named), node("plain", "reroute"), node("s", "sin")],
+        vec![
+            node("t", "time"),
+            with_data(node("scale", "reroute"), named),
+            node("plain", "reroute"),
+            node("s", "sin"),
+        ],
         &[("t", "seconds", "scale", "in")],
     )
 }
@@ -23,8 +32,10 @@ fn entry_of(model: &GraphModel) -> AddMenuEntry {
 
 #[test]
 fn named_reroutes_are_listed_in_the_add_menu_by_name_other_reroutes_arent() {
-    let links: Vec<AddMenuEntry> =
-        add_menu_entries(&graph()).into_iter().filter(|e| matches!(e.kind, EntryKind::Link { .. })).collect();
+    let links: Vec<AddMenuEntry> = add_menu_entries(&graph())
+        .into_iter()
+        .filter(|e| matches!(e.kind, EntryKind::Link { .. }))
+        .collect();
     let labels: Vec<&str> = links.iter().map(|e| e.label.as_str()).collect();
     assert_eq!(labels, ["Scale"]);
     assert_eq!(links[0].section, [NAMED_REROUTES]);
@@ -36,7 +47,10 @@ fn named_reroutes_are_found_by_search_under_their_aliases() {
     for query in ["scale", "get", "named reroute"] {
         let results = search_entries(&entries, query, &|_| true);
         let found: Vec<&str> = results.iter().map(|r| r.entry.label.as_str()).collect();
-        assert!(found.contains(&"Scale"), "{query:?} finds the named reroute, got {found:?}");
+        assert!(
+            found.contains(&"Scale"),
+            "{query:?} finds the named reroute, got {found:?}"
+        );
     }
 }
 
@@ -44,8 +58,15 @@ fn named_reroutes_are_found_by_search_under_their_aliases() {
 fn named_reroutes_are_linked_to_an_input_a_link_is_dragged_from_adding_nothing() {
     let mut model = graph();
     let entry = entry_of(&model);
-    let pending = Pending { node: "s".to_owned(), handle: "e".to_owned(), from_output: false };
-    assert_eq!(connectable_entries(&model, std::slice::from_ref(&entry), &pending).len(), 1);
+    let pending = Pending {
+        node: "s".to_owned(),
+        handle: "e".to_owned(),
+        from_output: false,
+    };
+    assert_eq!(
+        connectable_entries(&model, std::slice::from_ref(&entry), &pending).len(),
+        1
+    );
     let count = model.root().nodes.len();
     add_entry_connected(&mut model, &entry, Point::default(), &pending);
     assert_eq!(model.root().nodes.len(), count);

@@ -88,12 +88,16 @@ pub fn parse_groups(text: &str) -> Result<GroupsFile, LoadError> {
     if text.len() > MAX_JSON_BYTES {
         return Err(LoadError::TooLarge);
     }
-    let value: serde_json::Value = serde_json::from_str(text).map_err(|_| LoadError::InvalidJson)?;
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| LoadError::InvalidJson)?;
     let file: GroupsFile =
         serde_json::from_value(value).map_err(|e| LoadError::InvalidSchema(e.to_string()))?;
     let mut problems = Vec::new();
     if file.groups.len() > MAX_DEFINITIONS {
-        problems.push(format!("groups: too many: {}, at most {MAX_DEFINITIONS}", file.groups.len()));
+        problems.push(format!(
+            "groups: too many: {}, at most {MAX_DEFINITIONS}",
+            file.groups.len()
+        ));
     }
     for group in &file.groups {
         if group.dependencies.len() > MAX_DEFINITIONS {
@@ -101,11 +105,18 @@ pub fn parse_groups(text: &str) -> Result<GroupsFile, LoadError> {
         }
     }
     let mut probe = GraphProject::from_definitions(
-        file.groups.iter().map(|g| (g.id.clone(), g.definition.clone())).collect(),
+        file.groups
+            .iter()
+            .map(|g| (g.id.clone(), g.definition.clone()))
+            .collect(),
     );
     probe.assets = file.assets.clone();
     problems.extend(schema_issues(&probe));
-    if problems.is_empty() { Ok(file) } else { Err(LoadError::InvalidSchema(problems.join("; "))) }
+    if problems.is_empty() {
+        Ok(file)
+    } else {
+        Err(LoadError::InvalidSchema(problems.join("; ")))
+    }
 }
 
 /// Reads a groups bundle, leaving out the assets whose files aren't what they say.
@@ -113,12 +124,24 @@ pub fn read_groups(bytes: &[u8]) -> Result<GroupsBundle, GroupsReadError> {
     let bundle = unpack_bundle(bytes, BundleKind::Groups)?;
     let mut file = parse_groups(&bundle.json)?;
     let verified = verified_files(bundle, &file.assets);
-    let mut paths: HashMap<String, String> =
-        file.assets.iter().map(|a| (a.id().to_owned(), a.file().to_owned())).collect();
-    let files = verified.files.into_iter().filter_map(|(id, data)| Some((paths.remove(&id)?, data))).collect();
+    let mut paths: HashMap<String, String> = file
+        .assets
+        .iter()
+        .map(|a| (a.id().to_owned(), a.file().to_owned()))
+        .collect();
+    let files = verified
+        .files
+        .into_iter()
+        .filter_map(|(id, data)| Some((paths.remove(&id)?, data)))
+        .collect();
     let altered_ids: HashSet<&str> = verified.altered.iter().map(Asset::id).collect();
-    file.assets.retain(|asset| !altered_ids.contains(asset.id()));
-    Ok(GroupsBundle { file, altered: verified.altered, files })
+    file.assets
+        .retain(|asset| !altered_ids.contains(asset.id()));
+    Ok(GroupsBundle {
+        file,
+        altered: verified.altered,
+        files,
+    })
 }
 
 /// The groups of a bundle's definitions, as one document each for import checks.
@@ -176,7 +199,9 @@ fn reference_issues(definitions: &BTreeMap<&str, &GraphDocument>) -> Vec<GraphIs
     }
     for (definition, target) in &links {
         if *target == ROOT_ID {
-            issues.push(GraphIssue::RootInstance { definition: (*definition).to_owned() });
+            issues.push(GraphIssue::RootInstance {
+                definition: (*definition).to_owned(),
+            });
         }
     }
     let ids: Vec<&str> = definitions.keys().copied().collect();
@@ -209,15 +234,23 @@ impl GraphModel {
 
     /// The user groups `definition_ref` nests, at any depth, not counting itself.
     fn nested_user_refs(&self, definition_ref: &str) -> Vec<String> {
-        let seeds = self.project().document(definition_ref).map_or_else(Vec::new, |doc| {
-            doc.group_refs().map(str::to_owned).collect()
-        });
-        self.reachable_user_refs(seeds).into_iter().filter(|r| r != definition_ref).collect()
+        let seeds = self
+            .project()
+            .document(definition_ref)
+            .map_or_else(Vec::new, |doc| {
+                doc.group_refs().map(str::to_owned).collect()
+            });
+        self.reachable_user_refs(seeds)
+            .into_iter()
+            .filter(|r| r != definition_ref)
+            .collect()
     }
 
     fn export_entry(&self, definition_ref: &str) -> Option<GroupEntry> {
         let doc = self.project().document(definition_ref)?;
-        let library_entry = library::entries().iter().find(|e| e.reference == definition_ref);
+        let library_entry = library::entries()
+            .iter()
+            .find(|e| e.reference == definition_ref);
         let label = doc
             .label
             .clone()
@@ -241,13 +274,27 @@ impl GraphModel {
         let groups: Vec<GroupEntry> = refs.iter().filter_map(|r| self.export_entry(r)).collect();
         let used: HashSet<&str> = groups
             .iter()
-            .flat_map(|g| g.definition.nodes.iter().filter_map(|n| n.data.asset.as_deref()))
+            .flat_map(|g| {
+                g.definition
+                    .nodes
+                    .iter()
+                    .filter_map(|n| n.data.asset.as_deref())
+            })
             .collect();
-        let assets: Vec<Asset> =
-            self.project().assets.iter().filter(|a| used.contains(a.id())).cloned().collect();
+        let assets: Vec<Asset> = self
+            .project()
+            .assets
+            .iter()
+            .filter(|a| used.contains(a.id()))
+            .cloned()
+            .collect();
         let label = groups.first().map_or("group", |g| g.label.as_str());
         let name = file_stem(label);
-        let json = serde_json::to_string_pretty(&GroupsFile { groups, assets: assets.clone() }).ok()?;
+        let json = serde_json::to_string_pretty(&GroupsFile {
+            groups,
+            assets: assets.clone(),
+        })
+        .ok()?;
         Some(GroupsExport { name, json, assets })
     }
 
@@ -283,7 +330,9 @@ impl GraphModel {
         let mut issues: Vec<GraphIssue> = entries
             .iter()
             .filter(|(group, _)| group.id == ROOT_ID)
-            .map(|_| GraphIssue::ReservedDefinition { definition: ROOT_ID.to_owned() })
+            .map(|_| GraphIssue::ReservedDefinition {
+                definition: ROOT_ID.to_owned(),
+            })
             .collect();
         let mut checked: BTreeMap<&str, &GraphDocument> = self
             .project()
@@ -305,7 +354,9 @@ impl GraphModel {
 
         let mut probe = GraphProject::from_definitions(staged.definitions);
         normalise_project(&mut probe);
-        self.project.assets.extend(added.iter().map(|a| a.asset.clone()));
+        self.project
+            .assets
+            .extend(added.iter().map(|a| a.asset.clone()));
         self.project.definitions.extend(probe.definitions);
         self.changed();
 
@@ -319,12 +370,19 @@ impl GraphModel {
                 })
             })
             .collect();
-        Ok(GroupImport { imported: entries.len(), missing, added })
+        Ok(GroupImport {
+            imported: entries.len(),
+            missing,
+            added,
+        })
     }
 
     /// Each file's assets, by the id each one has in the project, and the assets
     /// that are new to it.
-    fn stage_assets(&self, files: &[GroupsFile]) -> (Vec<HashMap<String, String>>, Vec<ImportedAsset>) {
+    fn stage_assets(
+        &self,
+        files: &[GroupsFile],
+    ) -> (Vec<HashMap<String, String>>, Vec<ImportedAsset>) {
         let mut added: Vec<ImportedAsset> = Vec::new();
         let mut all_ids = Vec::with_capacity(files.len());
         for (index, file) in files.iter().enumerate() {
@@ -333,7 +391,12 @@ impl GraphModel {
                 if ids.contains_key(asset.id()) {
                     continue;
                 }
-                let known = || self.project().assets.iter().chain(added.iter().map(|a| &a.asset));
+                let known = || {
+                    self.project()
+                        .assets
+                        .iter()
+                        .chain(added.iter().map(|a| &a.asset))
+                };
                 if let Some(existing) = known().find(|a| a.hash() == asset.hash()) {
                     ids.insert(asset.id().to_owned(), existing.id().to_owned());
                     continue;
@@ -351,7 +414,10 @@ impl GraphModel {
                 ids.insert(asset.id().to_owned(), id);
                 added.push(ImportedAsset {
                     asset: imported,
-                    source: AssetSource { bundle: index, path: asset.file().to_owned() },
+                    source: AssetSource {
+                        bundle: index,
+                        path: asset.file().to_owned(),
+                    },
                 });
             }
             all_ids.push(ids);
@@ -363,7 +429,8 @@ impl GraphModel {
     /// adds nothing; one that differs takes a new ref, and so do those nesting
     /// it, which then differ too. Of entries sharing an id, the first counts.
     fn stage_definitions(&self, entries: &[(&GroupEntry, GraphDocument)]) -> Staged {
-        let contents: Vec<serde_json::Value> = entries.iter().map(|(_, doc)| content_of(doc)).collect();
+        let contents: Vec<serde_json::Value> =
+            entries.iter().map(|(_, doc)| content_of(doc)).collect();
         let existing: HashMap<&str, serde_json::Value> = entries
             .iter()
             .filter_map(|(group, _)| {
@@ -377,7 +444,9 @@ impl GraphModel {
         while changed {
             changed = false;
             for ((group, doc), content) in entries.iter().zip(&contents) {
-                let Some(existing_content) = existing.get(group.id.as_str()) else { continue };
+                let Some(existing_content) = existing.get(group.id.as_str()) else {
+                    continue;
+                };
                 if ids.contains_key(&group.id) {
                     continue;
                 }
@@ -394,7 +463,9 @@ impl GraphModel {
         for (group, doc) in entries {
             let renamed = ids.get(&group.id);
             let reference = renamed.cloned().unwrap_or_else(|| group.id.clone());
-            if definitions.contains_key(&reference) || (renamed.is_none() && existing.contains_key(group.id.as_str())) {
+            if definitions.contains_key(&reference)
+                || (renamed.is_none() && existing.contains_key(group.id.as_str()))
+            {
                 continue;
             }
             let mut copy = doc.clone();
@@ -427,14 +498,23 @@ mod tests {
     fn sin_document(id: &str) -> GraphDocument {
         let mut node = GraphNode::new("sin", AT);
         node.id = id.to_owned();
-        GraphDocument { nodes: vec![node], ..GraphDocument::default() }
+        GraphDocument {
+            nodes: vec![node],
+            ..GraphDocument::default()
+        }
     }
 
     fn nesting(id: &str, definition_ref: &str) -> GraphDocument {
         let mut node = GraphNode::new(NODE_GROUP, AT);
         node.id = id.to_owned();
-        node.group = Some(GroupRef { definition_ref: definition_ref.to_owned(), locked: false });
-        GraphDocument { nodes: vec![node], ..GraphDocument::default() }
+        node.group = Some(GroupRef {
+            definition_ref: definition_ref.to_owned(),
+            locked: false,
+        });
+        GraphDocument {
+            nodes: vec![node],
+            ..GraphDocument::default()
+        }
     }
 
     fn entry(id: &str, definition: GraphDocument, dependencies: &[&str]) -> GroupEntry {
@@ -448,12 +528,17 @@ mod tests {
     }
 
     fn file_of(groups: Vec<GroupEntry>) -> GroupsFile {
-        GroupsFile { groups, assets: Vec::new() }
+        GroupsFile {
+            groups,
+            assets: Vec::new(),
+        }
     }
 
     fn mine() -> GraphModel {
         let mut project = GraphProject::default();
-        project.definitions.insert("user".to_owned(), sin_document("user-node"));
+        project
+            .definitions
+            .insert("user".to_owned(), sin_document("user-node"));
         if let Some(root) = project.definitions.get_mut(ROOT_ID) {
             let mut node = GraphNode::new("sin", AT);
             node.id = "mine".to_owned();
@@ -479,7 +564,8 @@ mod tests {
     fn can_not_replace_the_root() {
         let mut model = mine();
         let before = model.project().clone();
-        let result = model.import_groups(&[file_of(vec![entry(ROOT_ID, sin_document("evil"), &[])])]);
+        let result =
+            model.import_groups(&[file_of(vec![entry(ROOT_ID, sin_document("evil"), &[])])]);
         assert!(result.is_err());
         assert_eq!(model.project(), &before);
         assert!(!model.root().locked);
@@ -490,10 +576,22 @@ mod tests {
         let library = library::entries().first().expect("the library has entries");
         let mut model = mine();
         let before = model.project().definitions.get(&library.reference).cloned();
-        let result = model.import_groups(&[file_of(vec![entry(&library.reference, sin_document("evil"), &[])])]);
+        let result = model.import_groups(&[file_of(vec![entry(
+            &library.reference,
+            sin_document("evil"),
+            &[],
+        )])]);
         assert_eq!(result.map(|r| r.imported), Ok(0));
-        assert_eq!(model.project().definitions.get(&library.reference).cloned(), before);
-        assert!(model.project().document(&library.reference).is_some_and(|d| d.node("evil").is_none()));
+        assert_eq!(
+            model.project().definitions.get(&library.reference).cloned(),
+            before
+        );
+        assert!(
+            model
+                .project()
+                .document(&library.reference)
+                .is_some_and(|d| d.node("evil").is_none())
+        );
     }
 
     #[test]
@@ -517,21 +615,34 @@ mod tests {
             .expect("outer nests a group")
             .to_owned();
         assert_ne!(copy, "user");
-        assert!(model.project().document(&copy).is_some_and(|d| d.node("evil").is_some()));
+        assert!(
+            model
+                .project()
+                .document(&copy)
+                .is_some_and(|d| d.node("evil").is_some())
+        );
     }
 
     #[test]
     fn copies_a_group_the_project_has_too_when_what_it_nests_had_to_be_copied() {
         let mut model = mine();
         let shared = nesting("n", "user");
-        model.import_groups(&[file_of(vec![entry("outer", shared.clone(), &[])])]).expect("imports");
+        model
+            .import_groups(&[file_of(vec![entry("outer", shared.clone(), &[])])])
+            .expect("imports");
         let before = model.project().document("outer").cloned();
 
-        let file = file_of(vec![entry("user", sin_document("evil"), &[]), entry("outer", shared, &["user"])]);
+        let file = file_of(vec![
+            entry("user", sin_document("evil"), &[]),
+            entry("outer", shared, &["user"]),
+        ]);
         assert!(model.import_groups(&[file]).is_ok());
         assert_eq!(model.project().document("outer").cloned(), before);
         assert_eq!(
-            before.as_ref().and_then(|d| d.nodes.first()).and_then(|n| n.definition_ref()),
+            before
+                .as_ref()
+                .and_then(|d| d.nodes.first())
+                .and_then(|n| n.definition_ref()),
             Some("user")
         );
     }
@@ -540,7 +651,13 @@ mod tests {
     fn adds_nothing_for_groups_the_project_has_already() {
         let mut model = mine();
         model.group_selection(&["mine".to_owned()]);
-        let reference = model.root().nodes.iter().find_map(|n| n.definition_ref()).expect("grouped").to_owned();
+        let reference = model
+            .root()
+            .nodes
+            .iter()
+            .find_map(|n| n.definition_ref())
+            .expect("grouped")
+            .to_owned();
         let export = model.export_group(&reference).expect("exports");
         let file = parse_groups(&export.json).expect("parses");
         let count = model.project().definitions.len();
@@ -554,7 +671,9 @@ mod tests {
         let mut group = sin_document("s");
         group.inputs = vec![GroupHandleDef::new("a", "A", WgslType::F32.into())];
         group.outputs = vec![GroupHandleDef::new("b", "B", WgslType::F32.into())];
-        group.defaults.insert("a".to_owned(), InputValue::from(2.0_f64));
+        group
+            .defaults
+            .insert("a".to_owned(), InputValue::from(2.0_f64));
         project.definitions.insert("g".to_owned(), group);
         let export = GraphModel::new(project).export_group("g").expect("exports");
         let file = parse_groups(&export.json).expect("parses");
@@ -562,8 +681,22 @@ mod tests {
         let mut target = GraphModel::default();
         assert!(target.import_groups(&[file]).is_ok());
         let imported = target.project().document("g").expect("imported");
-        assert_eq!(imported.inputs.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), ["a"]);
-        assert_eq!(imported.outputs.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert_eq!(
+            imported
+                .inputs
+                .iter()
+                .map(|h| h.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a"]
+        );
+        assert_eq!(
+            imported
+                .outputs
+                .iter()
+                .map(|h| h.id.as_str())
+                .collect::<Vec<_>>(),
+            ["b"]
+        );
         assert_eq!(imported.defaults.get("a"), Some(&InputValue::from(2.0_f64)));
     }
 
@@ -571,8 +704,14 @@ mod tests {
     fn rejects_cycles_within_the_file_or_through_the_projects_groups() {
         let mut model = mine();
         let before = model.project().clone();
-        let cycle = file_of(vec![entry("a", nesting("x", "b"), &[]), entry("b", nesting("y", "a"), &[])]);
-        assert_eq!(model.import_groups(&[cycle]), Err(LoadError::InvalidGraph(vec![GraphIssue::GroupCycle])));
+        let cycle = file_of(vec![
+            entry("a", nesting("x", "b"), &[]),
+            entry("b", nesting("y", "a"), &[]),
+        ]);
+        assert_eq!(
+            model.import_groups(&[cycle]),
+            Err(LoadError::InvalidGraph(vec![GraphIssue::GroupCycle]))
+        );
 
         let self_nesting = file_of(vec![entry("c", nesting("z", "c"), &[])]);
         assert!(model.import_groups(&[self_nesting]).is_err());
@@ -592,7 +731,10 @@ mod tests {
             target_handle: "e".to_owned(),
         });
         let file = GroupsFile {
-            groups: vec![entry("good", sin_document("g"), &[]), entry("bad", broken, &[])],
+            groups: vec![
+                entry("good", sin_document("g"), &[]),
+                entry("bad", broken, &[]),
+            ],
             assets: vec![image(&"a".repeat(64))],
         };
         assert!(model.import_groups(&[file]).is_err());
@@ -602,7 +744,9 @@ mod tests {
 
     #[test]
     fn rejects_more_definitions_than_a_project_can_hold() {
-        let groups = (0..=MAX_DEFINITIONS).map(|i| entry(&i.to_string(), sin_document(&i.to_string()), &[])).collect();
+        let groups = (0..=MAX_DEFINITIONS)
+            .map(|i| entry(&i.to_string(), sin_document(&i.to_string()), &[]))
+            .collect();
         assert!(mine().import_groups(&[file_of(groups)]).is_err());
     }
 
@@ -616,15 +760,32 @@ mod tests {
         if let Some(node) = document.nodes.first_mut() {
             node.data.asset = Some(other.id().to_owned());
         }
-        let file = GroupsFile { groups: vec![entry("g", document, &[])], assets: vec![other.clone()] };
+        let file = GroupsFile {
+            groups: vec![entry("g", document, &[])],
+            assets: vec![other.clone()],
+        };
         let result = model.import_groups(&[file]).expect("imports");
-        let [added] = result.added.as_slice() else { panic!("one asset is added") };
-        assert_eq!(added.source, AssetSource { bundle: 0, path: other.file().to_owned() });
+        let [added] = result.added.as_slice() else {
+            panic!("one asset is added")
+        };
+        assert_eq!(
+            added.source,
+            AssetSource {
+                bundle: 0,
+                path: other.file().to_owned()
+            }
+        );
         assert_ne!(added.asset.id(), "a1");
-        assert_eq!(added.asset.file(), format!("assets/images/{}.png", added.asset.id()));
+        assert_eq!(
+            added.asset.file(),
+            format!("assets/images/{}.png", added.asset.id())
+        );
         assert_eq!(model.asset("a1").map(Asset::hash), Some(hash_a.as_str()));
         let node = model.project().document("g").and_then(|d| d.nodes.first());
-        assert_eq!(node.and_then(|n| n.data.asset.as_deref()), Some(added.asset.id()));
+        assert_eq!(
+            node.and_then(|n| n.data.asset.as_deref()),
+            Some(added.asset.id())
+        );
     }
 
     #[test]
@@ -632,7 +793,10 @@ mod tests {
         let mut model = mine();
         let hash = "c".repeat(64);
         assert!(model.add_asset(image(&hash)));
-        let file = GroupsFile { groups: Vec::new(), assets: vec![image(&hash)] };
+        let file = GroupsFile {
+            groups: Vec::new(),
+            assets: vec![image(&hash)],
+        };
         let result = model.import_groups(&[file]).expect("imports");
         assert!(result.added.is_empty());
         assert_eq!(model.assets().len(), 1);
@@ -640,7 +804,8 @@ mod tests {
 
     #[test]
     fn reports_what_it_cant_find() {
-        let result = mine().import_groups(&[file_of(vec![entry("a", sin_document("x"), &["gone"])])]);
+        let result =
+            mine().import_groups(&[file_of(vec![entry("a", sin_document("x"), &["gone"])])]);
         assert_eq!(
             result.map(|r| r.missing),
             Ok(vec!["a depends on gone".to_owned()])
@@ -667,7 +832,10 @@ mod tests {
             width: 1,
             height: 1,
         });
-        let file = GroupsFile { groups: Vec::new(), assets: vec![good.clone(), bad.clone()] };
+        let file = GroupsFile {
+            groups: Vec::new(),
+            assets: vec![good.clone(), bad.clone()],
+        };
         let json = serde_json::to_string(&file).expect("serialises");
         let files = [(good.file(), &honest[..]), (bad.file(), &[9u8, 9, 9][..])];
         let bytes = crate::assets::pack_bundle(BundleKind::Groups, &json, files).expect("packs");

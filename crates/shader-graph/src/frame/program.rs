@@ -13,7 +13,9 @@ use crate::nodes::{
     resolve_descriptor,
 };
 use crate::passes::{FrameArg, FrameSizing, Size, TextureSource, TextureSources};
-use crate::types::{CpuCtx, CpuFn, CpuInputs, NodeData, NodeInputDef, Value, WgslType, input_control};
+use crate::types::{
+    CpuCtx, CpuFn, CpuInputs, NodeData, NodeInputDef, Value, WgslType, input_control,
+};
 use crate::zones::{
     ITERATION_HANDLE, ITERATIONS_HANDLE, REPEAT_INPUT, ZoneKind, zone_items, zone_kind_of,
     zone_max_iterations,
@@ -109,7 +111,10 @@ pub enum StepKind {
     Read(FrameInput),
     /// A texture's size at a mip level (`size`), the step from one texel to the
     /// next (`texel`) and how many levels it has (`levels`).
-    Texel { size: FrameInput, level: Option<FrameInput> },
+    Texel {
+        size: FrameInput,
+        level: Option<FrameInput>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -185,18 +190,26 @@ fn source_value(source: &FrameSource, env: &FrameEnv<'_>) -> Value {
         FrameSource::Delta => vec![env.delta],
         FrameSource::Frame => vec![env.frame],
         FrameSource::Canvas => vec![f64::from(env.canvas.width), f64::from(env.canvas.height)],
-        FrameSource::PassSize => vec![f64::from(env.pass_size.width), f64::from(env.pass_size.height)],
+        FrameSource::PassSize => vec![
+            f64::from(env.pass_size.width),
+            f64::from(env.pass_size.height),
+        ],
         FrameSource::Iteration(id) => vec![env.iteration.and_then(|f| f(id)).unwrap_or(0.0)],
         FrameSource::TextureSize(id) => {
-            let (size, levels) =
-                env.texture_size.and_then(|f| f(id)).unwrap_or((Size::new(1, 1), None));
-            vec![f64::from(size.width), f64::from(size.height), f64::from(levels.unwrap_or(1))]
+            let (size, levels) = env
+                .texture_size
+                .and_then(|f| f(id))
+                .unwrap_or((Size::new(1, 1), None));
+            vec![
+                f64::from(size.width),
+                f64::from(size.height),
+                f64::from(levels.unwrap_or(1)),
+            ]
         }
-        FrameSource::Uniform(name) => env
-            .uniforms
-            .iter()
-            .find(|(n, _)| n == name)
-            .map_or_else(|| vec![0.0], |(_, v)| v.0.iter().map(|c| f64::from(*c)).collect()),
+        FrameSource::Uniform(name) => env.uniforms.iter().find(|(n, _)| n == name).map_or_else(
+            || vec![0.0],
+            |(_, v)| v.0.iter().map(|c| f64::from(*c)).collect(),
+        ),
     }
 }
 
@@ -221,16 +234,33 @@ struct StepInputs<'r, 'a, 'e> {
 
 impl CpuInputs for StepInputs<'_, '_, '_> {
     fn input(&self, id: &str) -> Value {
-        let ty = self.step.input_types.get(id).copied().unwrap_or(WgslType::F32);
-        self.step.inputs.get(id).map_or_else(|| vec![0.0], |i| coerce(&self.runner.read(i), ty))
+        let ty = self
+            .step
+            .input_types
+            .get(id)
+            .copied()
+            .unwrap_or(WgslType::F32);
+        self.step
+            .inputs
+            .get(id)
+            .map_or_else(|| vec![0.0], |i| coerce(&self.runner.read(i), ty))
     }
 
     fn operands(&self, id: &str) -> Vec<Value> {
-        let ty = self.step.input_types.get(id).copied().unwrap_or(WgslType::F32);
+        let ty = self
+            .step
+            .input_types
+            .get(id)
+            .copied()
+            .unwrap_or(WgslType::F32);
         self.step
             .operands
             .get(id)
-            .map(|list| list.iter().map(|i| coerce(&self.runner.read(i), ty)).collect())
+            .map(|list| {
+                list.iter()
+                    .map(|i| coerce(&self.runner.read(i), ty))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -251,7 +281,10 @@ impl Runner<'_, '_> {
                 if item == ITERATION_HANDLE {
                     return vec![current.map_or(0.0, |l| l.iteration as f64)];
                 }
-                current.and_then(|l| l.state.get(item)).cloned().unwrap_or_else(|| vec![0.0])
+                current
+                    .and_then(|l| l.state.get(item))
+                    .cloned()
+                    .unwrap_or_else(|| vec![0.0])
             }
         }
     }
@@ -269,7 +302,9 @@ impl Runner<'_, '_> {
     }
 
     fn run(&self, index: usize) {
-        let Some(step) = self.program.steps.get(index) else { return };
+        let Some(step) = self.program.steps.get(index) else {
+            return;
+        };
         let outputs = match &step.kind {
             StepKind::Node(node) => self.run_node(node),
             StepKind::Read(input) => BTreeMap::from([("value".to_owned(), self.read(input))]),
@@ -277,18 +312,31 @@ impl Runner<'_, '_> {
                 let size = self.read(size);
                 let at = |i: usize| size.get(i).copied().unwrap_or(1.0);
                 let (base, tall, levels) = (at(0), at(1), at(2));
-                let wanted = level.as_ref().map_or(0.0, |l| self.read(l).first().copied().unwrap_or(0.0).trunc());
+                let wanted = level.as_ref().map_or(0.0, |l| {
+                    self.read(l).first().copied().unwrap_or(0.0).trunc()
+                });
                 let level = wanted.max(0.0).min(levels - 1.0);
                 let width = (base / 2f64.powf(level)).floor().max(1.0);
                 let height = (tall / 2f64.powf(level)).floor().max(1.0);
                 BTreeMap::from([
                     ("size".to_owned(), vec![width, height]),
-                    ("texel".to_owned(), vec![f64::from((1.0 / width) as f32), f64::from((1.0 / height) as f32)]),
+                    (
+                        "texel".to_owned(),
+                        vec![
+                            f64::from((1.0 / width) as f32),
+                            f64::from((1.0 / height) as f32),
+                        ],
+                    ),
                     ("levels".to_owned(), vec![levels]),
                 ])
             }
             StepKind::Repeat(repeat) => {
-                let wanted = self.read(&repeat.iterations).first().copied().unwrap_or(0.0).trunc();
+                let wanted = self
+                    .read(&repeat.iterations)
+                    .first()
+                    .copied()
+                    .unwrap_or(0.0)
+                    .trunc();
                 let count = wanted.max(0.0).min(f64::from(repeat.max)) as usize;
                 let mut state: BTreeMap<String, Value> = repeat
                     .items
@@ -296,9 +344,13 @@ impl Runner<'_, '_> {
                     .map(|i| (i.id.clone(), coerce(&self.read(&i.initial), i.ty)))
                     .collect();
                 for iteration in 0..count {
-                    self.loops
-                        .borrow_mut()
-                        .insert(repeat.id.clone(), Loop { iteration, state: state.clone() });
+                    self.loops.borrow_mut().insert(
+                        repeat.id.clone(),
+                        Loop {
+                            iteration,
+                            state: state.clone(),
+                        },
+                    );
                     self.run_body(Some(&repeat.id));
                     state = repeat
                         .items
@@ -326,7 +378,10 @@ impl Runner<'_, '_> {
 pub fn evaluate_frame(program: &FrameProgram, env: &FrameEnv<'_>) -> FrameValues {
     let mut bodies: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
     for (index, step) in program.steps.iter().enumerate() {
-        bodies.entry(step.loop_id.as_deref()).or_default().push(index);
+        bodies
+            .entry(step.loop_id.as_deref())
+            .or_default()
+            .push(index);
     }
     let runner = Runner {
         bodies,
@@ -336,7 +391,9 @@ pub fn evaluate_frame(program: &FrameProgram, env: &FrameEnv<'_>) -> FrameValues
         loops: RefCell::default(),
     };
     runner.run_body(None);
-    FrameValues { outputs: runner.outputs.into_inner() }
+    FrameValues {
+        outputs: runner.outputs.into_inner(),
+    }
 }
 
 /// What compiling a value gives: where to read it, and whether it varies with anything at runtime.
@@ -347,11 +404,17 @@ pub struct CompiledFrameValue {
 }
 
 fn literal(value: Value) -> CompiledFrameValue {
-    CompiledFrameValue { input: FrameInput::Literal(value), dynamic: false }
+    CompiledFrameValue {
+        input: FrameInput::Literal(value),
+        dynamic: false,
+    }
 }
 
 fn source(source: FrameSource) -> CompiledFrameValue {
-    CompiledFrameValue { input: FrameInput::Source(source), dynamic: true }
+    CompiledFrameValue {
+        input: FrameInput::Source(source),
+        dynamic: true,
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -420,7 +483,9 @@ impl<'g> FrameCompiler<'g> {
 
     /// The program of everything compiled so far.
     pub fn program(&self) -> FrameProgram {
-        FrameProgram { steps: self.state.borrow().steps.clone() }
+        FrameProgram {
+            steps: self.state.borrow().steps.clone(),
+        }
     }
 
     /// An output of a node of the document computed at `path`, if it's a frame
@@ -454,13 +519,25 @@ impl<'g> FrameCompiler<'g> {
 
     /// The same, as a number a plan can carry: a component of the value.
     #[cfg(test)]
-    pub(crate) fn arg(&self, path: &[String], node: &str, handle: &str, component: usize) -> Option<FrameArg> {
+    pub(crate) fn arg(
+        &self,
+        path: &[String],
+        node: &str,
+        handle: &str,
+        component: usize,
+    ) -> Option<FrameArg> {
         let value = self.compile(path, node, handle)?;
         Some(self.as_arg(&value, component))
     }
 
     /// What a node's input reads, as a number a plan can carry: the stored value when unlinked.
-    pub fn input_arg(&self, path: &[String], node: &str, input: &str, component: usize) -> Option<FrameArg> {
+    pub fn input_arg(
+        &self,
+        path: &[String],
+        node: &str,
+        input: &str,
+        component: usize,
+    ) -> Option<FrameArg> {
         let value = self.input(path, node, input)?;
         Some(self.as_arg(&value, component))
     }
@@ -473,29 +550,57 @@ impl<'g> FrameCompiler<'g> {
                     FrameInput::Ref(r) => r.clone(),
                     other => self.push(StepKind::Read(other.clone()), None, true, "value"),
                 };
-                FrameArg::Frame(FrameRef { component: Some(component), ..reference })
+                FrameArg::Frame(FrameRef {
+                    component: Some(component),
+                    ..reference
+                })
             }
         }
     }
 
-    fn push(&self, kind: StepKind, loop_id: Option<String>, dynamic: bool, output: &str) -> FrameRef {
+    fn push(
+        &self,
+        kind: StepKind,
+        loop_id: Option<String>,
+        dynamic: bool,
+        output: &str,
+    ) -> FrameRef {
         let mut state = self.state.borrow_mut();
         state.steps.push(FrameStep { loop_id, kind });
         state.dynamics.push(dynamic);
-        FrameRef { step: state.steps.len() - 1, output: output.to_owned(), component: None }
+        FrameRef {
+            step: state.steps.len() - 1,
+            output: output.to_owned(),
+            component: None,
+        }
     }
 
     fn is_dynamic(&self, input: &FrameInput) -> bool {
         match input {
             FrameInput::Literal(_) => false,
-            FrameInput::Ref(r) => self.state.borrow().dynamics.get(r.step).copied().unwrap_or(true),
+            FrameInput::Ref(r) => self
+                .state
+                .borrow()
+                .dynamics
+                .get(r.step)
+                .copied()
+                .unwrap_or(true),
             _ => true,
         }
     }
 
     fn reference(&self, reference: FrameRef) -> CompiledFrameValue {
-        let dynamic = self.state.borrow().dynamics.get(reference.step).copied().unwrap_or(true);
-        CompiledFrameValue { input: FrameInput::Ref(reference), dynamic }
+        let dynamic = self
+            .state
+            .borrow()
+            .dynamics
+            .get(reference.step)
+            .copied()
+            .unwrap_or(true);
+        CompiledFrameValue {
+            input: FrameInput::Ref(reference),
+            dynamic,
+        }
     }
 
     /// The loop a node of the document at `path` runs in, if it's in a repeat zone.
@@ -506,11 +611,20 @@ impl<'g> FrameCompiler<'g> {
             .then(|| format!("{}|{zone}", path_key(path)))
     }
 
-    fn compile_output(&self, path: &[String], node_id: &str, handle: &str) -> Option<CompiledFrameValue> {
+    fn compile_output(
+        &self,
+        path: &[String],
+        node_id: &str,
+        handle: &str,
+    ) -> Option<CompiledFrameValue> {
         let instance = self.sources.instance(path)?;
         let node = instance.doc.node(node_id)?;
         match node.node_type.as_str() {
-            "time" => Some(source(if handle == "frame" { FrameSource::Frame } else { FrameSource::Time })),
+            "time" => Some(source(if handle == "frame" {
+                FrameSource::Frame
+            } else {
+                FrameSource::Time
+            })),
             "delta" => Some(source(FrameSource::Delta)),
             "resolution" => Some(source(FrameSource::PassSize)),
             TEXTURE_SIZE => {
@@ -519,12 +633,18 @@ impl<'g> FrameCompiler<'g> {
                 }
                 let texture = self.sources.input(path, node_id, "texture").source();
                 if texture != TextureSource::Empty {
-                    self.state.borrow_mut().sized.insert(texture.id(), texture.clone());
+                    self.state
+                        .borrow_mut()
+                        .sized
+                        .insert(texture.id(), texture.clone());
                 }
                 let size = FrameInput::Source(FrameSource::TextureSize(texture.id()));
                 let level = self.input(path, node_id, TEXTURE_SIZE_LEVEL)?;
                 let reference = self.push(
-                    StepKind::Texel { size, level: Some(level.input) },
+                    StepKind::Texel {
+                        size,
+                        level: Some(level.input),
+                    },
                     self.loop_of(path, node_id),
                     true,
                     handle,
@@ -535,7 +655,11 @@ impl<'g> FrameCompiler<'g> {
                 if !is_video_metadata(handle) {
                     return None;
                 }
-                let asset = node.data.asset.as_deref().and_then(|id| self.graph.project.assets.iter().find(|a| a.id() == id));
+                let asset = node
+                    .data
+                    .asset
+                    .as_deref()
+                    .and_then(|id| self.graph.project.assets.iter().find(|a| a.id() == id));
                 if handle == VIDEO_INTERVAL {
                     return Some(literal(vec![frame_interval(asset)]));
                 }
@@ -566,21 +690,40 @@ impl<'g> FrameCompiler<'g> {
     fn input(&self, path: &[String], node_id: &str, input_id: &str) -> Option<CompiledFrameValue> {
         let instance = self.sources.instance(path)?;
         instance.doc.node(node_id)?;
-        match instance.edges_into(node_id).find(|e| e.target_handle == input_id) {
+        match instance
+            .edges_into(node_id)
+            .find(|e| e.target_handle == input_id)
+        {
             Some(edge) => self.compile(path, &edge.source, &edge.source_handle),
             None => self.unlinked(path, node_id, input_id),
         }
     }
 
     /// An unlinked input's value: a uniform where inputs are, else a literal.
-    fn unlinked(&self, path: &[String], node_id: &str, input_id: &str) -> Option<CompiledFrameValue> {
+    fn unlinked(
+        &self,
+        path: &[String],
+        node_id: &str,
+        input_id: &str,
+    ) -> Option<CompiledFrameValue> {
         let instance = self.sources.instance(path)?;
         let node = instance.doc.node(node_id)?;
         let descriptor = resolve_descriptor(node, self.graph.project);
-        let types = self.graph.resolver.resolve(self.graph.project, node, &instance.bindings);
+        let types = self
+            .graph
+            .resolver
+            .resolve(self.graph.project, node, &instance.bindings);
         let ty = types.input_type(input_id).filter(|t| !t.is_texture())?;
-        let stored = node.data.values.get(input_id).or_else(|| descriptor.default_value(input_id));
-        let definition = if path.is_empty() { Some(ROOT_ID.to_owned()) } else { self.definition_of(path) };
+        let stored = node
+            .data
+            .values
+            .get(input_id)
+            .or_else(|| descriptor.default_value(input_id));
+        let definition = if path.is_empty() {
+            Some(ROOT_ID.to_owned())
+        } else {
+            self.definition_of(path)
+        };
         if definition.is_some_and(|d| self.uniform_scopes.contains(&d)) {
             let def = descriptor.inputs.iter().find(|i| i.id == input_id);
             if def.is_none_or(|d| input_control(d, ty).is_uniform()) {
@@ -603,16 +746,28 @@ impl<'g> FrameCompiler<'g> {
         parent.doc.node(last)?.definition_ref().map(str::to_owned)
     }
 
-    fn compile_node(&self, path: &[String], node_id: &str, handle: &str) -> Option<CompiledFrameValue> {
+    fn compile_node(
+        &self,
+        path: &[String],
+        node_id: &str,
+        handle: &str,
+    ) -> Option<CompiledFrameValue> {
         let instance = self.sources.instance(path)?;
         let node = instance.doc.node(node_id)?;
         let descriptor = resolve_descriptor(node, self.graph.project);
         let cpu = descriptor.cpu.clone()?;
-        let types = self.graph.resolver.resolve(self.graph.project, node, &instance.bindings);
+        let types = self
+            .graph
+            .resolver
+            .resolve(self.graph.project, node, &instance.bindings);
         let mut inputs = BTreeMap::new();
         let mut operands = BTreeMap::new();
         for id in self.analysis.inputs_read(path, node_id) {
-            let variadic = types.resolved_inputs.iter().find(|i| i.id == id).is_some_and(|d| d.variadic);
+            let variadic = types
+                .resolved_inputs
+                .iter()
+                .find(|i| i.id == id)
+                .is_some_and(|d| d.variadic);
             if variadic {
                 let values: Vec<CompiledFrameValue> = instance
                     .edges_into(node_id)
@@ -634,12 +789,20 @@ impl<'g> FrameCompiler<'g> {
                 .filter(|(_, t)| !t.is_texture())
                 .map(|(id, t)| (id.clone(), t.value_type()))
                 .collect(),
-            output_types: types.resolved_outputs.iter().map(|o| (o.id.clone(), o.ty.value_type())).collect(),
+            output_types: types
+                .resolved_outputs
+                .iter()
+                .map(|o| (o.id.clone(), o.ty.value_type()))
+                .collect(),
             output_type: types.output_type.value_type(),
             resolved_inputs: types.resolved_inputs.clone(),
             inputs,
             operands,
-            present: instance.doc.edges_into(node_id).map(|e| e.target_handle.clone()).collect(),
+            present: instance
+                .doc
+                .edges_into(node_id)
+                .map(|e| e.target_handle.clone())
+                .collect(),
         };
         let loop_id = self.loop_of(path, node_id);
         let dynamic = step
@@ -650,8 +813,17 @@ impl<'g> FrameCompiler<'g> {
         if !dynamic && loop_id.is_none() {
             // Only literals: nothing the runtime knows is read, so it's known now.
             let folded = evaluate_frame(
-                &FrameProgram { steps: vec![FrameStep { loop_id: None, kind: StepKind::Node(Box::new(step)) }] },
-                &FrameEnv { canvas: Size::new(1, 1), pass_size: Size::new(1, 1), ..FrameEnv::default() },
+                &FrameProgram {
+                    steps: vec![FrameStep {
+                        loop_id: None,
+                        kind: StepKind::Node(Box::new(step)),
+                    }],
+                },
+                &FrameEnv {
+                    canvas: Size::new(1, 1),
+                    pass_size: Size::new(1, 1),
+                    ..FrameEnv::default()
+                },
             )
             .outputs
             .into_iter()
@@ -660,23 +832,39 @@ impl<'g> FrameCompiler<'g> {
             .unwrap_or_default();
             let mut state = self.state.borrow_mut();
             for (id, value) in &folded {
-                state.memo.insert(format!("{}|{node_id}|{id}", path_key(path)), Some(literal(value.clone())));
+                state.memo.insert(
+                    format!("{}|{node_id}|{id}", path_key(path)),
+                    Some(literal(value.clone())),
+                );
             }
-            return Some(literal(folded.get(handle).cloned().unwrap_or_else(|| vec![0.0])));
+            return Some(literal(
+                folded.get(handle).cloned().unwrap_or_else(|| vec![0.0]),
+            ));
         }
         let reference = self.push(StepKind::Node(Box::new(step)), loop_id, dynamic, handle);
         Some(self.reference(reference))
     }
 
     /// An output of a repeat zone's boundary: an item's current value, or its final one.
-    fn compile_zone_value(&self, path: &[String], node_id: &str, handle: &str) -> Option<CompiledFrameValue> {
+    fn compile_zone_value(
+        &self,
+        path: &[String],
+        node_id: &str,
+        handle: &str,
+    ) -> Option<CompiledFrameValue> {
         let instance = self.sources.instance(path)?;
-        let zone = instance.zones.zones.get(instance.zones.zone_of_boundary.get(node_id)?)?;
+        let zone = instance
+            .zones
+            .zones
+            .get(instance.zones.zone_of_boundary.get(node_id)?)?;
         let start = instance.doc.node(&zone.input_id)?;
         let loop_id = format!("{}|{}", path_key(path), zone.id);
         if instance.doc.node(node_id)?.is(REPEAT_INPUT) {
             return Some(CompiledFrameValue {
-                input: FrameInput::Loop { id: loop_id, item: handle.to_owned() },
+                input: FrameInput::Loop {
+                    id: loop_id,
+                    item: handle.to_owned(),
+                },
                 dynamic: true,
             });
         }
@@ -686,7 +874,11 @@ impl<'g> FrameCompiler<'g> {
             None => {
                 let output = instance.doc.node(&zone.output_id);
                 let outputs = output.map_or_else(Vec::new, |o| {
-                    self.graph.resolver.resolve(self.graph.project, o, &instance.bindings).resolved_outputs.clone()
+                    self.graph
+                        .resolver
+                        .resolve(self.graph.project, o, &instance.bindings)
+                        .resolved_outputs
+                        .clone()
                 });
                 let iterations = self.input(path, &zone.input_id, ITERATIONS_HANDLE)?;
                 let mut items = Vec::new();
@@ -697,9 +889,17 @@ impl<'g> FrameCompiler<'g> {
                     if ty.is_texture() {
                         return None;
                     }
-                    items.push(RepeatItem { id: item.id, ty, initial: initial.input, next: next.input });
+                    items.push(RepeatItem {
+                        id: item.id,
+                        ty,
+                        initial: initial.input,
+                        next: next.input,
+                    });
                 }
-                let parent = zone.parent.as_ref().map(|p| format!("{}|{p}", path_key(path)));
+                let parent = zone
+                    .parent
+                    .as_ref()
+                    .map(|p| format!("{}|{p}", path_key(path)));
                 let step = RepeatStep {
                     id: loop_id.clone(),
                     iterations: iterations.input,
@@ -711,12 +911,22 @@ impl<'g> FrameCompiler<'g> {
                 index
             }
         };
-        Some(self.reference(FrameRef { step: index, output: handle.to_owned(), component: None }))
+        Some(self.reference(FrameRef {
+            step: index,
+            output: handle.to_owned(),
+            component: None,
+        }))
     }
 }
 
 impl FrameSizing for FrameCompiler<'_> {
-    fn input_arg(&self, path: &[String], node: &str, input: &str, component: usize) -> Option<FrameArg> {
+    fn input_arg(
+        &self,
+        path: &[String],
+        node: &str,
+        input: &str,
+        component: usize,
+    ) -> Option<FrameArg> {
         FrameCompiler::input_arg(self, path, node, input, component)
     }
 }

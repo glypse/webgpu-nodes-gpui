@@ -48,8 +48,15 @@ pub struct ProjectSettings {
 impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
-            canvas: CanvasSettings { width: 1920, height: 1080, follow_preview: false },
-            timing: TimingSettings { fps: 60.0, realtime: true },
+            canvas: CanvasSettings {
+                width: 1920,
+                height: 1080,
+                follow_preview: false,
+            },
+            timing: TimingSettings {
+                fps: 60.0,
+                realtime: true,
+            },
             color_space: ColorSpace::Srgb,
         }
     }
@@ -68,7 +75,9 @@ impl ProjectSettings {
 impl GraphModel {
     /// The project's settings; the defaults when it has none, or ones that can't be used.
     pub fn settings(&self) -> ProjectSettings {
-        let Some(value) = self.project.extra.get(KEY) else { return ProjectSettings::default() };
+        let Some(value) = self.project.extra.get(KEY) else {
+            return ProjectSettings::default();
+        };
         match serde_json::from_value::<ProjectSettings>(value.clone()) {
             Ok(settings) if settings.is_valid() => settings,
             _ => {

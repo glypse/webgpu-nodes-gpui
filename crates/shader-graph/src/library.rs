@@ -14,55 +14,193 @@ const SOURCES: &[(&str, &str)] = &[
     ("std-aspect-uv", include_str!("library/std-aspect-uv.json")),
     ("std-remap", include_str!("library/std-remap.json")),
     ("std-color", include_str!("library/std-color.json")),
-    ("std-linear-rgb-to-xyz", include_str!("library/std-linear-rgb-to-xyz.json")),
-    ("std-xyz-to-linear-rgb", include_str!("library/std-xyz-to-linear-rgb.json")),
-    ("std-xyz-to-oklab", include_str!("library/std-xyz-to-oklab.json")),
-    ("std-oklab-to-xyz", include_str!("library/std-oklab-to-xyz.json")),
-    ("std-linear-rgb-to-oklab", include_str!("library/std-linear-rgb-to-oklab.json")),
-    ("std-oklab-to-linear-rgb", include_str!("library/std-oklab-to-linear-rgb.json")),
-    ("std-oklab-to-oklch", include_str!("library/std-oklab-to-oklch.json")),
-    ("std-oklch-to-oklab", include_str!("library/std-oklch-to-oklab.json")),
-    ("std-linear-rgb-to-oklch", include_str!("library/std-linear-rgb-to-oklch.json")),
-    ("std-oklch-to-linear-rgb", include_str!("library/std-oklch-to-linear-rgb.json")),
-    ("std-in-display-gamut", include_str!("library/std-in-display-gamut.json")),
-    ("std-oklch-gamut-map", include_str!("library/std-oklch-gamut-map.json")),
-    ("std-noise-coordinates", include_str!("library/std-noise-coordinates.json")),
+    (
+        "std-linear-rgb-to-xyz",
+        include_str!("library/std-linear-rgb-to-xyz.json"),
+    ),
+    (
+        "std-xyz-to-linear-rgb",
+        include_str!("library/std-xyz-to-linear-rgb.json"),
+    ),
+    (
+        "std-xyz-to-oklab",
+        include_str!("library/std-xyz-to-oklab.json"),
+    ),
+    (
+        "std-oklab-to-xyz",
+        include_str!("library/std-oklab-to-xyz.json"),
+    ),
+    (
+        "std-linear-rgb-to-oklab",
+        include_str!("library/std-linear-rgb-to-oklab.json"),
+    ),
+    (
+        "std-oklab-to-linear-rgb",
+        include_str!("library/std-oklab-to-linear-rgb.json"),
+    ),
+    (
+        "std-oklab-to-oklch",
+        include_str!("library/std-oklab-to-oklch.json"),
+    ),
+    (
+        "std-oklch-to-oklab",
+        include_str!("library/std-oklch-to-oklab.json"),
+    ),
+    (
+        "std-linear-rgb-to-oklch",
+        include_str!("library/std-linear-rgb-to-oklch.json"),
+    ),
+    (
+        "std-oklch-to-linear-rgb",
+        include_str!("library/std-oklch-to-linear-rgb.json"),
+    ),
+    (
+        "std-in-display-gamut",
+        include_str!("library/std-in-display-gamut.json"),
+    ),
+    (
+        "std-oklch-gamut-map",
+        include_str!("library/std-oklch-gamut-map.json"),
+    ),
+    (
+        "std-noise-coordinates",
+        include_str!("library/std-noise-coordinates.json"),
+    ),
     ("std-hash", include_str!("library/std-hash.json")),
-    ("std-lattice-neighbor", include_str!("library/std-lattice-neighbor.json")),
-    ("std-voronoi-point", include_str!("library/std-voronoi-point.json")),
-    ("std-voronoi-distance", include_str!("library/std-voronoi-distance.json")),
-    ("std-voronoi-texture", include_str!("library/std-voronoi-texture.json")),
-    ("std-fractal-octave", include_str!("library/std-fractal-octave.json")),
-    ("std-fractal-voronoi", include_str!("library/std-fractal-voronoi.json")),
-    ("std-voronoi-nearest", include_str!("library/std-voronoi-nearest.json")),
-    ("std-voronoi-edges", include_str!("library/std-voronoi-edges.json")),
-    ("std-voronoi-radius", include_str!("library/std-voronoi-radius.json")),
-    ("std-voronoi-smooth", include_str!("library/std-voronoi-smooth.json")),
-    ("std-voronoi-bisector", include_str!("library/std-voronoi-bisector.json")),
-    ("std-pad-vector", include_str!("library/std-pad-vector.json")),
-    ("std-component-sum", include_str!("library/std-component-sum.json")),
-    ("std-max-component", include_str!("library/std-max-component.json")),
-    ("std-lattice-gradient", include_str!("library/std-lattice-gradient.json")),
-    ("std-simplex-kernel", include_str!("library/std-simplex-kernel.json")),
-    ("std-opensimplex-orientation", include_str!("library/std-opensimplex-orientation.json")),
-    ("std-gradient-noise-1d", include_str!("library/std-gradient-noise-1d.json")),
-    ("std-opensimplex-2d", include_str!("library/std-opensimplex-2d.json")),
-    ("std-opensimplex-3d-half", include_str!("library/std-opensimplex-3d-half.json")),
-    ("std-opensimplex-3d", include_str!("library/std-opensimplex-3d.json")),
-    ("std-opensimplex-4d", include_str!("library/std-opensimplex-4d.json")),
-    ("std-opensimplex-noise", include_str!("library/std-opensimplex-noise.json")),
-    ("std-noise-distortion", include_str!("library/std-noise-distortion.json")),
-    ("std-octave-shift", include_str!("library/std-octave-shift.json")),
-    ("std-fractal-noise-octaves", include_str!("library/std-fractal-noise-octaves.json")),
-    ("std-fractal-noise", include_str!("library/std-fractal-noise.json")),
+    (
+        "std-lattice-neighbor",
+        include_str!("library/std-lattice-neighbor.json"),
+    ),
+    (
+        "std-voronoi-point",
+        include_str!("library/std-voronoi-point.json"),
+    ),
+    (
+        "std-voronoi-distance",
+        include_str!("library/std-voronoi-distance.json"),
+    ),
+    (
+        "std-voronoi-texture",
+        include_str!("library/std-voronoi-texture.json"),
+    ),
+    (
+        "std-fractal-octave",
+        include_str!("library/std-fractal-octave.json"),
+    ),
+    (
+        "std-fractal-voronoi",
+        include_str!("library/std-fractal-voronoi.json"),
+    ),
+    (
+        "std-voronoi-nearest",
+        include_str!("library/std-voronoi-nearest.json"),
+    ),
+    (
+        "std-voronoi-edges",
+        include_str!("library/std-voronoi-edges.json"),
+    ),
+    (
+        "std-voronoi-radius",
+        include_str!("library/std-voronoi-radius.json"),
+    ),
+    (
+        "std-voronoi-smooth",
+        include_str!("library/std-voronoi-smooth.json"),
+    ),
+    (
+        "std-voronoi-bisector",
+        include_str!("library/std-voronoi-bisector.json"),
+    ),
+    (
+        "std-pad-vector",
+        include_str!("library/std-pad-vector.json"),
+    ),
+    (
+        "std-component-sum",
+        include_str!("library/std-component-sum.json"),
+    ),
+    (
+        "std-max-component",
+        include_str!("library/std-max-component.json"),
+    ),
+    (
+        "std-lattice-gradient",
+        include_str!("library/std-lattice-gradient.json"),
+    ),
+    (
+        "std-simplex-kernel",
+        include_str!("library/std-simplex-kernel.json"),
+    ),
+    (
+        "std-opensimplex-orientation",
+        include_str!("library/std-opensimplex-orientation.json"),
+    ),
+    (
+        "std-gradient-noise-1d",
+        include_str!("library/std-gradient-noise-1d.json"),
+    ),
+    (
+        "std-opensimplex-2d",
+        include_str!("library/std-opensimplex-2d.json"),
+    ),
+    (
+        "std-opensimplex-3d-half",
+        include_str!("library/std-opensimplex-3d-half.json"),
+    ),
+    (
+        "std-opensimplex-3d",
+        include_str!("library/std-opensimplex-3d.json"),
+    ),
+    (
+        "std-opensimplex-4d",
+        include_str!("library/std-opensimplex-4d.json"),
+    ),
+    (
+        "std-opensimplex-noise",
+        include_str!("library/std-opensimplex-noise.json"),
+    ),
+    (
+        "std-noise-distortion",
+        include_str!("library/std-noise-distortion.json"),
+    ),
+    (
+        "std-octave-shift",
+        include_str!("library/std-octave-shift.json"),
+    ),
+    (
+        "std-fractal-noise-octaves",
+        include_str!("library/std-fractal-noise-octaves.json"),
+    ),
+    (
+        "std-fractal-noise",
+        include_str!("library/std-fractal-noise.json"),
+    ),
     ("std-fit-uv", include_str!("library/std-fit-uv.json")),
-    ("std-gaussian-blur-1d", include_str!("library/std-gaussian-blur-1d.json")),
-    ("std-box-blur-1d", include_str!("library/std-box-blur-1d.json")),
-    ("std-gaussian-blur", include_str!("library/std-gaussian-blur.json")),
+    (
+        "std-gaussian-blur-1d",
+        include_str!("library/std-gaussian-blur-1d.json"),
+    ),
+    (
+        "std-box-blur-1d",
+        include_str!("library/std-box-blur-1d.json"),
+    ),
+    (
+        "std-gaussian-blur",
+        include_str!("library/std-gaussian-blur.json"),
+    ),
     ("std-box-blur", include_str!("library/std-box-blur.json")),
-    ("std-box-blur-once", include_str!("library/std-box-blur-once.json")),
-    ("std-gaussian-blur-2d", include_str!("library/std-gaussian-blur-2d.json")),
-    ("std-box-blur-2d", include_str!("library/std-box-blur-2d.json")),
+    (
+        "std-box-blur-once",
+        include_str!("library/std-box-blur-once.json"),
+    ),
+    (
+        "std-gaussian-blur-2d",
+        include_str!("library/std-gaussian-blur-2d.json"),
+    ),
+    (
+        "std-box-blur-2d",
+        include_str!("library/std-box-blur-2d.json"),
+    ),
 ];
 
 /// Separates a library id from its version in a definition ref.
@@ -73,7 +211,10 @@ const VERSION_BYTES: usize = 8;
 #[derive(Debug, Error)]
 pub enum LibraryError {
     #[error("library file {id}.json is not valid: {source}")]
-    Invalid { id: &'static str, source: serde_json::Error },
+    Invalid {
+        id: &'static str,
+        source: serde_json::Error,
+    },
 }
 
 #[derive(Deserialize)]
@@ -120,7 +261,9 @@ pub fn parse_ref(reference: &str) -> Option<(&str, &str)> {
 
 /// Whether `reference` is any version of a library entry.
 pub fn is_library_ref(reference: &str) -> bool {
-    let Some((id, _)) = parse_ref(reference) else { return false };
+    let Some((id, _)) = parse_ref(reference) else {
+        return false;
+    };
     entries().iter().any(|e| e.id == id)
 }
 
@@ -175,7 +318,10 @@ pub fn entry_for_ref(reference: &str) -> Option<&'static LibraryEntry> {
 /// older one).
 pub fn register(project: &mut GraphProject) {
     for entry in entries() {
-        project.definitions.entry(entry.reference.clone()).or_insert_with(|| entry.definition.clone());
+        project
+            .definitions
+            .entry(entry.reference.clone())
+            .or_insert_with(|| entry.definition.clone());
     }
     loop {
         let missing: Vec<(String, &'static LibraryEntry)> = project
@@ -189,7 +335,9 @@ pub fn register(project: &mut GraphProject) {
             return;
         }
         for (reference, entry) in missing {
-            project.definitions.insert(reference, entry.definition.clone());
+            project
+                .definitions
+                .insert(reference, entry.definition.clone());
         }
     }
 }
@@ -219,7 +367,11 @@ fn version_of(definition: &Value) -> String {
         }
     }
     let text = sorted(Value::Object(hashed)).to_string();
-    Sha256::digest(text.as_bytes()).iter().take(VERSION_BYTES).map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .take(VERSION_BYTES)
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// `value` with every object's keys sorted, so its serialisation is canonical.

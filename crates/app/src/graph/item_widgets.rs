@@ -67,7 +67,9 @@ pub fn row(
                 format.id(),
                 Some(format.id() == row.format),
                 Rc::new(move |_, cx| {
-                    super::update_editor(&ed, cx, |e, cx| e.set_render_item_format(&node, &item, format, cx));
+                    super::update_editor(&ed, cx, |e, cx| {
+                        e.set_render_item_format(&node, &item, format, cx)
+                    });
                 }),
             )
         })
@@ -85,7 +87,9 @@ pub fn row(
                 .h(px(22.0 * z))
                 .rounded(px(4.0 * z))
                 .bg(colors.foreground.opacity(0.05))
-                .when(locked, |d| d.opacity(0.5).child(div().absolute().size_full()))
+                .when(locked, |d| {
+                    d.opacity(0.5).child(div().absolute().size_full())
+                })
                 .child(Input::new(&input).h(px(22.0 * z)).text_size(px(12.0 * z))),
         )
         .child(div().w(px(84.0 * z)).flex().child(picker(
@@ -106,12 +110,20 @@ pub fn row(
             z,
             cx,
             move |_, cx| {
-                super::update_editor(&remove, cx, |e, cx| e.remove_render_item(&node_id, &item_id, cx));
+                super::update_editor(&remove, cx, |e, cx| {
+                    e.remove_render_item(&node_id, &item_id, cx)
+                });
             },
         ))
 }
 
-pub fn add(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) -> impl IntoElement {
+pub fn add(
+    node: &str,
+    locked: bool,
+    z: f32,
+    ed: &WeakEntity<Editor>,
+    cx: &App,
+) -> impl IntoElement {
     let (ed, node_id) = (ed.clone(), node.to_owned());
     div().flex().child(picker(
         SharedString::from(format!("add-render-item-{node}")),
@@ -125,9 +137,22 @@ pub fn add(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) 
     ))
 }
 
-pub fn sockets_button(node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) -> impl IntoElement {
+pub fn sockets_button(
+    node: &str,
+    locked: bool,
+    z: f32,
+    ed: &WeakEntity<Editor>,
+    cx: &App,
+) -> impl IntoElement {
     let (ed, node_id) = (ed.clone(), node.to_owned());
-    icon_button(SharedString::from(format!("sockets-{node}")), Icon::new(IconName::Plugs).size(px(14.0 * z)), !locked, z, cx, move |at, cx| {
-        super::update_editor(&ed, cx, |e, cx| e.open_sockets(&node_id, at, cx));
-    })
+    icon_button(
+        SharedString::from(format!("sockets-{node}")),
+        Icon::new(IconName::Plugs).size(px(14.0 * z)),
+        !locked,
+        z,
+        cx,
+        move |at, cx| {
+            super::update_editor(&ed, cx, |e, cx| e.open_sockets(&node_id, at, cx));
+        },
+    )
 }

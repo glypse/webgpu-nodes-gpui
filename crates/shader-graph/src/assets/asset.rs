@@ -105,13 +105,22 @@ impl Asset {
     pub fn is_valid(&self) -> bool {
         let info = self.file_info();
         let finite = self.video().is_none_or(|v| {
-            v.duration.is_finite() && v.duration >= 0.0 && v.frame_rate.is_finite() && v.frame_rate >= 0.0
+            v.duration.is_finite()
+                && v.duration >= 0.0
+                && v.frame_rate.is_finite()
+                && v.frame_rate >= 0.0
         });
         !info.id.is_empty()
             && info.id.len() <= MAX_ID_LENGTH
-            && info.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            && info
+                .id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
             && info.hash.len() == 64
-            && info.hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+            && info
+                .hash
+                .chars()
+                .all(|c| matches!(c, '0'..='9' | 'a'..='f'))
             && valid_side(info.width)
             && valid_side(info.height)
             && finite
@@ -127,11 +136,15 @@ pub(super) fn valid_side(side: u32) -> bool {
 
 /// The extension a bundle path keeps: tame ones only, as lowercase.
 fn extension_of(filename: &str) -> String {
-    let Some(dot) = filename.rfind('.').filter(|d| *d > 0) else { return String::new() };
+    let Some(dot) = filename.rfind('.').filter(|d| *d > 0) else {
+        return String::new();
+    };
     let extension = filename[dot..].to_ascii_lowercase();
     let tame = extension.len() >= 2
         && extension.len() <= 9
-        && extension[1..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+        && extension[1..]
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     if tame { extension } else { String::new() }
 }
 
@@ -161,16 +174,27 @@ fn is_file_name(name: &str) -> bool {
     let tame = extension.is_empty()
         || (extension.len() >= 2
             && extension.len() <= 9
-            && extension[1..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
-    !stem.is_empty() && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') && tame
+            && extension[1..]
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+    !stem.is_empty()
+        && stem
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && tame
 }
 
 /// The kind of asset a file of `mime` type makes, if any. SVG is a
 /// document: opened as one, it runs its scripts.
 pub fn asset_kind_of(mime: &str) -> Option<AssetKind> {
     let (kind, subtype) = mime.split_once('/')?;
-    let valid = subtype.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && subtype.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '+' | '-'));
+    let valid = subtype
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && subtype
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '+' | '-'));
     if !valid || mime == "image/svg+xml" {
         return None;
     }
@@ -208,7 +232,11 @@ pub struct VideoPlayback {
     pub end: VideoEnd,
 }
 
-pub const DEFAULT_PLAYBACK: VideoPlayback = VideoPlayback { start: 0.0, speed: 1.0, end: VideoEnd::Loop };
+pub const DEFAULT_PLAYBACK: VideoPlayback = VideoPlayback {
+    start: 0.0,
+    speed: 1.0,
+    end: VideoEnd::Loop,
+};
 
 impl Default for VideoPlayback {
     fn default() -> Self {
@@ -270,10 +298,19 @@ mod tests {
 
     #[test]
     fn files_assets_by_kind_and_id_keeping_the_extension() {
-        assert_eq!(asset_file(AssetKind::Image, "a1", "Photo.JPG"), "assets/images/a1.jpg");
+        assert_eq!(
+            asset_file(AssetKind::Image, "a1", "Photo.JPG"),
+            "assets/images/a1.jpg"
+        );
         assert_eq!(asset_file(AssetKind::Video, "v", "clip"), "assets/videos/v");
-        assert_eq!(asset_file(AssetKind::Image, "a", "x/../../evil"), "assets/images/a");
-        assert_eq!(asset_file(AssetKind::Image, "a", "b.tar/../../etc"), "assets/images/a");
+        assert_eq!(
+            asset_file(AssetKind::Image, "a", "x/../../evil"),
+            "assets/images/a"
+        );
+        assert_eq!(
+            asset_file(AssetKind::Image, "a", "b.tar/../../etc"),
+            "assets/images/a"
+        );
     }
 
     #[test]
@@ -319,10 +356,26 @@ mod tests {
         let loops = DEFAULT_PLAYBACK;
         assert_eq!(video_time(&loops, 0.5, 2.0), Some(0.5));
         assert_eq!(video_time(&loops, 2.5, 2.0), Some(0.5));
-        assert_eq!(video_time(&VideoPlayback { start: 1.0, ..loops }, 0.5, 2.0), None);
-        let hold = VideoPlayback { end: VideoEnd::Hold, ..loops };
+        assert_eq!(
+            video_time(
+                &VideoPlayback {
+                    start: 1.0,
+                    ..loops
+                },
+                0.5,
+                2.0
+            ),
+            None
+        );
+        let hold = VideoPlayback {
+            end: VideoEnd::Hold,
+            ..loops
+        };
         assert_eq!(video_time(&hold, 5.0, 2.0), Some(2.0));
-        let transparent = VideoPlayback { end: VideoEnd::Transparent, ..loops };
+        let transparent = VideoPlayback {
+            end: VideoEnd::Transparent,
+            ..loops
+        };
         assert_eq!(video_time(&transparent, 5.0, 2.0), None);
         assert_eq!(video_time(&loops, 3.0, 0.0), Some(0.0));
     }

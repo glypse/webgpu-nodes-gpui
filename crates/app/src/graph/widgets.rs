@@ -3,21 +3,21 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Image, ImageSource, ObjectFit, Subscription,
-    WeakEntity, Window, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
-    SharedString, StyledImage as _, Styled as _, div, img, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Entity, Image, ImageSource, InteractiveElement as _,
+    IntoElement, MouseButton, ObjectFit, ParentElement as _, SharedString, Styled as _,
+    StyledImage as _, Subscription, WeakEntity, Window, div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
+use shader_graph::assets::{Asset, AssetKind, DEFAULT_PLAYBACK, VideoEnd, VideoPlayback};
 use shader_graph::color::{ColorMode, ColorSpace as DisplayGamut, Rgba};
 use shader_graph::curve::{CurvePoint, linear_curve};
-use shader_graph::assets::{Asset, AssetKind, DEFAULT_PLAYBACK, VideoEnd, VideoPlayback};
-use shader_graph::graph::{ColorSpace, GraphModel, GraphNode, GraphProject, GroupWidget, PlaybackChange};
+use shader_graph::graph::{
+    ColorSpace, GraphModel, GraphNode, GraphProject, GroupWidget, PlaybackChange,
+};
 use shader_graph::nodes::{
     RAMP_HUE, RAMP_INTERPOLATION, RAMP_SPACE, color_ramp_stops, index_switch_cases,
 };
-use shader_graph::ramp::{
-    RAMP_HUES, RAMP_INTERPOLATIONS, RAMP_SPACES, RampModes,
-};
+use shader_graph::ramp::{RAMP_HUES, RAMP_INTERPOLATIONS, RAMP_SPACES, RampModes};
 use shader_graph::types::{
     InputValue, NodeData, NodeWidget, ScalarValue, VectorValue, WgslType, enum_value,
 };
@@ -34,7 +34,12 @@ use crate::editor::{Editor, ListItem, OnSelect};
 use crate::project::AssetFiles;
 
 /// What a linked ramp stop is drawn as: its colour is only known in the shader.
-const UNKNOWN_STOP: Rgba = Rgba { r: 0.214, g: 0.214, b: 0.214, a: 1.0 };
+const UNKNOWN_STOP: Rgba = Rgba {
+    r: 0.214,
+    g: 0.214,
+    b: 0.214,
+    a: 1.0,
+};
 
 /// One row of a Render Texture's items.
 #[derive(Clone)]
@@ -51,8 +56,14 @@ pub enum WidgetView {
     Ramp(Entity<RampEditor>),
     Color(Entity<ColorWheels>),
     Cases(u32),
-    Items { rows: Vec<ItemRow>, can_remove: bool },
-    Code { signature: String, text: String },
+    Items {
+        rows: Vec<ItemRow>,
+        can_remove: bool,
+    },
+    Code {
+        signature: String,
+        text: String,
+    },
     Asset(AssetView),
 }
 
@@ -94,22 +105,32 @@ impl ItemNameField {
             input
         });
         let (node, item) = (node.to_owned(), item.to_owned());
-        let subscription = cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| {
-            if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                return;
-            }
-            let name = input.read(cx).value().to_string();
-            let accepted = guard::guard("item name", || {
-                ed.update(cx, |editor, cx| editor.rename_render_item(&node, &item, &name, cx))
-            })
-            .and_then(Result::ok)
-            .unwrap_or(true);
-            if !accepted {
-                let stored = this.synced.clone();
-                input.update(cx, |input, cx| input.set_value(stored, window, cx));
-            }
-        });
-        Self { input, synced: label.to_owned(), _subscription: subscription }
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            move |this, input, event: &InputEvent, window, cx| {
+                if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    return;
+                }
+                let name = input.read(cx).value().to_string();
+                let accepted = guard::guard("item name", || {
+                    ed.update(cx, |editor, cx| {
+                        editor.rename_render_item(&node, &item, &name, cx)
+                    })
+                })
+                .and_then(Result::ok)
+                .unwrap_or(true);
+                if !accepted {
+                    let stored = this.synced.clone();
+                    input.update(cx, |input, cx| input.set_value(stored, window, cx));
+                }
+            },
+        );
+        Self {
+            input,
+            synced: label.to_owned(),
+            _subscription: subscription,
+        }
     }
 
     /// Puts a name the model changed into the field; typing that hasn't been submitted is kept.
@@ -117,7 +138,8 @@ impl ItemNameField {
         if self.synced != label {
             self.synced = label.to_owned();
             let label = label.to_owned();
-            self.input.update(cx, |input, cx| input.set_value(label, window, cx));
+            self.input
+                .update(cx, |input, cx| input.set_value(label, window, cx));
         }
     }
 }
@@ -131,26 +153,37 @@ pub struct CodeField {
 }
 
 impl CodeField {
-    pub(super) fn new(node: &str, text: &str, ed: WeakEntity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(
+        node: &str,
+        text: &str,
+        ed: WeakEntity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let area = cx.new(|cx| new_text_area("", text, window, cx));
         let node = node.to_owned();
-        let subscription = cx.subscribe_in(&area, window, move |_, area, event: &InputEvent, _, cx| {
-            if !matches!(event, InputEvent::Change | InputEvent::Blur) {
-                return;
-            }
-            let value = area.read(cx).value().to_string();
-            let is_change = matches!(event, InputEvent::Change);
-            guard::guard("code editor", || {
-                ed.update(cx, |editor, cx| {
-                    if is_change {
-                        editor.code_typed(&node, value, cx);
-                    } else {
-                        editor.code_commit(&node, value, cx);
-                    }
-                })
+        let subscription =
+            cx.subscribe_in(&area, window, move |_, area, event: &InputEvent, _, cx| {
+                if !matches!(event, InputEvent::Change | InputEvent::Blur) {
+                    return;
+                }
+                let value = area.read(cx).value().to_string();
+                let is_change = matches!(event, InputEvent::Change);
+                guard::guard("code editor", || {
+                    ed.update(cx, |editor, cx| {
+                        if is_change {
+                            editor.code_typed(&node, value, cx);
+                        } else {
+                            editor.code_commit(&node, value, cx);
+                        }
+                    })
+                });
             });
-        });
-        Self { area, synced: text.to_owned(), _subscription: subscription }
+        Self {
+            area,
+            synced: text.to_owned(),
+            _subscription: subscription,
+        }
     }
 
     pub(super) fn sync(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -158,7 +191,8 @@ impl CodeField {
             self.synced = text.to_owned();
             if self.area.read(cx).value().as_ref() != text {
                 let text = text.to_owned();
-                self.area.update(cx, |area, cx| area.set_value(text, window, cx));
+                self.area
+                    .update(cx, |area, cx| area.set_value(text, window, cx));
             }
         }
     }
@@ -189,16 +223,27 @@ pub fn node_data_mut<'a>(project: &'a mut GraphProject, node: &str) -> Option<&'
 }
 
 fn stored<'a>(node: &'a GraphNode, defaults: &'a NodeData, input: &str) -> Option<&'a InputValue> {
-    node.data.values.get(input).or_else(|| defaults.values.get(input))
+    node.data
+        .values
+        .get(input)
+        .or_else(|| defaults.values.get(input))
 }
 
 fn linked_inputs(model: &GraphModel, node: &str) -> BTreeSet<String> {
-    model.active_document().edges_into(node).map(|e| e.target_handle.clone()).collect()
+    model
+        .active_document()
+        .edges_into(node)
+        .map(|e| e.target_handle.clone())
+        .collect()
 }
 
 fn pick(value: Option<&InputValue>, list: &[(i64, &str)]) -> i64 {
     let value = value.map_or(0, InputValue::as_i64);
-    list.iter().map(|(v, _)| *v).find(|v| *v == value).or_else(|| list.first().map(|(v, _)| *v)).unwrap_or(0)
+    list.iter()
+        .map(|(v, _)| *v)
+        .find(|v| *v == value)
+        .or_else(|| list.first().map(|(v, _)| *v))
+        .unwrap_or(0)
 }
 
 /// How a colour widget reads its node: the mode, the inputs holding the
@@ -215,7 +260,12 @@ pub fn color_binding(model: &GraphModel, node: &GraphNode) -> Option<ColorBindin
     let Some(NodeWidget::Color(GroupWidget::Color { mode, modes })) = &descriptor.widget else {
         return None;
     };
-    let variants = match descriptor.inputs.iter().find(|i| i.id == *mode).and_then(|i| i.control.as_ref()) {
+    let variants = match descriptor
+        .inputs
+        .iter()
+        .find(|i| i.id == *mode)
+        .and_then(|i| i.control.as_ref())
+    {
         Some(shader_graph::types::InputControl::Enum { variants }) => variants.clone(),
         _ => Vec::new(),
     };
@@ -233,7 +283,14 @@ pub fn color_binding(model: &GraphModel, node: &GraphNode) -> Option<ColorBindin
 }
 
 fn rgba_of(value: Option<&InputValue>) -> Rgba {
-    let Some(value) = value else { return Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 } };
+    let Some(value) = value else {
+        return Rgba {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+    };
     Rgba {
         r: value.component(0),
         g: value.component(1),
@@ -280,11 +337,16 @@ impl Widgets {
             .or_insert_with(|| {
                 let entity = cx.new(|_| ColorWheels::new(ColorMode::Rgb, rgb));
                 let (node, input) = (node.to_owned(), input.to_owned());
-                cx.subscribe(&entity, move |editor: &mut Editor, _, event: &ColorWheelsEvent, cx| {
-                    let ColorWheelsEvent::Change(next) = event;
-                    let next = *next;
-                    guard::guard("wheel input", || editor.set_wheel_input(&node, &input, next, cx));
-                })
+                cx.subscribe(
+                    &entity,
+                    move |editor: &mut Editor, _, event: &ColorWheelsEvent, cx| {
+                        let ColorWheelsEvent::Change(next) = event;
+                        let next = *next;
+                        guard::guard("wheel input", || {
+                            editor.set_wheel_input(&node, &input, next, cx)
+                        });
+                    },
+                )
                 .detach();
                 entity
             })
@@ -306,7 +368,8 @@ impl Widgets {
         }
         let format = image_format(&asset.file_info().mime)?;
         let image = Arc::new(Image::from_bytes(format, bytes.to_vec()));
-        self.thumbnails.insert(asset.id().to_owned(), (bytes.clone(), image.clone()));
+        self.thumbnails
+            .insert(asset.id().to_owned(), (bytes.clone(), image.clone()));
         Some(image)
     }
 
@@ -335,11 +398,16 @@ impl Widgets {
                     .or_insert_with(|| {
                         let entity = cx.new(|cx| CurveEditor::new(points.clone(), cx));
                         let node = id.to_owned();
-                        cx.subscribe(&entity, move |editor: &mut Editor, _, event: &CurveEditorEvent, cx| {
-                            let CurveEditorEvent::Change(points) = event;
-                            let points = points.clone();
-                            guard::guard("curve widget", || editor.set_curve(&node, points, cx));
-                        })
+                        cx.subscribe(
+                            &entity,
+                            move |editor: &mut Editor, _, event: &CurveEditorEvent, cx| {
+                                let CurveEditorEvent::Change(points) = event;
+                                let points = points.clone();
+                                guard::guard("curve widget", || {
+                                    editor.set_curve(&node, points, cx)
+                                });
+                            },
+                        )
                         .detach();
                         entity
                     })
@@ -366,7 +434,10 @@ impl Widgets {
                     })
                     .collect();
                 let modes = RampModes {
-                    interpolation: pick(stored(node, defaults, RAMP_INTERPOLATION), &RAMP_INTERPOLATIONS),
+                    interpolation: pick(
+                        stored(node, defaults, RAMP_INTERPOLATION),
+                        &RAMP_INTERPOLATIONS,
+                    ),
                     space: pick(stored(node, defaults, RAMP_SPACE), &RAMP_SPACES),
                     hue: pick(stored(node, defaults, RAMP_HUE), &RAMP_HUES),
                 };
@@ -375,20 +446,30 @@ impl Widgets {
                     .iter()
                     .find(|o| o.id == "color")
                     .is_some_and(|o| o.ty == WgslType::Vec4f);
-                let stale = self.ramps.get(id).is_some_and(|(g, a, _)| *g != gamut || *a != alpha);
+                let stale = self
+                    .ramps
+                    .get(id)
+                    .is_some_and(|(g, a, _)| *g != gamut || *a != alpha);
                 if stale {
                     self.ramps.remove(id);
                 }
                 let (_, _, entity) = self.ramps.entry(id.to_owned()).or_insert_with(|| {
                     let entity = cx.new(|cx| {
-                        RampEditor::new(stops.clone(), colors.clone(), modes, cx).alpha(alpha).gamut(gamut)
+                        RampEditor::new(stops.clone(), colors.clone(), modes, cx)
+                            .alpha(alpha)
+                            .gamut(gamut)
                     });
                     let node = id.to_owned();
-                    cx.subscribe(&entity, move |editor: &mut Editor, _, event: &RampEditorEvent, cx| {
-                        let RampEditorEvent::Change { stops, added } = event;
-                        let (stops, added) = (stops.clone(), added.clone());
-                        guard::guard("ramp widget", || editor.set_ramp(&node, stops, added, cx));
-                    })
+                    cx.subscribe(
+                        &entity,
+                        move |editor: &mut Editor, _, event: &RampEditorEvent, cx| {
+                            let RampEditorEvent::Change { stops, added } = event;
+                            let (stops, added) = (stops.clone(), added.clone());
+                            guard::guard("ramp widget", || {
+                                editor.set_ramp(&node, stops, added, cx)
+                            });
+                        },
+                    )
                     .detach();
                     (gamut, alpha, entity)
                 });
@@ -407,11 +488,16 @@ impl Widgets {
                     .or_insert_with(|| {
                         let entity = cx.new(|_| ColorWheels::new(binding.mode, binding.components));
                         let node = id.to_owned();
-                        cx.subscribe(&entity, move |editor: &mut Editor, _, event: &ColorWheelsEvent, cx| {
-                            let ColorWheelsEvent::Change(next) = event;
-                            let next = *next;
-                            guard::guard("color widget", || editor.set_color_widget(&node, next, cx));
-                        })
+                        cx.subscribe(
+                            &entity,
+                            move |editor: &mut Editor, _, event: &ColorWheelsEvent, cx| {
+                                let ColorWheelsEvent::Change(next) = event;
+                                let next = *next;
+                                guard::guard("color widget", || {
+                                    editor.set_color_widget(&node, next, cx)
+                                });
+                            },
+                        )
                         .detach();
                         entity
                     })
@@ -432,7 +518,10 @@ impl Widgets {
                     .map(|item| ItemRow {
                         id: item.id.clone(),
                         label: item.label.clone(),
-                        format: item.format.clone().unwrap_or_else(|| "rgba16float".to_owned()),
+                        format: item
+                            .format
+                            .clone()
+                            .unwrap_or_else(|| "rgba16float".to_owned()),
                     })
                     .collect();
                 Some(WidgetView::Items { rows, can_remove })
@@ -441,7 +530,8 @@ impl Widgets {
                 let kind = *kind;
                 let asset = node.data.asset.as_deref().and_then(|a| model.asset(a));
                 let current = asset.map(|a| (a.id().to_owned(), a.name().to_owned()));
-                let thumbnail = match (asset, node.data.asset.as_deref().and_then(|a| files.get(a))) {
+                let thumbnail = match (asset, node.data.asset.as_deref().and_then(|a| files.get(a)))
+                {
                     (Some(asset), Some(bytes)) => self.thumbnail(asset, bytes),
                     _ => None,
                 };
@@ -462,13 +552,20 @@ impl Widgets {
             NodeWidget::Code => {
                 let sockets = shader_graph::nodes::custom_sockets(&node.data);
                 let labels = |list: &[shader_graph::types::HandleDef]| {
-                    list.iter().map(|s| s.label.clone()).collect::<Vec<_>>().join(", ")
+                    list.iter()
+                        .map(|s| s.label.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
                 let outputs = labels(&sockets.outputs);
                 let signature = format!(
                     "({}) → {}",
                     labels(&sockets.inputs),
-                    if outputs.is_empty() { "nothing".to_owned() } else { outputs }
+                    if outputs.is_empty() {
+                        "nothing".to_owned()
+                    } else {
+                        outputs
+                    }
                 );
                 let text = node.data.code.clone().unwrap_or_default();
                 Some(WidgetView::Code { signature, text })
@@ -508,7 +605,12 @@ pub fn render(
         }
         WidgetView::Cases(count) => {
             let count = *count;
-            let button = |id: &'static str, label: IconName, enabled: bool, next: i64, node: String, ed: WeakEntity<Editor>| {
+            let button = |id: &'static str,
+                          label: IconName,
+                          enabled: bool,
+                          next: i64,
+                          node: String,
+                          ed: WeakEntity<Editor>| {
                 div()
                     .id(id)
                     .flex()
@@ -536,18 +638,45 @@ pub fn render(
                         .flex_1()
                         .text_size(px(12.0 * z))
                         .text_color(c.muted_foreground)
-                        .child(format!("{count} {}", if count == 1 { "case" } else { "cases" })),
+                        .child(format!(
+                            "{count} {}",
+                            if count == 1 { "case" } else { "cases" }
+                        )),
                 )
-                .child(button("fewer-cases", IconName::Minus, !locked && count > 1, i64::from(count) - 1, node.to_owned(), ed.clone()))
-                .child(button("more-cases", IconName::Plus, !locked, i64::from(count) + 1, node.to_owned(), ed.clone()))
+                .child(button(
+                    "fewer-cases",
+                    IconName::Minus,
+                    !locked && count > 1,
+                    i64::from(count) - 1,
+                    node.to_owned(),
+                    ed.clone(),
+                ))
+                .child(button(
+                    "more-cases",
+                    IconName::Plus,
+                    !locked,
+                    i64::from(count) + 1,
+                    node.to_owned(),
+                    ed.clone(),
+                ))
                 .into_any_element()
         }
         WidgetView::Items { rows, can_remove } => {
             let mut list = div().flex().flex_col().gap(px(4.0 * z));
             for row in rows {
-                list = list.child(item_widgets::row(row, node, *can_remove && !locked, locked, z, ed, window, cx));
+                list = list.child(item_widgets::row(
+                    row,
+                    node,
+                    *can_remove && !locked,
+                    locked,
+                    z,
+                    ed,
+                    window,
+                    cx,
+                ));
             }
-            list.child(item_widgets::add(node, locked, z, ed, cx)).into_any_element()
+            list.child(item_widgets::add(node, locked, z, ed, cx))
+                .into_any_element()
         }
         WidgetView::Asset(asset) => asset_body(asset, node, locked, z, ed, cx),
         WidgetView::Code { signature, text } => {
@@ -610,13 +739,26 @@ fn field_row(label: &'static str, child: impl IntoElement, z: f32, muted: gpui::
         .flex()
         .items_center()
         .gap(px(6.0 * z))
-        .child(div().w(px(44.0 * z)).text_size(px(12.0 * z)).text_color(muted).child(label))
+        .child(
+            div()
+                .w(px(44.0 * z))
+                .text_size(px(12.0 * z))
+                .text_color(muted)
+                .child(label),
+        )
         .child(div().flex_1().min_w_0().child(child))
 }
 
 /// The body of an Image or Video node: the preview of its asset, the asset picker and,
 /// for a video, its playback fields.
-fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntity<Editor>, cx: &App) -> AnyElement {
+fn asset_body(
+    view: &AssetView,
+    node: &str,
+    locked: bool,
+    z: f32,
+    ed: &WeakEntity<Editor>,
+    cx: &App,
+) -> AnyElement {
     let c = &cx.theme().colors;
     let (muted, muted_fg) = (c.muted, c.muted_foreground);
     let icon = match view.kind {
@@ -637,7 +779,9 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
             .size_full()
             .object_fit(ObjectFit::Contain)
             .into_any_element(),
-        (None, _, _) => Icon::new(IconName::Image).size(px(24.0 * z)).into_any_element(),
+        (None, _, _) => Icon::new(IconName::Image)
+            .size(px(24.0 * z))
+            .into_any_element(),
         (Some(_), None, false) => Icon::new(icon).size(px(24.0 * z)).into_any_element(),
     };
     let preview = div()
@@ -653,7 +797,10 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
         .child(preview);
 
     let current_id = view.current.as_ref().map(|(id, _)| id.clone());
-    let label = view.current.as_ref().map_or_else(|| "None".to_owned(), |(_, name)| name.clone());
+    let label = view
+        .current
+        .as_ref()
+        .map_or_else(|| "None".to_owned(), |(_, name)| name.clone());
     let mut choices = vec![ListItem::new(
         "None",
         Some(current_id.is_none()),
@@ -692,12 +839,18 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
         let playback = view.playback;
         let video_field = |field: &'static str, value: f64, change: fn(f64) -> PlaybackChange| {
             let (ed, node) = (ed.clone(), node.to_owned());
-            Scrub::new(SharedString::from(format!("video-{field}-{node}")), value, z)
-                .stack(Stack::Single)
-                .readonly(locked)
-                .on_change(move |v, edit, _, cx| {
-                    super::update_editor(&ed, cx, |e, cx| e.set_video_playback(&node, change(v), edit, cx));
-                })
+            Scrub::new(
+                SharedString::from(format!("video-{field}-{node}")),
+                value,
+                z,
+            )
+            .stack(Stack::Single)
+            .readonly(locked)
+            .on_change(move |v, edit, _, cx| {
+                super::update_editor(&ed, cx, |e, cx| {
+                    e.set_video_playback(&node, change(v), edit, cx)
+                });
+            })
         };
         let end_items: Vec<ListItem> = VIDEO_ENDS
             .iter()
@@ -708,7 +861,15 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
                     Some(end == playback.end),
                     Rc::new(move |_, cx| {
                         super::update_editor(&ed, cx, |e, cx| {
-                            e.set_video_playback(&node, PlaybackChange { end: Some(end), ..Default::default() }, Edit::Commit, cx)
+                            e.set_video_playback(
+                                &node,
+                                PlaybackChange {
+                                    end: Some(end),
+                                    ..Default::default()
+                                },
+                                Edit::Commit,
+                                cx,
+                            )
                         });
                     }),
                 )
@@ -729,17 +890,28 @@ fn asset_body(view: &AssetView, node: &str, locked: bool, z: f32, ed: &WeakEntit
         body = body
             .child(field_row(
                 "Start",
-                video_field("start", playback.start, |v| PlaybackChange { start: Some(v), ..Default::default() }),
+                video_field("start", playback.start, |v| PlaybackChange {
+                    start: Some(v),
+                    ..Default::default()
+                }),
                 z,
                 muted_fg,
             ))
             .child(field_row(
                 "Speed",
-                video_field("speed", playback.speed, |v| PlaybackChange { speed: Some(v), ..Default::default() }),
+                video_field("speed", playback.speed, |v| PlaybackChange {
+                    speed: Some(v),
+                    ..Default::default()
+                }),
                 z,
                 muted_fg,
             ))
-            .child(field_row("After end", end_picker.into_any_element(), z, muted_fg));
+            .child(field_row(
+                "After end",
+                end_picker.into_any_element(),
+                z,
+                muted_fg,
+            ));
     }
     div()
         .px(px(12.0 * z))
@@ -760,6 +932,8 @@ fn import_choice(ed: &WeakEntity<Editor>, node: &str) -> OnSelect {
 fn asset_choice(ed: &WeakEntity<Editor>, node: &str, asset: Option<String>) -> OnSelect {
     let (ed, node) = (ed.clone(), node.to_owned());
     Rc::new(move |_, cx| {
-        super::update_editor(&ed, cx, |e, cx| e.set_node_asset(&node, asset.as_deref(), cx));
+        super::update_editor(&ed, cx, |e, cx| {
+            e.set_node_asset(&node, asset.as_deref(), cx)
+        });
     })
 }

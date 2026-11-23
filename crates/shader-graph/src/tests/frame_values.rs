@@ -29,7 +29,10 @@ fn env() -> FrameEnv<'static> {
 }
 
 fn graph(model: &GraphModel) -> CodegenGraph<'_> {
-    CodegenGraph { project: model.project(), resolver: model.resolver() }
+    CodegenGraph {
+        project: model.project(),
+        resolver: model.resolver(),
+    }
 }
 
 fn compiler<'g>(model: &'g GraphModel, scopes: &[&str]) -> Rc<FrameCompiler<'g>> {
@@ -101,13 +104,25 @@ fn maths_on_time_unlinked_values_and_canvas_sizes_are_frame_values() {
 #[test]
 fn what_differs_per_pixel_is_excluded_with_a_reason() {
     let model = model_for(
-        vec![node("uv", "uv"), node("x", "separate-vector"), node("time", "time"), node("sum", "add")],
-        &[("uv", "uv", "x", "v"), ("x", "x", "sum", "operands"), ("time", "seconds", "sum", "operands")],
+        vec![
+            node("uv", "uv"),
+            node("x", "separate-vector"),
+            node("time", "time"),
+            node("sum", "add"),
+        ],
+        &[
+            ("uv", "uv", "x", "v"),
+            ("x", "x", "sum", "operands"),
+            ("time", "seconds", "sum", "operands"),
+        ],
     );
     let frame = analysis(&model);
     assert!(!frame.is_frame_value(&[], "x", "x"));
     assert!(!frame.is_frame_value(&[], "sum", "result"));
-    assert_eq!(frame.reason(&[], "sum", "result").as_deref(), Some("UV is computed for each pixel."));
+    assert_eq!(
+        frame.reason(&[], "sum", "result").as_deref(),
+        Some("UV is computed for each pixel.")
+    );
     assert!(!frame.is_frame_input(&[], "sum", "operands"));
 }
 
@@ -133,9 +148,15 @@ fn groups_pass_through_as_the_inputs_they_are_given() {
             instance("b", "increment", Default::default()),
             instance("c", "increment", Default::default()),
         ],
-        &[("time", "seconds", "a", "a"), ("uv", "uv", "x", "v"), ("x", "x", "b", "a")],
+        &[
+            ("time", "seconds", "a", "a"),
+            ("uv", "uv", "x", "v"),
+            ("x", "x", "b", "a"),
+        ],
     );
-    project.definitions.insert("increment".to_owned(), increment());
+    project
+        .definitions
+        .insert("increment".to_owned(), increment());
     let model = GraphModel::new(project);
     let frame = analysis(&model);
     assert!(frame.is_frame_value(&[], "a", "b"));
@@ -154,7 +175,10 @@ fn repeat_zone(model: &mut GraphModel, op: &str) -> (String, String, String, Str
     let item = model.zone_items_of(&zone)[0].id.clone();
     let next = model.add_node(op, AT).expect("adds");
     let mut link = |s: &str, sh: &str, t: &str, th: &str| {
-        assert!(model.connect(crate::graph::Connection::new(s, sh, t, th)), "{s}.{sh} -> {t}.{th}");
+        assert!(
+            model.connect(crate::graph::Connection::new(s, sh, t, th)),
+            "{s}.{sh} -> {t}.{th}"
+        );
     };
     link(&zone, &item, &next, "operands");
     link(&zone, "iteration", &next, "operands");
@@ -166,7 +190,9 @@ fn repeat_zone(model: &mut GraphModel, op: &str) -> (String, String, String, Str
 fn a_repeat_zone_over_frame_values_and_what_is_in_it_are_frame_values() {
     let mut model = model_for(vec![node("time", "time")], &[]);
     let (zone, output, item, next) = repeat_zone(&mut model, "mul");
-    model.connect(crate::graph::Connection::new("time", "seconds", &zone, &item));
+    model.connect(crate::graph::Connection::new(
+        "time", "seconds", &zone, &item,
+    ));
     let frame = analysis(&model);
     assert!(frame.is_frame_value(&[], &output, &item));
     assert!(frame.is_frame_value(&[], &next, "result"));
@@ -174,7 +200,10 @@ fn a_repeat_zone_over_frame_values_and_what_is_in_it_are_frame_values() {
 
 #[test]
 fn a_repeat_zone_with_a_value_per_pixel_in_it_is_excluded() {
-    let mut model = model_for(vec![node("uv", "uv"), node("sep", "separate-vector")], &[("uv", "uv", "sep", "v")]);
+    let mut model = model_for(
+        vec![node("uv", "uv"), node("sep", "separate-vector")],
+        &[("uv", "uv", "sep", "v")],
+    );
     let zone = model.create_zone(ZoneKind::Repeat, AT).expect("creates");
     let output = model.zone_nodes(&zone).expect("paired").output.id.clone();
     let item = model.zone_items_of(&zone)[0].id.clone();
@@ -195,43 +224,78 @@ fn a_repeat_zone_with_a_value_per_pixel_in_it_is_excluded() {
 #[test]
 fn links_tell_frame_values_from_per_pixel_ones_and_refuse_those_into_inputs_needing_one() {
     let model = model_for(
-        vec![node("time", "time"), node("uv", "uv"), node("x", "separate-vector"), node("vid", "video")],
-        &[("time", "seconds", "vid", "time"), ("uv", "uv", "x", "v"), ("x", "x", "vid", "time")],
+        vec![
+            node("time", "time"),
+            node("uv", "uv"),
+            node("x", "separate-vector"),
+            node("vid", "video"),
+        ],
+        &[
+            ("time", "seconds", "vid", "time"),
+            ("uv", "uv", "x", "v"),
+            ("x", "x", "vid", "time"),
+        ],
     );
     // Two links into one input: the second is what a user could drop on it.
     let frame = analysis(&model);
     let link = |from: &str| {
-        let e = model.root().edges.iter().find(|e| e.source == from && e.target == "vid").expect("linked");
+        let e = model
+            .root()
+            .edges
+            .iter()
+            .find(|e| e.source == from && e.target == "vid")
+            .expect("linked");
         frame.link(&[], e)
     };
     assert_eq!(link("time"), Some(FrameLink::Frame));
     assert_eq!(
         link("x"),
         Some(FrameLink::Invalid {
-            reason: "Needs a value that's the same for the whole frame: UV is computed for each pixel.".into()
+            reason:
+                "Needs a value that's the same for the whole frame: UV is computed for each pixel."
+                    .into()
         })
     );
     // An input needing no frame value takes a per-pixel one as it always did.
     let plain = model_for(
-        vec![node("uv", "uv"), node("x", "separate-vector"), node("here", "sin")],
+        vec![
+            node("uv", "uv"),
+            node("x", "separate-vector"),
+            node("here", "sin"),
+        ],
         &[("uv", "uv", "x", "v"), ("x", "x", "here", "e")],
     );
     let frame = analysis(&plain);
-    let e = plain.root().edges.iter().find(|e| e.target == "here").expect("linked");
+    let e = plain
+        .root()
+        .edges
+        .iter()
+        .find(|e| e.target == "here")
+        .expect("linked");
     assert_eq!(frame.link(&[], e), None);
 }
 
 #[test]
 fn programs_evaluate_maths_on_time() {
     let model = model_for(
-        vec![node("time", "time"), with_values(node("two", "declare"), &x(2.0)), node("double", "mul")],
-        &[("time", "seconds", "double", "operands"), ("two", "value", "double", "operands")],
+        vec![
+            node("time", "time"),
+            with_values(node("two", "declare"), &x(2.0)),
+            node("double", "mul"),
+        ],
+        &[
+            ("time", "seconds", "double", "operands"),
+            ("two", "value", "double", "operands"),
+        ],
     );
     let frame = compiler(&model, &[]);
     let arg = frame.arg(&[], "double", "result", 0).expect("compiles");
     let values = evaluate_frame(&frame.program(), &env());
     assert_eq!(values.arg(&arg), 6.0);
-    assert_eq!(compiler(&model, &[]).arg(&[], "double", "result", 0), Some(arg));
+    assert_eq!(
+        compiler(&model, &[]).arg(&[], "double", "result", 0),
+        Some(arg)
+    );
 }
 
 #[test]
@@ -242,25 +306,50 @@ fn programs_fold_what_reads_only_literals() {
             with_values(node("b", "declare"), &x(2.0)),
             node("sum", "add"),
         ],
-        &[("a", "value", "sum", "operands"), ("b", "value", "sum", "operands")],
+        &[
+            ("a", "value", "sum", "operands"),
+            ("b", "value", "sum", "operands"),
+        ],
     );
     let frame = compiler(&model, &[]);
-    assert_eq!(frame.arg(&[], "sum", "result", 0), Some(FrameArg::Literal(3.5)));
+    assert_eq!(
+        frame.arg(&[], "sum", "result", 0),
+        Some(FrameArg::Literal(3.5))
+    );
     assert!(frame.program().steps.is_empty());
 }
 
 #[test]
 fn programs_read_unlinked_inputs_as_uniforms_in_the_scopes_asked() {
     let model = model_for(
-        vec![node("time", "time"), with_values(node("d", "declare"), &x(4.0)), node("sum", "add")],
-        &[("time", "seconds", "sum", "operands"), ("d", "value", "sum", "operands")],
+        vec![
+            node("time", "time"),
+            with_values(node("d", "declare"), &x(4.0)),
+            node("sum", "add"),
+        ],
+        &[
+            ("time", "seconds", "sum", "operands"),
+            ("d", "value", "sum", "operands"),
+        ],
     );
     let frame = compiler(&model, &[ROOT_ID]);
     let arg = frame.arg(&[], "sum", "result", 0).expect("compiles");
     let uniforms = frame.uniforms();
-    assert_eq!(uniforms.iter().map(|(n, v)| (n.as_str(), v.0.clone())).collect::<Vec<_>>(), [("u_d_x", vec![4.0])]);
+    assert_eq!(
+        uniforms
+            .iter()
+            .map(|(n, v)| (n.as_str(), v.0.clone()))
+            .collect::<Vec<_>>(),
+        [("u_d_x", vec![4.0])]
+    );
     let ten = [("u_d_x".to_owned(), crate::codegen::UniformValue(vec![10.0]))];
-    let values = evaluate_frame(&frame.program(), &FrameEnv { uniforms: &ten, ..env() });
+    let values = evaluate_frame(
+        &frame.program(),
+        &FrameEnv {
+            uniforms: &ten,
+            ..env()
+        },
+    );
     assert_eq!(values.arg(&arg), 13.0);
 }
 
@@ -274,15 +363,25 @@ fn programs_evaluate_a_group_instances_value_with_the_types_it_is_given() {
         ],
         &[("v", "value", "sq", "a"), ("sq", "b", "y", "v")],
     );
-    let variable = || HandleType::Variable { variable: "t".to_owned() };
+    let variable = || HandleType::Variable {
+        variable: "t".to_owned(),
+    };
     project.definitions.insert(
         "square".to_owned(),
         GraphDocument {
             label: Some("Square".into()),
-            type_variables: vec![TypeVariable { id: "t".into(), name: "T".into(), types: FLOAT_TYPES.to_vec() }],
+            type_variables: vec![TypeVariable {
+                id: "t".into(),
+                name: "T".into(),
+                types: FLOAT_TYPES.to_vec(),
+            }],
             inputs: vec![Handle::new("a", "A", variable())],
             outputs: vec![Handle::new("b", "B", variable())],
-            nodes: vec![node("gin", "group-input"), node("mul", "mul"), node("gout", "group-output")],
+            nodes: vec![
+                node("gin", "group-input"),
+                node("mul", "mul"),
+                node("gout", "group-output"),
+            ],
             edges: super::builders::edges(&[
                 ("gin", "a", "mul", "operands"),
                 ("gin", "a", "mul", "operands"),
@@ -302,13 +401,30 @@ fn programs_evaluate_a_group_instances_value_with_the_types_it_is_given() {
 fn programs_run_a_repeat_zone() {
     let mut model = model_for(vec![node("time", "time")], &[]);
     let (zone, output, item, _) = repeat_zone(&mut model, "add");
-    model.connect(crate::graph::Connection::new("time", "seconds", &zone, &item));
-    model.connect(crate::graph::Connection::new("time", "frame", &zone, "iterations"));
+    model.connect(crate::graph::Connection::new(
+        "time", "seconds", &zone, &item,
+    ));
+    model.connect(crate::graph::Connection::new(
+        "time",
+        "frame",
+        &zone,
+        "iterations",
+    ));
     let frame = compiler(&model, &[]);
     let arg = frame.arg(&[], &output, &item, 0).expect("compiles");
     // Time 3, then plus the iterations 0, 1, 2, 3, 4, 5, 6.
-    assert_eq!(evaluate_frame(&frame.program(), &env()).arg(&arg), 3.0 + 21.0);
-    let later = evaluate_frame(&frame.program(), &FrameEnv { frame: 2.0, time: 0.0, ..env() });
+    assert_eq!(
+        evaluate_frame(&frame.program(), &env()).arg(&arg),
+        3.0 + 21.0
+    );
+    let later = evaluate_frame(
+        &frame.program(),
+        &FrameEnv {
+            frame: 2.0,
+            time: 0.0,
+            ..env()
+        },
+    );
     assert_eq!(later.arg(&arg), 1.0);
 }
 
@@ -350,8 +466,15 @@ fn hoisted_frame_values_are_read_from_the_frame_block_instead_of_computed_per_pi
     let pass = &plan.passes[0];
     assert!(!pass.program.code.contains("sin("));
     assert!(!pass.program.code.contains("runtime_frame.time"));
-    assert!(pass.program.code.contains(&format!("{FRAME_VALUES_VAR}.f_wave_result")));
-    assert_eq!(pass.program.frame_values.fields.keys().collect::<Vec<_>>(), ["f_wave_result"]);
+    assert!(
+        pass.program
+            .code
+            .contains(&format!("{FRAME_VALUES_VAR}.f_wave_result"))
+    );
+    assert_eq!(
+        pass.program.frame_values.fields.keys().collect::<Vec<_>>(),
+        ["f_wave_result"]
+    );
     validate_wgsl(&pass.program.code);
 }
 
@@ -361,7 +484,10 @@ fn hoisted_values_are_what_the_cpu_computes_for_the_formula_at_any_time() {
     let reference = &plan.passes[0].program.frame_value_refs["f_wave_result"];
     for time in [0.0, 0.4, 1.7, 9.0] {
         let values = evaluate_frame(&plan.frame, &FrameEnv { time, ..env() });
-        assert!((values.value(reference)[0] - (time * 3.0).sin()).abs() < 1e-5, "{time}");
+        assert!(
+            (values.value(reference)[0] - (time * 3.0).sin()).abs() < 1e-5,
+            "{time}"
+        );
     }
 }
 
@@ -373,12 +499,22 @@ fn hoisted_values_read_uniforms_where_inputs_are_so_editing_one_only_changes_the
     let after = plan_of(&model, &[ROOT_ID]);
     assert_eq!(after.passes[0].program.code, before.passes[0].program.code);
     let uniform = |plan: &crate::codegen::RenderPlan| {
-        plan.uniforms.iter().find(|(n, _)| n == "u_k_x").map(|(_, v)| v.0.clone())
+        plan.uniforms
+            .iter()
+            .find(|(n, _)| n == "u_k_x")
+            .map(|(_, v)| v.0.clone())
     };
     assert_eq!(uniform(&before), Some(vec![3.0]));
     assert_eq!(uniform(&after), Some(vec![5.0]));
     let reference = &after.passes[0].program.frame_value_refs["f_wave_result"];
-    let values = evaluate_frame(&after.frame, &FrameEnv { time: 2.0, uniforms: &after.uniforms, ..env() });
+    let values = evaluate_frame(
+        &after.frame,
+        &FrameEnv {
+            time: 2.0,
+            uniforms: &after.uniforms,
+            ..env()
+        },
+    );
     assert!((values.value(reference)[0] - 10f64.sin()).abs() < 1e-5);
     validate_wgsl(&after.passes[0].program.code);
 }
@@ -386,7 +522,11 @@ fn hoisted_values_read_uniforms_where_inputs_are_so_editing_one_only_changes_the
 #[test]
 fn per_pixel_values_and_what_only_they_read_stay_in_the_shader() {
     let mut nodes = pulse();
-    nodes.extend([node("uv", "uv"), node("x", "separate-vector"), node("sum", "add")]);
+    nodes.extend([
+        node("uv", "uv"),
+        node("x", "separate-vector"),
+        node("sum", "add"),
+    ]);
     let model = model_for(
         nodes,
         &[
@@ -415,7 +555,14 @@ fn values_of_literals_only_stay_in_the_shader_for_the_compiler_to_fold() {
     );
     let plan = plan_of(&model, &[]);
     assert!(plan.passes[0].program.code.contains("sin("));
-    assert!(plan.passes[0].program.frame_values.fields.keys().all(|k| k == "unused"));
+    assert!(
+        plan.passes[0]
+            .program
+            .frame_values
+            .fields
+            .keys()
+            .all(|k| k == "unused")
+    );
     assert_eq!(plan.frame, FrameProgram::default());
 }
 
@@ -425,7 +572,10 @@ fn integers_and_booleans_are_stored_as_integers() {
         vec![
             node("time", "time"),
             node("n", "to-int"),
-            with_data_settings(with_values(node("big", "compare"), &[("b", 1.0.into())]), ">"),
+            with_data_settings(
+                with_values(node("big", "compare"), &[("b", 1.0.into())]),
+                ">",
+            ),
             node("uv", "uv"),
             node("x", "separate-vector"),
             node("pick", "switch"),
@@ -448,8 +598,14 @@ fn integers_and_booleans_are_stored_as_integers() {
     assert_eq!(field("f_n_result").scalar, UniformScalar::I32);
     assert_eq!(field("f_big_result").scalar, UniformScalar::U32);
     let values = evaluate_frame(&plan.frame, &FrameEnv { time: 2.7, ..env() });
-    assert_eq!(values.value(&pass.program.frame_value_refs["f_n_result"]), [2.0]);
-    assert_eq!(values.value(&pass.program.frame_value_refs["f_big_result"]), [1.0]);
+    assert_eq!(
+        values.value(&pass.program.frame_value_refs["f_n_result"]),
+        [2.0]
+    );
+    assert_eq!(
+        values.value(&pass.program.frame_value_refs["f_big_result"]),
+        [1.0]
+    );
     validate_wgsl(&pass.program.code);
 }
 
@@ -492,7 +648,11 @@ fn video(id: &str, frame_rate: f64) -> Asset {
     })
 }
 
-fn with_assets(nodes: Vec<crate::graph::GraphNode>, links: &[Link], assets: Vec<Asset>) -> GraphModel {
+fn with_assets(
+    nodes: Vec<crate::graph::GraphNode>,
+    links: &[Link],
+    assets: Vec<Asset>,
+) -> GraphModel {
     let mut project = root_project(nodes, links);
     project.assets = assets;
     GraphModel::new(project)
@@ -530,11 +690,23 @@ fn programs_evaluate_the_octaves_of_a_texture_1001_pixels_wide() {
     let frame = compiler(&model, &[]);
     let arg = frame.arg(&[], "ceil", "result", 0).expect("compiles");
     let sized = |id: &str| (id == "media:w").then_some((Size::new(1001, 500), None));
-    let values = evaluate_frame(&frame.program(), &FrameEnv { texture_size: Some(&sized), ..env() });
+    let values = evaluate_frame(
+        &frame.program(),
+        &FrameEnv {
+            texture_size: Some(&sized),
+            ..env()
+        },
+    );
     assert_eq!(values.arg(&arg), 10.0);
     // The same maths for another texture: 1000 wide is 9.97 octaves, 2000 wide 10.97.
     let wider = |_: &str| Some((Size::new(2000, 1), None));
-    let values = evaluate_frame(&frame.program(), &FrameEnv { texture_size: Some(&wider), ..env() });
+    let values = evaluate_frame(
+        &frame.program(),
+        &FrameEnv {
+            texture_size: Some(&wider),
+            ..env()
+        },
+    );
     assert_eq!(values.arg(&arg), 11.0);
 }
 
@@ -594,8 +766,11 @@ fn two_frames() -> GraphModel {
 fn every_video_node_gets_a_texture_of_its_own_even_on_one_asset() {
     use crate::codegen::ResourceDecl;
     let plan = plan_of(&two_frames(), &[]);
-    let videos: Vec<&ResourceDecl> =
-        plan.resources.iter().filter(|r| matches!(r, ResourceDecl::Media { .. })).collect();
+    let videos: Vec<&ResourceDecl> = plan
+        .resources
+        .iter()
+        .filter(|r| matches!(r, ResourceDecl::Media { .. }))
+        .collect();
     assert_eq!(videos.len(), 2);
     assert_ne!(videos[0].id(), videos[1].id());
 }
@@ -621,10 +796,22 @@ fn a_video_shows_the_frame_time_by_default_and_the_time_linked_to_it_otherwise()
 #[test]
 fn a_video_refuses_a_time_computed_per_pixel() {
     let model = with_assets(
-        vec![using(node("vid", "video"), "v"), node("uv", "uv"), node("x", "separate-vector")],
+        vec![
+            using(node("vid", "video"), "v"),
+            node("uv", "uv"),
+            node("x", "separate-vector"),
+        ],
         &[("uv", "uv", "x", "v"), ("x", "x", "vid", "time")],
         vec![video("v", 25.0)],
     );
-    let edge = model.root().edges.iter().find(|e| e.target == "vid").expect("linked");
-    assert!(matches!(analysis(&model).link(&[], edge), Some(FrameLink::Invalid { .. })));
+    let edge = model
+        .root()
+        .edges
+        .iter()
+        .find(|e| e.target == "vid")
+        .expect("linked");
+    assert!(matches!(
+        analysis(&model).link(&[], edge),
+        Some(FrameLink::Invalid { .. })
+    ));
 }

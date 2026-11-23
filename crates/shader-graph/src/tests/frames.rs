@@ -45,7 +45,10 @@ fn nodes_are_framed_in_the_frame_they_share_and_leave_one_frame_at_a_time() {
     let (a, b) = (g.add("sin"), g.add("sin"));
     set_frame(&mut g, &a, Some(&outer));
     set_frame(&mut g, &b, Some(&outer));
-    let id = g.model.frame_nodes(&[a.clone(), b.clone()]).expect("frames");
+    let id = g
+        .model
+        .frame_nodes(&[a.clone(), b.clone()])
+        .expect("frames");
     let of = |g: &TestGraph, n: &str| g.model.active_frames().frame_of.get(n).cloned();
     assert_eq!(of(&g, &id), Some(outer.clone()));
     assert_eq!(of(&g, &a), Some(id.clone()));
@@ -63,8 +66,14 @@ fn a_frame_never_goes_in_itself_or_a_frame_it_holds() {
     let outer = frame_in(&mut g, None);
     let inner = frame_in(&mut g, Some(&outer));
     let a = g.add("sin");
-    assert!(!g.model.set_nodes_frame(std::slice::from_ref(&outer), Some(&inner)));
-    assert!(!g.model.set_nodes_frame(std::slice::from_ref(&outer), Some(&outer)));
+    assert!(
+        !g.model
+            .set_nodes_frame(std::slice::from_ref(&outer), Some(&inner))
+    );
+    assert!(
+        !g.model
+            .set_nodes_frame(std::slice::from_ref(&outer), Some(&outer))
+    );
     assert!(g.model.set_nodes_frame(&[a.clone(), outer], Some(&inner)));
     assert_eq!(frame_of(&g.model, &a), Some(inner));
     assert!(g.model.set_nodes_frame(std::slice::from_ref(&a), None));
@@ -93,8 +102,14 @@ fn a_frame_is_copied_with_what_it_holds() {
     let copied = g.model.duplicate_nodes(&[f]);
     assert_eq!(copied.len(), 2);
     let nodes: Vec<_> = copied.iter().filter_map(|id| g.model.node(id)).collect();
-    let frame_copy = nodes.iter().find(|n| n.is(LAYOUT_FRAME)).map(|n| n.id.clone());
-    let held = nodes.iter().find(|n| n.is("sin")).and_then(|n| n.frame.clone());
+    let frame_copy = nodes
+        .iter()
+        .find(|n| n.is(LAYOUT_FRAME))
+        .map(|n| n.id.clone());
+    let held = nodes
+        .iter()
+        .find(|n| n.is("sin"))
+        .and_then(|n| n.frame.clone());
     assert!(frame_copy.is_some());
     assert_eq!(held, frame_copy);
 }
@@ -108,11 +123,21 @@ fn a_frame_is_grouped_with_what_it_holds_the_group_staying_in_the_frame_around_t
     set_frame(&mut g, &a, Some(&f));
     set_frame(&mut g, &b, Some(&outer));
     g.link((&a, "result"), (&b, "e"));
-    let group = g.model.group_selection(std::slice::from_ref(&f)).expect("groups");
+    let group = g
+        .model
+        .group_selection(std::slice::from_ref(&f))
+        .expect("groups");
     let node = g.model.node(&group).expect("group node");
     assert_eq!(node.frame.as_deref(), Some(outer.as_str()));
-    let definition = g.model.project().document(node.definition_ref().expect("ref")).expect("definition");
-    assert_eq!(definition.node(&a).and_then(|n| n.frame.clone()), Some(f.clone()));
+    let definition = g
+        .model
+        .project()
+        .document(node.definition_ref().expect("ref"))
+        .expect("definition");
+    assert_eq!(
+        definition.node(&a).and_then(|n| n.frame.clone()),
+        Some(f.clone())
+    );
     assert_eq!(definition.node(&f).and_then(|n| n.frame.clone()), None);
 }
 
@@ -121,7 +146,10 @@ fn ungrouping_puts_unframed_nodes_in_the_group_nodes_frame() {
     let mut g = TestGraph::new();
     let outer = frame_in(&mut g, None);
     let a = g.add("sin");
-    let group = g.model.group_selection(std::slice::from_ref(&a)).expect("groups");
+    let group = g
+        .model
+        .group_selection(std::slice::from_ref(&a))
+        .expect("groups");
     set_frame(&mut g, &group, Some(&outer));
     let fresh = g.model.ungroup_selection(&[group]);
     assert_eq!(fresh.len(), 1);
@@ -138,9 +166,16 @@ fn frame_data_survives_a_round_trip() {
         crate::graph::set_frame_tint(d, Some(crate::graph::FrameTint::Teal));
         crate::graph::set_frame_note(d, Some("what it does"));
     });
-    let loaded = crate::graph::GraphProject::from_json(&g.model.project().to_json()).expect("loads");
+    let loaded =
+        crate::graph::GraphProject::from_json(&g.model.project().to_json()).expect("loads");
     let node = loaded.root().node(&f).expect("frame");
-    assert_eq!(crate::graph::frame_tint(&node.data), Some(crate::graph::FrameTint::Teal));
+    assert_eq!(
+        crate::graph::frame_tint(&node.data),
+        Some(crate::graph::FrameTint::Teal)
+    );
     assert_eq!(crate::graph::frame_note(&node.data), Some("what it does"));
-    assert_eq!(loaded.root().node(&a).and_then(|n| n.frame.clone()), Some(f));
+    assert_eq!(
+        loaded.root().node(&a).and_then(|n| n.frame.clone()),
+        Some(f)
+    );
 }

@@ -204,7 +204,10 @@ fn match_keeps_links_on_their_case_through_renames_and_reorders_and_drops_remove
 #[test]
 fn a_group_node_hides_inputs_under_variants_it_isnt_on() {
     let hidden_with = |data, nodes, links: &[Link]| hidden(&match_model(data, nodes, links));
-    assert_eq!(hidden_with(with_values(&[("mode", 0.0)]), vec![], &[]), ["x"]);
+    assert_eq!(
+        hidden_with(with_values(&[("mode", 0.0)]), vec![], &[]),
+        ["x"]
+    );
     assert!(hidden_with(with_values(&[("mode", 2.0)]), vec![], &[]).is_empty());
     // Unknown while compiling: every variant's inputs.
     let linked = [("ft", "seconds", "g", "mode")];
@@ -212,7 +215,11 @@ fn a_group_node_hides_inputs_under_variants_it_isnt_on() {
     // Linked or not: its link stays, unused.
     let to_x = [("ft", "seconds", "g", "x")];
     assert_eq!(
-        hidden_with(with_values(&[("mode", 0.0)]), vec![node("ft", "time")], &to_x),
+        hidden_with(
+            with_values(&[("mode", 0.0)]),
+            vec![node("ft", "time")],
+            &to_x
+        ),
         ["x"]
     );
 }

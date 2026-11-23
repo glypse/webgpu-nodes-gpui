@@ -35,7 +35,11 @@ impl Target {
     /// are kept; the transients are remade on first use at the new size. The linear texture, the
     /// simulation state and the surface pool start over.
     pub fn resized(self, device: &wgpu::Device, size: Size) -> Self {
-        Self { transients: self.transients, blocks: self.blocks, ..Self::new(device, size) }
+        Self {
+            transients: self.transients,
+            blocks: self.blocks,
+            ..Self::new(device, size)
+        }
     }
 
     pub fn new(device: &wgpu::Device, size: Size) -> Self {
@@ -58,7 +62,11 @@ impl Target {
 
     /// Makes the blocks the program's passes write, where they are not the program's already.
     pub fn ensure_blocks(&mut self, device: &wgpu::Device, program: &Program) {
-        if self.blocks.as_ref().is_some_and(|(id, _)| *id == program.id) {
+        if self
+            .blocks
+            .as_ref()
+            .is_some_and(|(id, _)| *id == program.id)
+        {
             return;
         }
         let buffer = |label, size: u32| {
@@ -105,7 +113,11 @@ impl Target {
         }
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(id),
-            size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: levels,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -127,7 +139,11 @@ pub(crate) fn render_target(
 ) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
-        size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: size.width,
+            height: size.height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,

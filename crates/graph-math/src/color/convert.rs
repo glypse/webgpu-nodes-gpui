@@ -103,11 +103,8 @@ pub fn rgb_to_hsv(rgb: Rgb) -> Hsv {
 
 pub fn hsv_to_rgb(Hsv { h, s, v }: Hsv) -> Rgb {
     let hue = ((h % 1.0) + 1.0) % 1.0;
-    let rgb = PaletteSrgb::from_color_unclamped(PaletteHsv::new(
-        RgbHue::from_degrees(hue * 360.0),
-        s,
-        v,
-    ));
+    let rgb =
+        PaletteSrgb::from_color_unclamped(PaletteHsv::new(RgbHue::from_degrees(hue * 360.0), s, v));
     Rgb::new(rgb.red, rgb.green, rgb.blue)
 }
 
@@ -372,7 +369,10 @@ mod tests {
     #[test]
     fn reads_and_writes_srgb_encoded_hex() {
         let hex = |r, g, b, a, alpha| linear_to_hex(Rgba::new(r, g, b, a), alpha, ColorSpace::Srgb);
-        assert_eq!(hex(1.0, 0.0, srgb_decode(128.0 / 255.0), 1.0, false), "#FF0080");
+        assert_eq!(
+            hex(1.0, 0.0, srgb_decode(128.0 / 255.0), 1.0, false),
+            "#FF0080"
+        );
         assert_eq!(hex(2.0, -1.0, 0.0, 0.5, true), "#FF000080");
         let parsed = hex_to_linear("#ff0080", ColorSpace::Srgb);
         let Some(parsed) = parsed else {
@@ -482,13 +482,10 @@ mod tests {
             close(lab.g, expected.a, 7);
             close(lab.b, expected.b, 7);
 
-            let back = apply_mat3(
-                &LMS_TO_LINEAR_RGB,
-                {
-                    let lms = apply_mat3(&OKLAB_TO_LMS, lab);
-                    Rgb::new(lms.r.powi(3), lms.g.powi(3), lms.b.powi(3))
-                },
-            );
+            let back = apply_mat3(&LMS_TO_LINEAR_RGB, {
+                let lms = apply_mat3(&OKLAB_TO_LMS, lab);
+                Rgb::new(lms.r.powi(3), lms.g.powi(3), lms.b.powi(3))
+            });
             close_rgb(back, rgb, 6);
         }
     }

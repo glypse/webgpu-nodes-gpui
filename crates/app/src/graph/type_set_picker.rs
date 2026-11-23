@@ -3,9 +3,9 @@
 
 use std::rc::Rc;
 
+use gpui::Context;
 use gpui::{Pixels, Point, WeakEntity};
 use shader_graph::types::{TYPE_SETS, WgslType, type_set_of, with_default_type};
-use gpui::Context;
 
 use super::type_picker::on_editor;
 use crate::editor::{Editor, ListItem};
@@ -28,20 +28,31 @@ pub fn label(types: &[WgslType]) -> String {
         |set| set.label.to_owned(),
     );
     match (type_set_of(types), types.first()) {
-        (Some(set), Some(default)) if set.types.first() != Some(default) => format!("{base} {}", default.id()),
+        (Some(set), Some(default)) if set.types.first() != Some(default) => {
+            format!("{base} {}", default.id())
+        }
         _ => base,
     }
 }
 
 /// The entries of the picker's menu for a variable that takes `types` (the first the default).
-pub fn items(weak: &WeakEntity<Editor>, at: Point<Pixels>, types: Vec<WgslType>, change: Change) -> Vec<ListItem> {
+pub fn items(
+    weak: &WeakEntity<Editor>,
+    at: Point<Pixels>,
+    types: Vec<WgslType>,
+    change: Change,
+) -> Vec<ListItem> {
     let default = types.first().copied();
     let current = type_set_of(&types).map(|s| s.id);
     let mut items: Vec<ListItem> = TYPE_SETS
         .iter()
         .map(|set| {
             let (change, next) = (change.clone(), with_default_type(set.types, default));
-            ListItem::new(set.label, Some(current == Some(set.id)), on_editor(weak, move |e, cx| change(next.clone(), e, cx)))
+            ListItem::new(
+                set.label,
+                Some(current == Some(set.id)),
+                on_editor(weak, move |e, cx| change(next.clone(), e, cx)),
+            )
         })
         .collect();
     for (index, set) in TYPE_SETS.iter().take(KINDS).enumerate() {
@@ -67,8 +78,16 @@ pub fn items(weak: &WeakEntity<Editor>, at: Point<Pixels>, types: Vec<WgslType>,
 
 /// One type per entry of a kind. Toggling one changes the variable and reopens the menu with the
 /// kind's submenu still open, so the checks show the new types.
-fn kind_items(weak: &WeakEntity<Editor>, at: Point<Pixels>, types: Vec<WgslType>, kind: usize, change: Change) -> Vec<ListItem> {
-    let Some(set) = TYPE_SETS.get(kind) else { return Vec::new() };
+fn kind_items(
+    weak: &WeakEntity<Editor>,
+    at: Point<Pixels>,
+    types: Vec<WgslType>,
+    kind: usize,
+    change: Change,
+) -> Vec<ListItem> {
+    let Some(set) = TYPE_SETS.get(kind) else {
+        return Vec::new();
+    };
     sorted(set.types)
         .into_iter()
         .map(|ty| {
@@ -99,7 +118,13 @@ fn default_items(weak: &WeakEntity<Editor>, types: Vec<WgslType>, change: Change
         .iter()
         .map(|&ty| {
             let (ts, ch) = (types.clone(), change.clone());
-            ListItem::new(ty.id(), Some(Some(ty) == default), on_editor(weak, move |e, cx| ch(with_default_type(&ts, Some(ty)), e, cx)))
+            ListItem::new(
+                ty.id(),
+                Some(Some(ty) == default),
+                on_editor(weak, move |e, cx| {
+                    ch(with_default_type(&ts, Some(ty)), e, cx)
+                }),
+            )
         })
         .collect()
 }

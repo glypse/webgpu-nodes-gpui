@@ -33,7 +33,10 @@ fn editor_json(panel: &Panel, graph: &GraphView) -> Value {
         Panel::Graph => {
             let mut editor = json!({ "type": "graph", "path": graph.path });
             if let (Some(v), Some(map)) = (&graph.viewport, editor.as_object_mut()) {
-                map.insert("viewport".to_owned(), json!({ "x": v.x, "y": v.y, "zoom": v.zoom }));
+                map.insert(
+                    "viewport".to_owned(),
+                    json!({ "x": v.x, "y": v.y, "zoom": v.zoom }),
+                );
             }
             editor
         }
@@ -46,7 +49,11 @@ fn editor_json(panel: &Panel, graph: &GraphView) -> Value {
 }
 
 /// Stores the layout in the project, replacing what it had. `graph` says where a graph area is.
-pub fn store(project: &mut GraphProject, screen: &Screen<Panel>, graph: &dyn Fn(AreaId) -> GraphView) {
+pub fn store(
+    project: &mut GraphProject,
+    screen: &Screen<Panel>,
+    graph: &dyn Fn(AreaId) -> GraphView,
+) {
     let areas: Vec<Value> = screen
         .areas()
         .iter()
@@ -63,18 +70,29 @@ pub fn store(project: &mut GraphProject, screen: &Screen<Panel>, graph: &dyn Fn(
             })
         })
         .collect();
-    project.extra.insert(KEY.to_owned(), json!({ "areas": areas }));
+    project
+        .extra
+        .insert(KEY.to_owned(), json!({ "areas": areas }));
 }
 
 fn fraction(v: &Value) -> Option<f64> {
-    v.as_f64().filter(|f| f.is_finite() && (0.0..=1.0).contains(f))
+    v.as_f64()
+        .filter(|f| f.is_finite() && (0.0..=1.0).contains(f))
 }
 
 /// A viewport coordinate or zoom outside f32's range would become infinite or NaN, so the camera is dropped instead.
 fn viewport(v: &Value) -> Option<Viewport> {
-    let number = |key: &str| v.get(key)?.as_f64().filter(|f| f.abs() <= f64::from(f32::MAX));
+    let number = |key: &str| {
+        v.get(key)?
+            .as_f64()
+            .filter(|f| f.abs() <= f64::from(f32::MAX))
+    };
     let zoom = number("zoom").filter(|z| *z > 0.0)?;
-    Some(Viewport { x: number("x")? as f32, y: number("y")? as f32, zoom: zoom as f32 })
+    Some(Viewport {
+        x: number("x")? as f32,
+        y: number("y")? as f32,
+        zoom: zoom as f32,
+    })
 }
 
 fn editor_from_json(v: &Value) -> Result<(Panel, Option<GraphView>), &'static str> {
@@ -83,12 +101,19 @@ fn editor_from_json(v: &Value) -> Result<(Panel, Option<GraphView>), &'static st
             let path: Vec<String> = v
                 .get("path")
                 .and_then(Value::as_array)
-                .and_then(|ids| ids.iter().map(|id| id.as_str().map(str::to_owned)).collect::<Option<_>>())
+                .and_then(|ids| {
+                    ids.iter()
+                        .map(|id| id.as_str().map(str::to_owned))
+                        .collect::<Option<_>>()
+                })
                 .ok_or("a graph area has no path")?;
             if path.len() > MAX_PATH {
                 return Err("a graph area's path is too long");
             }
-            let view = GraphView { path, viewport: v.get("viewport").and_then(viewport) };
+            let view = GraphView {
+                path,
+                viewport: v.get("viewport").and_then(viewport),
+            };
             Ok((Panel::Graph, Some(view)))
         }
         Some("preview") => Ok((Panel::Preview, None)),
@@ -121,10 +146,17 @@ fn from_areas(areas: &[Value]) -> Result<Layout, &'static str> {
     let mut views = Vec::new();
     let mut parsed = Vec::new();
     for area in areas {
-        let id = area.get("id").and_then(Value::as_str).ok_or("an area has no id")?;
+        let id = area
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("an area has no id")?;
         ids.insert(id);
         let rect = area.get("rect").ok_or("an area has no rect")?;
-        let side = |key: &str| rect.get(key).and_then(fraction).ok_or("an area's rect isn't within the window");
+        let side = |key: &str| {
+            rect.get(key)
+                .and_then(fraction)
+                .ok_or("an area's rect isn't within the window")
+        };
         let rect = Rect::new(side("left")?, side("top")?, side("right")?, side("bottom")?);
         if rect.right <= rect.left || rect.bottom <= rect.top {
             return Err("an area is empty");
@@ -137,8 +169,15 @@ fn from_areas(areas: &[Value]) -> Result<Layout, &'static str> {
         return Err("two areas share an id");
     }
     let screen = Screen::new(parsed);
-    screen.validate().map_err(|_| "the areas don't tile the window")?;
-    let graphs = screen.areas().iter().zip(views).filter_map(|(area, view)| Some((area.id, view?))).collect();
+    screen
+        .validate()
+        .map_err(|_| "the areas don't tile the window")?;
+    let graphs = screen
+        .areas()
+        .iter()
+        .zip(views)
+        .filter_map(|(area, view)| Some((area.id, view?)))
+        .collect();
     Ok(Layout { screen, graphs })
 }
 
@@ -159,12 +198,23 @@ mod tests {
         let mut project = GraphProject::default();
         let view = GraphView {
             path: vec!["a".into(), "b".into()],
-            viewport: Some(Viewport { x: 1.0, y: -2.0, zoom: 0.5 }),
+            viewport: Some(Viewport {
+                x: 1.0,
+                y: -2.0,
+                zoom: 0.5,
+            }),
         };
         let shown = view.clone();
         store(&mut project, &screen(), &move |_| shown.clone());
         let layout = load(&project).expect("loads");
-        assert_eq!(layout.graphs.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>(), [view]);
+        assert_eq!(
+            layout
+                .graphs
+                .iter()
+                .map(|(_, v)| v.clone())
+                .collect::<Vec<_>>(),
+            [view]
+        );
         let editors: Vec<&Panel> = layout.screen.areas().iter().map(|a| &a.editor).collect();
         assert_eq!(editors, [&Panel::Preview, &Panel::Graph, &Panel::Timeline]);
         assert_eq!(layout.screen.areas()[1].rect, Rect::new(0.3, 0.0, 1.0, 0.8));
@@ -177,12 +227,24 @@ mod tests {
             (Rect::new(0.5, 0.0, 1.0, 1.0), Panel::Graph),
         ]);
         let ids: Vec<AreaId> = screen.areas().iter().map(|a| a.id).collect();
-        let first = GraphView { path: vec!["a".into()], viewport: None };
-        let second = GraphView { path: Vec::new(), viewport: Some(Viewport { x: 3.0, y: 4.0, zoom: 2.0 }) };
+        let first = GraphView {
+            path: vec!["a".into()],
+            viewport: None,
+        };
+        let second = GraphView {
+            path: Vec::new(),
+            viewport: Some(Viewport {
+                x: 3.0,
+                y: 4.0,
+                zoom: 2.0,
+            }),
+        };
         let (f, s) = (first.clone(), second.clone());
         let first_id = ids[0];
         let mut project = GraphProject::default();
-        store(&mut project, &screen, &move |id| if id == first_id { f.clone() } else { s.clone() });
+        store(&mut project, &screen, &move |id| {
+            if id == first_id { f.clone() } else { s.clone() }
+        });
         let layout = load(&project).expect("loads");
         let views: Vec<GraphView> = layout.graphs.into_iter().map(|(_, v)| v).collect();
         assert_eq!(views, [first, second]);
@@ -195,7 +257,10 @@ mod tests {
         let json = project.to_json();
         let loaded = GraphProject::from_json(&json).expect("loads");
         let layout = loaded.extra.get("layout").expect("kept");
-        assert_eq!(layout["areas"][1]["editor"], json!({ "type": "graph", "path": [] }));
+        assert_eq!(
+            layout["areas"][1]["editor"],
+            json!({ "type": "graph", "path": [] })
+        );
         assert_eq!(layout["areas"][0]["rect"]["right"], json!(0.3));
         assert!(load(&loaded).is_some());
     }
@@ -214,9 +279,7 @@ mod tests {
         };
         assert!(broken(json!({ "areas": [] })));
         assert!(broken(json!({ "areas": "none" })));
-        let area = |id: &str, right: f64, kind: &str| {
-            json!({ "id": id, "rect": { "left": 0, "top": 0, "right": right, "bottom": 1 }, "editor": { "type": kind } })
-        };
+        let area = |id: &str, right: f64, kind: &str| json!({ "id": id, "rect": { "left": 0, "top": 0, "right": right, "bottom": 1 }, "editor": { "type": kind } });
         // Not covering the window.
         assert!(broken(json!({ "areas": [area("a", 0.5, "preview")] })));
         // Out of range, empty, an unknown editor, a repeated id.
@@ -242,7 +305,10 @@ mod tests {
                 { "id": "a", "rect": { "left": 0, "top": 0, "right": 1, "bottom": 1 }, "editor": { "type": "assets" } },
             ] }),
         );
-        assert_eq!(load(&project).map(|l| l.screen.areas()[0].editor), Some(Panel::Assets));
+        assert_eq!(
+            load(&project).map(|l| l.screen.areas()[0].editor),
+            Some(Panel::Assets)
+        );
     }
 
     #[test]
@@ -256,6 +322,9 @@ mod tests {
         let loaded = load(&project).expect("loads");
         let editors: Vec<&Panel> = loaded.screen.areas().iter().map(|a| &a.editor).collect();
         assert_eq!(editors, [&Panel::Graph, &Panel::Properties]);
-        assert_eq!(project.extra["layout"]["areas"][1]["editor"], json!({ "type": "properties" }));
+        assert_eq!(
+            project.extra["layout"]["areas"][1]["editor"],
+            json!({ "type": "properties" })
+        );
     }
 }
