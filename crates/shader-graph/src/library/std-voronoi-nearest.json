@@ -6,8 +6,8 @@
 	"section": ["Helpers", "Voronoi"],
 	"searchSection": "Helpers",
 	"dependencies": [
-		"std-lattice-neighbor@3788b541dbe1aa83",
-		"std-voronoi-point@46472c253e5c3d20",
+		"std-lattice-neighbor@d570510851915f32",
+		"std-voronoi-point@d8ab9547892f5ae7",
 		"std-voronoi-distance@4bc38b78e5db6e66"
 	],
 	"definition": {
@@ -37,7 +37,7 @@
 					"y": 1389
 				},
 				"group": {
-					"definitionRef": "std-lattice-neighbor@3788b541dbe1aa83",
+					"definitionRef": "std-lattice-neighbor@d570510851915f32",
 					"locked": true
 				},
 				"frame": "fc786a34-ad02-41b7-8dd8-ff87df871454"
@@ -138,7 +138,7 @@
 					"y": 1061
 				},
 				"group": {
-					"definitionRef": "std-lattice-neighbor@3788b541dbe1aa83",
+					"definitionRef": "std-lattice-neighbor@d570510851915f32",
 					"locked": true
 				},
 				"frame": "fc786a34-ad02-41b7-8dd8-ff87df871454"
@@ -152,7 +152,7 @@
 					"y": 1413
 				},
 				"group": {
-					"definitionRef": "std-voronoi-point@46472c253e5c3d20",
+					"definitionRef": "std-voronoi-point@d8ab9547892f5ae7",
 					"locked": true
 				},
 				"frame": "fc786a34-ad02-41b7-8dd8-ff87df871454"

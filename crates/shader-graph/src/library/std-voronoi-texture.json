@@ -6,12 +6,12 @@
 	"section": ["Helpers", "Voronoi"],
 	"searchSection": "Helpers",
 	"dependencies": [
-		"std-noise-coordinates@a7dd53fbc4c18faa",
-		"std-voronoi-nearest@cc461aa095d5abf1",
-		"std-hash@7388918a3bd7190a",
-		"std-voronoi-smooth@e8a6d8486160736c",
-		"std-voronoi-edges@d5256fed78f3a127",
-		"std-voronoi-radius@c4612706b9a72ab2"
+		"std-noise-coordinates@e40ba35d8573e4af",
+		"std-voronoi-nearest@8a4bf7ac93e8af05",
+		"std-hash@392514c3c7486a42",
+		"std-voronoi-smooth@221deb8326166817",
+		"std-voronoi-edges@ed7a41abb076650e",
+		"std-voronoi-radius@fdd5fd7921caf698"
 	],
 	"definition": {
 		"nodes": [
@@ -36,7 +36,7 @@
 					"y": 665
 				},
 				"group": {
-					"definitionRef": "std-noise-coordinates@a7dd53fbc4c18faa",
+					"definitionRef": "std-noise-coordinates@e40ba35d8573e4af",
 					"locked": true
 				},
 				"frame": "a7750851-f72f-4e05-ad62-80851cf4a4c4"
@@ -233,7 +233,7 @@
 					"y": 1479
 				},
 				"group": {
-					"definitionRef": "std-voronoi-nearest@cc461aa095d5abf1",
+					"definitionRef": "std-voronoi-nearest@8a4bf7ac93e8af05",
 					"locked": true
 				},
 				"frame": "7ab1f4de-8b95-4fb0-9ea6-32574bd57011"
@@ -331,7 +331,7 @@
 					"y": 798
 				},
 				"group": {
-					"definitionRef": "std-hash@7388918a3bd7190a",
+					"definitionRef": "std-hash@392514c3c7486a42",
 					"locked": true
 				},
 				"frame": "7ab1f4de-8b95-4fb0-9ea6-32574bd57011"
@@ -433,7 +433,7 @@
 					"y": 1271
 				},
 				"group": {
-					"definitionRef": "std-hash@7388918a3bd7190a",
+					"definitionRef": "std-hash@392514c3c7486a42",
 					"locked": true
 				},
 				"frame": "7ab1f4de-8b95-4fb0-9ea6-32574bd57011"
@@ -479,7 +479,7 @@
 					"y": 406
 				},
 				"group": {
-					"definitionRef": "std-voronoi-smooth@e8a6d8486160736c",
+					"definitionRef": "std-voronoi-smooth@221deb8326166817",
 					"locked": true
 				},
 				"frame": "61670854-a246-4f4f-b7ac-94d2ae6bd943"
@@ -596,7 +596,7 @@
 					"y": 1193
 				},
 				"group": {
-					"definitionRef": "std-voronoi-edges@d5256fed78f3a127",
+					"definitionRef": "std-voronoi-edges@ed7a41abb076650e",
 					"locked": true
 				},
 				"frame": "19e41e74-664b-4c13-a392-8b8a2b6e425f"
@@ -646,7 +646,7 @@
 					"y": 2223
 				},
 				"group": {
-					"definitionRef": "std-voronoi-radius@c4612706b9a72ab2",
+					"definitionRef": "std-voronoi-radius@fdd5fd7921caf698",
 					"locked": true
 				},
 				"frame": "eff7025e-eb2e-4df5-a69c-7e9241344111"

@@ -6,12 +6,12 @@
 	"section": ["Helpers", "OpenSimplex"],
 	"searchSection": "Helpers",
 	"dependencies": [
-		"std-noise-coordinates@a7dd53fbc4c18faa",
+		"std-noise-coordinates@e40ba35d8573e4af",
 		"std-opensimplex-orientation@ee762b52ef9d5bbb",
-		"std-gradient-noise-1d@7660b4a99b25e13a",
-		"std-opensimplex-2d@c0373f1c797bc8de",
-		"std-opensimplex-3d@416f450d0138f340",
-		"std-opensimplex-4d@3f1813e24947b092"
+		"std-gradient-noise-1d@86dde02cecf8ccaa",
+		"std-opensimplex-2d@77fcf14622614877",
+		"std-opensimplex-3d@5200cc4b164b36b0",
+		"std-opensimplex-4d@b9b1760451bb874e"
 	],
 	"definition": {
 		"nodes": [
@@ -24,7 +24,7 @@
 					"y": 228
 				},
 				"group": {
-					"definitionRef": "std-noise-coordinates@a7dd53fbc4c18faa",
+					"definitionRef": "std-noise-coordinates@e40ba35d8573e4af",
 					"locked": true
 				}
 			},
@@ -73,7 +73,7 @@
 					"y": 90
 				},
 				"group": {
-					"definitionRef": "std-gradient-noise-1d@7660b4a99b25e13a",
+					"definitionRef": "std-gradient-noise-1d@86dde02cecf8ccaa",
 					"locked": true
 				},
 				"frame": "3a6466bf-a830-4a12-9f13-908ea9f6b664"
@@ -99,7 +99,7 @@
 					"y": 295
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-2d@c0373f1c797bc8de",
+					"definitionRef": "std-opensimplex-2d@77fcf14622614877",
 					"locked": true
 				},
 				"frame": "3a6466bf-a830-4a12-9f13-908ea9f6b664"
@@ -113,7 +113,7 @@
 					"y": 528
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-3d@416f450d0138f340",
+					"definitionRef": "std-opensimplex-3d@5200cc4b164b36b0",
 					"locked": true
 				},
 				"frame": "3a6466bf-a830-4a12-9f13-908ea9f6b664"
@@ -127,7 +127,7 @@
 					"y": 761
 				},
 				"group": {
-					"definitionRef": "std-opensimplex-4d@3f1813e24947b092",
+					"definitionRef": "std-opensimplex-4d@b9b1760451bb874e",
 					"locked": true
 				},
 				"frame": "3a6466bf-a830-4a12-9f13-908ea9f6b664"

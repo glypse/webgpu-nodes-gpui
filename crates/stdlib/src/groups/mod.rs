@@ -7,6 +7,7 @@ mod color;
 mod coordinates;
 mod helpers;
 mod math;
+mod noise;
 mod texture;
 mod vector;
 
@@ -18,5 +19,6 @@ pub fn all() -> Vec<GroupSpec> {
     groups.extend(coordinates::all());
     groups.extend(texture::all());
     groups.extend(blur::all());
+    groups.extend(noise::all());
     groups
 }
