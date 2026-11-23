@@ -14,6 +14,7 @@ Renders a shader graph frame by frame at a fixed timestep and encodes it to MOV 
 - Frame n is at time `n / fps`; `first_frame` = `round(start * fps)`; `frame_count` = `round(duration * fps)`, at least 1 (so a positive duration under half a frame still exports one).
 - `validate` refuses a zero duration and a frame rate under 0.001 (the time base is in thousandths of a second).
 - Progress and cancel are atomics in `Shared`. Cancel is checked per frame and per 64-frame simulate batch; a cancelled export returns `ExportError::Cancelled`.
+- `start_notifying`'s callback runs on the export thread after each frame written and once after the work finishes (`is_finished` is already true then). Consumers wait on it instead of polling; keep the callback non-blocking.
 - `Export::wait` maps a thread panic to `ExportError::Panicked`. Dropping `Export` does not stop the thread: call `cancel` first.
 - The UI consumers are `crates/app/src/{video_export,properties,shell}.rs`.
 

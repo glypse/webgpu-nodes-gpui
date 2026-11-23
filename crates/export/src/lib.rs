@@ -250,6 +250,17 @@ struct Shared {
     done: AtomicU64,
     total: AtomicU64,
     cancel: AtomicBool,
+    finished: AtomicBool,
+    /// Set by `start_notifying`; the export thread calls it, so it must not block.
+    on_update: Option<Box<dyn Fn() + Send + Sync>>,
+}
+
+impl Shared {
+    fn notify(&self) {
+        if let Some(on_update) = &self.on_update {
+            on_update();
+        }
+    }
 }
 
 /// A running export. Dropping it does not stop the export: call `cancel` first.
@@ -261,6 +272,18 @@ pub struct Export {
 impl Export {
     /// Validates the settings and starts encoding `scene` into `path` on a thread of its own.
     pub fn start(scene: Scene, settings: Settings, path: PathBuf) -> Result<Self, ExportError> {
+        Self::start_notifying(scene, settings, path, || {})
+    }
+
+    /// Like `start`, and `on_update` is called from the export thread after each frame is
+    /// written and once more when the export has finished. The thread may still be running
+    /// for a moment after that last call, so `wait` returns after a short join.
+    pub fn start_notifying(
+        scene: Scene,
+        settings: Settings,
+        path: PathBuf,
+        on_update: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
         validate(&settings)?;
         let size = video_size(scene.size);
         if let Some(min) = settings.codec.min_size()
@@ -276,13 +299,21 @@ impl Export {
             )));
         }
         let total = frame_count(&settings) as u64;
-        let shared = Arc::new(Shared::default());
-        shared.total.store(total, Ordering::Relaxed);
+        let shared = Arc::new(Shared {
+            total: AtomicU64::new(total),
+            on_update: Some(Box::new(on_update)),
+            ..Shared::default()
+        });
         let thread_shared = shared.clone();
         let failed_path = path.clone();
         let thread = std::thread::Builder::new()
             .name("video-export".into())
-            .spawn(move || run::run(scene, settings, path, &thread_shared))
+            .spawn(move || {
+                let result = run::run(scene, settings, path, &thread_shared);
+                thread_shared.finished.store(true, Ordering::Release);
+                thread_shared.notify();
+                result
+            })
             .map_err(|source| ExportError::Io {
                 path: failed_path,
                 source,
@@ -302,8 +333,9 @@ impl Export {
         self.shared.cancel.store(true, Ordering::Relaxed);
     }
 
+    /// Whether the export's work is over. Set before the final `on_update`, so it is true by then.
     pub fn is_finished(&self) -> bool {
-        self.thread.is_finished()
+        self.shared.finished.load(Ordering::Acquire)
     }
 
     /// Waits for the export to finish and returns the written file's path.

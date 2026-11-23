@@ -181,6 +181,7 @@ fn write_oldest(
     }
     *written += 1;
     shared.done.store(*written, Ordering::Relaxed);
+    shared.notify();
     Ok(())
 }
 

@@ -15,8 +15,6 @@ use runtime::{
 
 /// Seconds' worth of samples before the display's refresh rate is judged.
 const REFRESH_SAMPLES: usize = 20;
-/// How often a running compile is checked for.
-const COMPILE_POLL: Duration = Duration::from_millis(4);
 /// How often the preview's frame timing is logged at debug level.
 const STATS_PERIOD: Duration = Duration::from_secs(5);
 pub const DEFAULT_RESOLUTION: Size = Size::new(512, 512);
@@ -94,9 +92,10 @@ pub struct Playback {
     program: Option<Program>,
     /// Compiles the programs generated, off the UI thread.
     compiler: Option<CompileQueue>,
-    /// Collects the compiles while one is running. It polls: a wake-up from the compile
-    /// thread could drop this foreground task on that thread.
-    compile_poll: Option<Task<()>>,
+    /// Woken by the compile thread when a compile finishes. Taken by `watch_compiles`, which
+    /// spawns the foreground task that drains the queue.
+    compile_ready: Option<async_channel::Receiver<()>>,
+    compile_watch: Option<Task<()>>,
     /// Compiles with an id up to this one are out of date: a newer source replaced them.
     discarded: u64,
     /// The uniform values of the latest program, which a program takes when it arrives.
@@ -143,14 +142,24 @@ impl Playback {
             ),
         };
         let player = Player::new(DEFAULT_TIMING);
-        let compiler = renderer
-            .as_ref()
-            .map(|r| CompileQueue::new(r.compiler(), || {}));
+        let (compiler, compile_ready) = match renderer.as_ref() {
+            Some(renderer) => {
+                // Capacity one: a wake-up that finds one already queued adds nothing, since
+                // the drain takes every finished compile.
+                let (ready, compile_ready) = async_channel::bounded(1);
+                let compiler = CompileQueue::new(renderer.compiler(), move || {
+                    let _ = ready.try_send(());
+                });
+                (Some(compiler), Some(compile_ready))
+            }
+            None => (None, None),
+        };
         Self {
             renderer,
             program: None,
             compiler,
-            compile_poll: None,
+            compile_ready,
+            compile_watch: None,
             discarded: 0,
             uniforms: Vec::new(),
             player,
@@ -311,25 +320,21 @@ impl Playback {
         self.changed(window, cx);
     }
 
-    /// Starts collecting finished compiles, unless that is already going on.
+    /// Starts draining finished compiles as the compile thread reports them. The task lives as
+    /// long as the playback; it is spawned on the first source.
     fn watch_compiles(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.compile_poll.is_some() {
+        if self.compile_watch.is_some() {
             return;
         }
-        self.compile_poll = Some(cx.spawn_in(window, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(COMPILE_POLL).await;
-                let more = guard::guard("compiles ready", || {
-                    this.update_in(cx, |p, window, cx| {
-                        p.compiles_ready(window, cx);
-                        let more = p.compiling();
-                        if !more {
-                            p.compile_poll = None;
-                        }
-                        more
-                    })
+        let Some(ready) = self.compile_ready.take() else {
+            return;
+        };
+        self.compile_watch = Some(cx.spawn_in(window, async move |this, cx| {
+            while ready.recv().await.is_ok() {
+                let updated = guard::guard("compiles ready", || {
+                    this.update_in(cx, |p, window, cx| p.compiles_ready(window, cx))
                 });
-                if !more.and_then(Result::ok).unwrap_or(false) {
+                if !matches!(updated, Some(Ok(()))) {
                     break;
                 }
             }
@@ -401,19 +406,6 @@ impl Playback {
         }
         if let (Some(renderer), Some(program)) = (&self.renderer, &self.program) {
             renderer.set_uniforms(program, &uniform_values(uniforms));
-            self.player.invalidate();
-            self.changed(window, cx);
-        }
-    }
-
-    pub fn set_resolution(
-        &mut self,
-        resolution: Size,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if resolution != self.resolution {
-            self.resolution = resolution;
             self.player.invalidate();
             self.changed(window, cx);
         }
@@ -875,11 +867,10 @@ mod tests {
         cx.update(|window, cx| playback.update(cx, |p, cx| p.set_source(source, window, cx)));
     }
 
-    /// Lets the compile thread finish, as the app's event loop would.
+    /// Waits for the compile thread, then lets the drain task run on the test executor.
     fn wait_for_compile(cx: &mut gpui::VisualTestContext, playback: &Entity<Playback>) {
         cx.executor().allow_parking();
         for _ in 0..2000 {
-            cx.executor().advance_clock(COMPILE_POLL);
             cx.run_until_parked();
             if !playback.read_with(cx, |p, _| p.compiling()) {
                 return;

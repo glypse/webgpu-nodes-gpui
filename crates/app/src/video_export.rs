@@ -1,10 +1,9 @@
 //! The video export's output settings, kept with the project, and the export
 //! job the Output section runs: frames are rendered and encoded on a thread of
-//! the export crate's own, and the job polls it for progress.
+//! the export crate's own, which wakes the job for each frame written.
 
 use crate::properties::MAX_SECONDS;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use export::{
     Codec, Container, Depth, DnxhrProfile, Export, ExportError, ProResProfile, Scene, Settings,
@@ -23,8 +22,6 @@ use theme::ActiveTheme as _;
 
 /// The key of the output settings in the project's JSON, beside the layout and settings.
 const KEY: &str = "export";
-/// How often the job reads the export's progress.
-const POLL: Duration = Duration::from_millis(100);
 /// Seconds, the range a new project exports.
 const DEFAULT_DURATION: f64 = 5.0;
 
@@ -232,14 +229,18 @@ impl ExportJob {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) -> Result<(), ExportError> {
-        let export = Export::start(scene, settings, path)?;
+        // Capacity one: a wake-up that finds one already queued adds nothing, since the
+        // job reads the export's state after receiving.
+        let (wake, woken) = async_channel::bounded(1);
+        let export = Export::start_notifying(scene, settings, path, move || {
+            let _ = wake.try_send(());
+        })?;
         self.running = Some(Running {
             progress: export.progress(),
             export: Some(export),
         });
         cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(POLL).await;
+            while woken.recv().await.is_ok() {
                 let Some(Ok(finished)) =
                     guard::guard("export poll", || this.update(cx, |job, cx| job.poll(cx)))
                 else {

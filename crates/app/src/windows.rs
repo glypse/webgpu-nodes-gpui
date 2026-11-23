@@ -257,6 +257,8 @@ mod tests {
     }
 
     fn app(cx: &mut TestAppContext) {
+        // Shader compiles finish on a real thread, which wakes the window from outside the scheduler.
+        cx.executor().allow_parking();
         cx.update(|cx| {
             theme::init(cx);
             preferences::init(cx);
